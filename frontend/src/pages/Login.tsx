@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Card, Form, Input, Typography, message } from 'antd'
+import { Button, Card, Form, Input, message } from 'antd'
 import { LockOutlined, UserOutlined } from '@ant-design/icons'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
@@ -47,7 +47,6 @@ export default function Login() {
         <Form<LoginFormValues>
           name="login"
           size="large"
-          initialValues={{ username: 'boss', password: 'secret123' }}
           onFinish={onFinish}
         >
           <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
@@ -65,12 +64,6 @@ export default function Login() {
               登录
             </Button>
           </Form.Item>
-          <Typography.Paragraph
-            type="secondary"
-            style={{ textAlign: 'center', marginBottom: 0 }}
-          >
-            测试账号：boss / secret123
-          </Typography.Paragraph>
         </Form>
       </Card>
     </div>
