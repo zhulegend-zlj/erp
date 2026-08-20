@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
-// 创建/更新 5 个角色初始账号（初始密码统一 secret123，上线后请修改）
+// 创建/更新 5 个角色初始账号（初始密码统一 88888888，上线后请修改）
 // 用法：cd backend && npx tsx --env-file=.env prisma/seed.ts
 
 const prisma = new PrismaClient()
@@ -16,13 +16,13 @@ const users = [
 
 async function main() {
   for (const u of users) {
-    const passwordHash = await bcrypt.hash('secret123', 10)
+    const passwordHash = await bcrypt.hash('88888888', 10)
     await prisma.user.upsert({
       where: { username: u.username },
       update: { name: u.name, role: u.role, passwordHash },
       create: { username: u.username, name: u.name, role: u.role, passwordHash },
     })
-    console.log(`已创建/更新用户 ${u.username}（初始密码 secret123）`)
+    console.log(`已创建/更新用户 ${u.username}（初始密码 88888888）`)
   }
 }
 

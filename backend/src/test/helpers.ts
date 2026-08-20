@@ -35,11 +35,11 @@ export async function resetDb(): Promise<void> {
 }
 
 /**
- * 为 5 个角色之一 upsert 测试用户（username = role，密码统一 secret123），
+ * 为 5 个角色之一 upsert 测试用户（username = role，密码统一 88888888），
  * 登录后返回可直接用于后续请求的 cookie 字符串（如 "token=..."）。
  */
 export async function loginCookie(app: FastifyInstance, role: TestRole): Promise<string> {
-  const passwordHash = await bcrypt.hash('secret123', 10)
+  const passwordHash = await bcrypt.hash('88888888', 10)
   await prisma.user.upsert({
     where: { username: role },
     update: { passwordHash, name: role, role },
@@ -49,7 +49,7 @@ export async function loginCookie(app: FastifyInstance, role: TestRole): Promise
   const res = await app.inject({
     method: 'POST',
     url: '/api/auth/login',
-    payload: { username: role, password: 'secret123' },
+    payload: { username: role, password: '88888888' },
   })
   if (res.statusCode !== 200) {
     throw new Error(`登录失败（${role}）: ${res.statusCode} ${res.body}`)

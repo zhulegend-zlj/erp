@@ -194,7 +194,7 @@ Vite 开发服务器已配置 `/api` 代理到 `127.0.0.1:3000`（见 `frontend/
 
 系统角色：`boss`（老板）、`purchase`（采购）、`warehouse`（仓库）、`sales`（销售）、`finance`（财务）。
 
-以下命令用 `backend/prisma/seed.ts` 一次性创建/更新 5 个角色用户（初始密码统一 `secret123`）：
+以下命令用 `backend/prisma/seed.ts` 一次性创建/更新 5 个角色用户（初始密码统一 `88888888`）：
 
 ```powershell
 cd backend
@@ -307,6 +307,6 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ## 13. 安全提醒
 
-- 上线前务必：改掉 `JWT_SECRET`、改掉初始账号 `secret123` 密码、移除任何测试账号。
+- 上线前务必：改掉 `JWT_SECRET`、改掉初始账号 `88888888` 密码、移除任何测试账号。
 - `backend/.env`、备份 SQL 含敏感数据，勿提交到公开仓库、勿放在共享目录。
 - `D:\erp-backups\` 建议定期异地拷贝（脚本只做本地轮转，不做异地容灾）。
