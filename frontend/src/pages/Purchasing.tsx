@@ -1,0 +1,263 @@
+import { useEffect, useState } from 'react'
+import {
+  Alert,
+  Button,
+  Card,
+  Form,
+  InputNumber,
+  Modal,
+  Select,
+  Space,
+  Table,
+  Tag,
+  message,
+} from 'antd'
+import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
+import { api } from '../api'
+import { useAuth } from '../auth'
+import { notifyError, statusLabel } from './common'
+
+interface SalesOrder {
+  id: number
+  orderNo: string
+  status: string
+  customer: { name: string }
+}
+
+interface Supplier {
+  id: number
+  name: string
+  contact: string | null
+}
+
+interface Requirement {
+  partId: number
+  partName: string
+  requiredQty: number
+  onHand: number
+  gapQty: number
+}
+
+interface PoItemField {
+  partId?: number
+  qty?: number | null
+  unitPrice?: number | null
+}
+
+interface PoFormValues {
+  supplierId?: number
+  items?: PoItemField[]
+}
+
+interface PurchaseOrder {
+  id: number
+  orderNo: string
+  supplierId: number
+  salesOrderId: number | null
+}
+
+export default function Purchasing() {
+  const { user } = useAuth()
+  const [orders, setOrders] = useState<SalesOrder[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [orderId, setOrderId] = useState<number | undefined>()
+  const [requirements, setRequirements] = useState<Requirement[]>([])
+  const [reqLoading, setReqLoading] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [lastPo, setLastPo] = useState<PurchaseOrder | null>(null)
+  const [form] = Form.useForm<PoFormValues>()
+
+  const canCreate = user?.role === 'purchase'
+
+  useEffect(() => {
+    void Promise.all([api.get<SalesOrder[]>('/orders'), api.get<Supplier[]>('/suppliers')])
+      .then(([o, s]) => {
+        setOrders(o.data)
+        setSuppliers(s.data)
+      })
+      .catch(notifyError)
+  }, [])
+
+  useEffect(() => {
+    if (!orderId) {
+      setRequirements([])
+      return
+    }
+    setReqLoading(true)
+    api
+      .get<Requirement[]>('/purchasing/requirements', { params: { orderId } })
+      .then(({ data }) => setRequirements(data))
+      .catch(notifyError)
+      .finally(() => setReqLoading(false))
+  }, [orderId])
+
+  const gaps = requirements.filter((r) => r.gapQty > 0)
+
+  function openCreatePo() {
+    form.setFieldsValue({
+      supplierId: undefined,
+      items: gaps.map((g) => ({ partId: g.partId, qty: g.gapQty, unitPrice: undefined })),
+    })
+    setModalOpen(true)
+  }
+
+  async function handleCreate(values: PoFormValues) {
+    setSubmitting(true)
+    try {
+      const { data } = await api.post<PurchaseOrder>('/purchase-orders', {
+        supplierId: values.supplierId,
+        salesOrderId: orderId,
+        items: (values.items ?? []).map((it) => ({
+          partId: Number(it.partId ?? 0),
+          qty: Number(it.qty ?? 0),
+          unitPrice: Number(it.unitPrice ?? 0),
+        })),
+      })
+      setLastPo(data)
+      message.success('采购单已生成：' + data.orderNo)
+      setModalOpen(false)
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div>
+      <Card title="采购需求" style={{ marginBottom: 16 }}>
+        <Space style={{ marginBottom: 16 }}>
+          <Select
+            placeholder="选择销售订单"
+            style={{ width: 360 }}
+            value={orderId}
+            onChange={(v) => setOrderId(v)}
+            options={orders.map((o) => ({
+              value: o.id,
+              label: o.orderNo + '（' + (o.customer?.name ?? '') + ' / ' + statusLabel(o.status) + '）',
+            }))}
+          />
+          {canCreate && orderId ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePo} disabled={gaps.length === 0}>
+              生成采购单
+            </Button>
+          ) : null}
+        </Space>
+        {orderId && gaps.length === 0 && !reqLoading ? (
+          <Alert type="success" message="该订单当前无零件缺口" showIcon />
+        ) : null}
+        <Table<Requirement>
+          rowKey="partId"
+          loading={reqLoading}
+          dataSource={requirements}
+          pagination={false}
+          columns={[
+            { title: '零件', dataIndex: 'partName', key: 'partName' },
+            { title: '需求数量', dataIndex: 'requiredQty', key: 'requiredQty' },
+            { title: '现有库存', dataIndex: 'onHand', key: 'onHand' },
+            {
+              title: '缺口',
+              dataIndex: 'gapQty',
+              key: 'gapQty',
+              render: (v: number) => (v > 0 ? <Tag color="red">{v}</Tag> : v),
+            },
+          ]}
+        />
+        {lastPo ? (
+          <Alert
+            style={{ marginTop: 16 }}
+            type="success"
+            showIcon
+            message="最近生成的采购单"
+            description={lastPo.orderNo}
+          />
+        ) : null}
+      </Card>
+
+      <Card title="供应商跟催（联系人）">
+        <Table<Supplier>
+          rowKey="id"
+          dataSource={suppliers}
+          pagination={false}
+          columns={[
+            { title: '供应商', dataIndex: 'name', key: 'name' },
+            {
+              title: '联系人',
+              dataIndex: 'contact',
+              key: 'contact',
+              render: (v: string | null) => v ?? '-',
+            },
+          ]}
+        />
+      </Card>
+
+      <Modal
+        title="生成采购单"
+        open={modalOpen}
+        onCancel={() => setModalOpen(false)}
+        onOk={() => form.submit()}
+        confirmLoading={submitting}
+        width={720}
+        destroyOnClose
+      >
+        <Form form={form} layout="vertical" onFinish={handleCreate}>
+          <Form.Item
+            name="supplierId"
+            label="供应商"
+            rules={[{ required: true, message: '请选择供应商' }]}
+          >
+            <Select
+              placeholder="选择供应商"
+              options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+            />
+          </Form.Item>
+          <Form.List name="items">
+            {(fields, { add, remove }) => (
+              <>
+                {fields.map((field) => (
+                  <Space key={field.key} align="start" style={{ display: 'flex', marginBottom: 8 }}>
+                    <Form.Item
+                      name={[field.name, 'partId']}
+                      rules={[{ required: true, message: '零件' }]}
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Select
+                        style={{ width: 200 }}
+                        placeholder="零件"
+                        options={requirements.map((r) => ({ value: r.partId, label: r.partName }))}
+                      />
+                    </Form.Item>
+                    <Form.Item
+                      name={[field.name, 'qty']}
+                      rules={[{ required: true, message: '数量' }]}
+                      style={{ marginBottom: 0 }}
+                    >
+                      <InputNumber min={1} placeholder="数量" />
+                    </Form.Item>
+                    <Form.Item
+                      name={[field.name, 'unitPrice']}
+                      rules={[{ required: true, message: '单价' }]}
+                      style={{ marginBottom: 0 }}
+                    >
+                      <InputNumber min={0} placeholder="单价" style={{ width: 120 }} />
+                    </Form.Item>
+                    <Button
+                      type="text"
+                      danger
+                      icon={<MinusCircleOutlined />}
+                      onClick={() => remove(field.name)}
+                    />
+                  </Space>
+                ))}
+                <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                  添加明细
+                </Button>
+              </>
+            )}
+          </Form.List>
+        </Form>
+      </Modal>
+    </div>
+  )
+}

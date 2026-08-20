@@ -12,10 +12,26 @@ import {
   theme,
   type MenuProps,
 } from 'antd'
-import { DashboardOutlined, LogoutOutlined } from '@ant-design/icons'
+import {
+  AccountBookOutlined,
+  DatabaseOutlined,
+  HomeOutlined,
+  InboxOutlined,
+  LogoutOutlined,
+  SendOutlined,
+  ShoppingCartOutlined,
+  ShoppingOutlined,
+} from '@ant-design/icons'
 import { useAuth } from './auth'
 import type { Role } from './api'
 import Login from './pages/Login'
+import DashboardPage from './pages/Dashboard'
+import OrdersPage from './pages/Orders'
+import ShippingPage from './pages/Shipping'
+import MastersPage from './pages/Masters'
+import PurchasingPage from './pages/Purchasing'
+import InventoryPage from './pages/Inventory'
+import FinancePage from './pages/Finance'
 
 const { Header, Sider, Content } = Layout
 
@@ -29,9 +45,60 @@ export const roleLabels: Record<Role, string> = {
   finance: '财务',
 }
 
-// 导航配置：后续业务页面（Task 13）在此追加，roles 控制菜单可见性与页面访问
-const navItems: { key: string; label: string; path: string; roles: Role[] }[] = [
-  { key: '/', label: '首页', path: '/', roles: ALL_ROLES },
+interface NavItem {
+  key: string
+  label: string
+  path: string
+  roles: Role[]
+  icon: ReactNode
+}
+
+// 导航配置：roles 控制菜单可见性与页面访问
+const navItems: NavItem[] = [
+  { key: '/', label: '首页', path: '/', roles: ALL_ROLES, icon: <HomeOutlined /> },
+  { key: '/dashboard', label: '看板', path: '/dashboard', roles: ['boss'], icon: <SendOutlined /> },
+  {
+    key: '/orders',
+    label: '订单',
+    path: '/orders',
+    roles: ['sales', 'boss'],
+    icon: <ShoppingCartOutlined />,
+  },
+  {
+    key: '/shipping',
+    label: '出货',
+    path: '/shipping',
+    roles: ['sales', 'boss'],
+    icon: <SendOutlined />,
+  },
+  {
+    key: '/masters',
+    label: '基础资料',
+    path: '/masters',
+    roles: ['purchase', 'boss'],
+    icon: <DatabaseOutlined />,
+  },
+  {
+    key: '/purchasing',
+    label: '采购',
+    path: '/purchasing',
+    roles: ['purchase', 'boss'],
+    icon: <ShoppingOutlined />,
+  },
+  {
+    key: '/inventory',
+    label: '库存',
+    path: '/inventory',
+    roles: ['warehouse', 'boss'],
+    icon: <InboxOutlined />,
+  },
+  {
+    key: '/finance',
+    label: '财务',
+    path: '/finance',
+    roles: ['finance', 'boss'],
+    icon: <AccountBookOutlined />,
+  },
 ]
 
 function FullScreenSpin() {
@@ -77,7 +144,7 @@ export function RequireRole({ roles, children }: { roles: Role[]; children: Reac
   return <>{children}</>
 }
 
-function Dashboard() {
+function Home() {
   const { user } = useAuth()
   return (
     <Card>
@@ -86,7 +153,7 @@ function Dashboard() {
         {user ? '（' + roleLabels[user.role] + '）' : ''}
       </Typography.Title>
       <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-        这里是 ERP 系统首页占位。业务模块（订单、采购、库存、发货、财务等）将在后续任务中逐步开放。
+        请从左侧菜单进入各业务模块：看板、订单、出货、基础资料、采购、库存、财务。
       </Typography.Paragraph>
     </Card>
   )
@@ -104,7 +171,7 @@ function AppShell() {
         .filter((item) => user && item.roles.includes(user.role))
         .map((item) => ({
           key: item.path,
-          icon: <DashboardOutlined />,
+          icon: item.icon,
           label: item.label,
         })),
     [user],
@@ -184,7 +251,63 @@ export default function App() {
           path="/"
           element={
             <RequireRole roles={ALL_ROLES}>
-              <Dashboard />
+              <Home />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/dashboard"
+          element={
+            <RequireRole roles={['boss']}>
+              <DashboardPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/orders"
+          element={
+            <RequireRole roles={['sales', 'boss']}>
+              <OrdersPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/shipping"
+          element={
+            <RequireRole roles={['sales', 'boss']}>
+              <ShippingPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/masters"
+          element={
+            <RequireRole roles={['purchase', 'boss']}>
+              <MastersPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/purchasing"
+          element={
+            <RequireRole roles={['purchase', 'boss']}>
+              <PurchasingPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/inventory"
+          element={
+            <RequireRole roles={['warehouse', 'boss']}>
+              <InventoryPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/finance"
+          element={
+            <RequireRole roles={['finance', 'boss']}>
+              <FinancePage />
             </RequireRole>
           }
         />
