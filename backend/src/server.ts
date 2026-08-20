@@ -8,6 +8,7 @@ import { ordersRoutes } from './routes/orders'
 import { purchasingRoutes } from './routes/purchasing'
 import { inventoryRoutes } from './routes/inventory'
 import { shippingRoutes } from './routes/shipping'
+import { financeRoutes } from './routes/finance'
 
 export function buildApp() {
   const app = Fastify({ logger: true })
@@ -19,6 +20,7 @@ export function buildApp() {
   purchasingRoutes(app)
   inventoryRoutes(app)
   shippingRoutes(app)
+  financeRoutes(app)
   return app
 }
 
