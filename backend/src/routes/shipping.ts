@@ -53,6 +53,7 @@ export function shippingRoutes(app: FastifyInstance) {
           include: { items: true },
         })
         if (!order) throw new Error('订单不存在')
+        if (order.status === 'shipped' || order.status === 'completed') throw new Error('订单已出货')
 
         const created = await tx.shipment.create({
           data: {
@@ -70,6 +71,7 @@ export function shippingRoutes(app: FastifyInstance) {
     } catch (err) {
       const message = err instanceof Error ? err.message : '出货失败'
       if (message.includes('库存不足')) return reply.code(400).send({ error: message })
+      if (message.includes('订单已出货')) return reply.code(400).send({ error: message })
       if (message.includes('订单不存在')) return reply.code(404).send({ error: message })
       return reply.code(500).send({ error: '出货失败：' + message })
     }

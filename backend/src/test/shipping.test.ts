@@ -112,6 +112,49 @@ describe('shipping', () => {
     expect(shipmentCount).toBe(0)
   })
 
+  it('同一订单重复出货返回 400，库存与出货单数量不变', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F300', name: '成品B' } })
+    await prisma.stock.create({ data: { itemType: 'product', itemId: product.id, qtyOnHand: 100 } })
+    const customer = await prisma.customer.create({ data: { name: 'C1' } })
+    const order = await prisma.salesOrder.create({
+      data: {
+        orderNo: 'SO-S1',
+        customerId: customer.id,
+        deliveryDate: new Date(),
+        items: { create: { productId: product.id, qty: 10, unitPrice: 5 } }
+      }
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'sales')
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/shipments',
+      headers: { cookie },
+      payload: { salesOrderId: order.id }
+    })
+    expect(first.statusCode).toBe(200)
+    const stockAfterFirst = await prisma.stock.findUnique({
+      where: { itemType_itemId: { itemType: 'product', itemId: product.id } }
+    })
+    expect(stockAfterFirst?.qtyOnHand).toBe(90)
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/shipments',
+      headers: { cookie },
+      payload: { salesOrderId: order.id }
+    })
+    expect(second.statusCode).toBe(400)
+    expect(second.json().error).toContain('订单已出货')
+
+    const stock = await prisma.stock.findUnique({
+      where: { itemType_itemId: { itemType: 'product', itemId: product.id } }
+    })
+    expect(stock?.qtyOnHand).toBe(90)
+    const count = await prisma.shipment.count({ where: { salesOrderId: order.id } })
+    expect(count).toBe(1)
+  })
+
   it('GET /api/shipments?orderId= 返回含 legs（按 at 倒序）的出货单列表', async () => {
     const product = await prisma.product.create({ data: { sku: 'F302', name: '成品D' } })
     await prisma.stock.create({ data: { itemType: 'product', itemId: product.id, qtyOnHand: 10 } })
