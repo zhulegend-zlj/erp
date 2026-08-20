@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { authRoutes } from './routes/auth'
 import { mastersRoutes } from './routes/masters'
+import { ordersRoutes } from './routes/orders'
 
 export function buildApp() {
   const app = Fastify({ logger: true })
@@ -11,6 +12,7 @@ export function buildApp() {
   app.get('/api/health', async () => ({ status: 'ok' }))
   authRoutes(app)
   mastersRoutes(app)
+  ordersRoutes(app)
   return app
 }
 
