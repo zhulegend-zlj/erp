@@ -15,11 +15,16 @@
   },
   "license": "ISC",
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.3.0",
     "@prisma/client": "^6.19.3",
-    "fastify": "^5.12.1"
+    "bcryptjs": "^3.0.3",
+    "fastify": "^5.12.1",
+    "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.2.0",
     "prisma": "^6.19.3",
     "tsx": "^4.23.12",

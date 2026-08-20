@@ -1,10 +1,14 @@
 import Fastify from 'fastify'
+import cookie from '@fastify/cookie'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { authRoutes } from './routes/auth'
 
 export function buildApp() {
   const app = Fastify({ logger: true })
+  app.register(cookie)
   app.get('/api/health', async () => ({ status: 'ok' }))
+  authRoutes(app)
   return app
 }
 
