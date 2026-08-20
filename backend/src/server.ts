@@ -3,12 +3,14 @@ import cookie from '@fastify/cookie'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { authRoutes } from './routes/auth'
+import { mastersRoutes } from './routes/masters'
 
 export function buildApp() {
   const app = Fastify({ logger: true })
   app.register(cookie)
   app.get('/api/health', async () => ({ status: 'ok' }))
   authRoutes(app)
+  mastersRoutes(app)
   return app
 }
 
