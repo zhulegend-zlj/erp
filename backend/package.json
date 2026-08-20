@@ -16,10 +16,12 @@
   "license": "ISC",
   "dependencies": {
     "@fastify/cors": "^11.3.0",
+    "@prisma/client": "^6.19.3",
     "fastify": "^5.12.1"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "prisma": "^6.19.3",
     "tsx": "^4.23.12",
     "typescript": "~5.9.0",
     "vitest": "^4.1.11"

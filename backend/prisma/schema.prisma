@@ -1,0 +1,216 @@
+// backend/prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+
+enum Role {
+  boss
+  purchase
+  warehouse
+  sales
+  finance
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  name         String
+  role         Role
+  createdAt    DateTime @default(now())
+}
+
+model Customer {
+  id        Int      @id @default(autoincrement())
+  name      String
+  country   String?
+  contact   String?
+  createdAt DateTime @default(now())
+  orders    SalesOrder[]
+  customerPayments CustomerPayment[]
+}
+
+model Supplier {
+  id        Int      @id @default(autoincrement())
+  name      String
+  contact   String?
+  createdAt DateTime @default(now())
+  purchaseOrders PurchaseOrder[]
+  supplierPayments SupplierPayment[]
+}
+
+model Product {
+  id     Int    @id @default(autoincrement())
+  sku    String @unique
+  name   String
+  unit   String @default("件")
+  boms   Bom[]
+  orderItems SalesOrderItem[]
+  productionEntries ProductionEntry[]
+}
+
+model Part {
+  id     Int    @id @default(autoincrement())
+  sku    String @unique
+  name   String
+  unit   String @default("个")
+  boms   Bom[]
+  purchaseItems PurchaseOrderItem[]
+  receipts Receipt[]
+  issues   Issue[]
+}
+
+model Bom {
+  id        Int     @id @default(autoincrement())
+  product   Product @relation(fields: [productId], references: [id])
+  productId Int
+  part      Part    @relation(fields: [partId], references: [id])
+  partId    Int
+  qty       Int
+  @@unique([productId, partId])
+}
+
+model SalesOrder {
+  id           Int      @id @default(autoincrement())
+  orderNo      String   @unique
+  customer     Customer @relation(fields: [customerId], references: [id])
+  customerId   Int
+  deliveryDate DateTime
+  status       String   @default("draft") // draft/confirmed/in_production/ready/shipped/completed
+  otherCost    Decimal  @default(0) @db.Decimal(12,2)
+  createdAt    DateTime @default(now())
+  items        SalesOrderItem[]
+  purchaseOrders PurchaseOrder[]
+  issues       Issue[]
+  productionEntries ProductionEntry[]
+  shipments    Shipment[]
+  customerPayments CustomerPayment[]
+}
+
+model SalesOrderItem {
+  id        Int      @id @default(autoincrement())
+  order     SalesOrder @relation(fields: [orderId], references: [id])
+  orderId   Int
+  product   Product  @relation(fields: [productId], references: [id])
+  productId Int
+  qty       Int
+  unitPrice Decimal  @db.Decimal(12,2)
+  @@unique([orderId, productId])
+}
+
+model PurchaseOrder {
+  id           Int      @id @default(autoincrement())
+  orderNo      String   @unique
+  supplier     Supplier @relation(fields: [supplierId], references: [id])
+  supplierId   Int
+  salesOrder   SalesOrder? @relation(fields: [salesOrderId], references: [id])
+  salesOrderId Int?
+  status       String   @default("open") // open/partial/received
+  createdAt    DateTime @default(now())
+  items        PurchaseOrderItem[]
+  receipts     Receipt[]
+  payments     SupplierPayment[]
+}
+
+model PurchaseOrderItem {
+  id              Int      @id @default(autoincrement())
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId Int
+  part            Part     @relation(fields: [partId], references: [id])
+  partId          Int
+  qty             Int
+  unitPrice       Decimal  @db.Decimal(12,2)
+  @@unique([purchaseOrderId, partId])
+}
+
+model Receipt {
+  id              Int      @id @default(autoincrement())
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId Int
+  part            Part     @relation(fields: [partId], references: [id])
+  partId          Int
+  qty             Int
+  receivedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+}
+
+model Issue {
+  id           Int      @id @default(autoincrement())
+  salesOrder   SalesOrder @relation(fields: [salesOrderId], references: [id])
+  salesOrderId Int
+  part         Part     @relation(fields: [partId], references: [id])
+  partId       Int
+  qty          Int
+  issuedBy     String   // 生产组长姓名（不登录系统，由仓管代录）
+  note         String?
+  issuedAt     DateTime @default(now())
+}
+
+model ProductionEntry {
+  id           Int      @id @default(autoincrement())
+  salesOrder   SalesOrder @relation(fields: [salesOrderId], references: [id])
+  salesOrderId Int
+  product      Product  @relation(fields: [productId], references: [id])
+  productId    Int
+  qty          Int
+  entryDate    DateTime @default(now())
+}
+
+model Shipment {
+  id           Int      @id @default(autoincrement())
+  salesOrder   SalesOrder @relation(fields: [salesOrderId], references: [id])
+  salesOrderId Int
+  shippedAt    DateTime @default(now())
+  legs         ShipmentLeg[]
+}
+
+model ShipmentLeg {
+  id         Int      @id @default(autoincrement())
+  shipment   Shipment @relation(fields: [shipmentId], references: [id])
+  shipmentId Int
+  node       String   // 备货/装柜/开船/到港/清关
+  at         DateTime @default(now())
+  note       String?
+}
+
+model SupplierPayment {
+  id              Int      @id @default(autoincrement())
+  supplier        Supplier @relation(fields: [supplierId], references: [id])
+  supplierId      Int
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId Int?
+  amount          Decimal  @db.Decimal(12,2)
+  paidAt          DateTime @default(now())
+}
+
+model CustomerPayment {
+  id           Int      @id @default(autoincrement())
+  customer     Customer @relation(fields: [customerId], references: [id])
+  customerId   Int
+  salesOrder   SalesOrder? @relation(fields: [salesOrderId], references: [id])
+  salesOrderId Int?
+  amount       Decimal  @db.Decimal(12,2)
+  receivedAt   DateTime @default(now())
+}
+
+model Stock {
+  itemType String // part / product
+  itemId   Int
+  qtyOnHand Int    @default(0)
+  @@id([itemType, itemId])
+}
+
+model InventoryLedger {
+  id        Int      @id @default(autoincrement())
+  itemType  String
+  itemId    Int
+  delta     Int
+  balance   Int
+  refType   String   // receipt/issue/production/shipment
+  refId     Int
+  at        DateTime @default(now())
+}
