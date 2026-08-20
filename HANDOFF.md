@@ -45,7 +45,13 @@ ERP 系统，服务一家**按订单生产（MTO）的组装/贸易企业**。
 - 低：出货应校验订单处于 ready；大列表分页
 - （可能还有用户新提交的反馈，以 FEEDBACK.md 为准）
 
-## 七、如何开始
+## 七、开发技能（Skills）
+
+本次开发使用的 superpowers 技能套件已随项目放在 `.dsh/skills/` 目录（共 14 个：brainstorming、writing-plans、subagent-driven-development、using-git-worktrees、executing-plans、requesting-code-review、receiving-code-review、finishing-a-development-branch、verification-before-completion、systematic-debugging、test-driven-development、using-superpowers、writing-skills、dispatching-parallel-agents）。
+
+工厂电脑若没有这些技能，可直接参考 `.dsh/skills/` 下的技能文件，或把它们复制到本机 `~/.dsh/skills/` 使用。核心几个：**brainstorming**（动手前先做设计）、**writing-plans**（写实施计划）、**subagent-driven-development**（按任务派子代理执行+审查）。
+
+## 八、如何开始
 
 ```bash
 git pull origin main          # 拉最新代码（若已 clone 则跳过）
