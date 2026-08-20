@@ -20,7 +20,7 @@ export default function Login() {
   async function onFinish(values: LoginFormValues) {
     setSubmitting(true)
     try {
-      await login(values.username, values.password)
+      await login(values.username.trim(), values.password)
       message.success('登录成功')
       navigate(from, { replace: true })
     } catch (err) {

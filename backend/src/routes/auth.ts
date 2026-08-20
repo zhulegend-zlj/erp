@@ -7,7 +7,8 @@ import { requireRole } from '../auth/guard'
 export function authRoutes(app: FastifyInstance) {
   app.post('/api/auth/login', async (req, reply) => {
     const { username, password } = req.body as any
-    const user = await prisma.user.findUnique({ where: { username } })
+    const uname = typeof username === 'string' ? username.trim() : ''
+    const user = await prisma.user.findUnique({ where: { username: uname } })
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       return reply.code(401).send({ error: '用户名或密码错误' })
     }
