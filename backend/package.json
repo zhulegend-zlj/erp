@@ -5,7 +5,7 @@
   "description": "ERP（MTO 组装/贸易）后端：Fastify + TypeScript",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -25,7 +25,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^26.2.0",
+    "@types/node": "^22",
     "prisma": "^6.19.3",
     "tsx": "^4.23.12",
     "typescript": "~5.9.0",
