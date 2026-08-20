@@ -233,13 +233,23 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    void Promise.all([api.get<Product[]>('/products'), api.get<Part[]>('/parts')])
-      .then(([p, pt]) => {
-        setProducts(p.data)
-        setParts(pt.data)
-      })
+  function refreshProducts() {
+    void api
+      .get<Product[]>('/products')
+      .then(({ data }) => setProducts(data))
       .catch(notifyError)
+  }
+
+  function refreshParts() {
+    void api
+      .get<Part[]>('/parts')
+      .then(({ data }) => setParts(data))
+      .catch(notifyError)
+  }
+
+  useEffect(() => {
+    refreshProducts()
+    refreshParts()
   }, [])
 
   useEffect(() => {
@@ -292,6 +302,9 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
           style={{ width: 300 }}
           value={productId}
           onChange={(v) => setProductId(v)}
+          onDropdownVisibleChange={(open) => {
+            if (open) void refreshProducts()
+          }}
           options={products.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
         />
         {canWrite ? (
@@ -326,6 +339,9 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
                 value={r.partId}
                 disabled={!canWrite}
                 onChange={(v) => updateRow(index, { partId: v })}
+                onDropdownVisibleChange={(open) => {
+                  if (open) void refreshParts()
+                }}
                 options={parts.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
               />
             ),

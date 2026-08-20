@@ -14,6 +14,7 @@ import {
 } from 'antd'
 import {
   AccountBookOutlined,
+  BarChartOutlined,
   DatabaseOutlined,
   HomeOutlined,
   InboxOutlined,
@@ -57,7 +58,7 @@ interface NavItem {
 // 导航配置：roles 控制菜单可见性与页面访问
 const navItems: NavItem[] = [
   { key: '/', label: '首页', path: '/', roles: ALL_ROLES, icon: <HomeOutlined /> },
-  { key: '/dashboard', label: '看板', path: '/dashboard', roles: ['boss'], icon: <SendOutlined /> },
+  { key: '/dashboard', label: '看板', path: '/dashboard', roles: ['boss'], icon: <BarChartOutlined /> },
   {
     key: '/orders',
     label: '订单',
