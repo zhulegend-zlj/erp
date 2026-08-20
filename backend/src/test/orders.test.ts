@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { buildApp } from '../server'
-import { loginCookie } from './helpers'
+import { loginCookie, resetDb } from './helpers'
 import { prisma } from '../db'
 
 async function seedOrder(app: ReturnType<typeof buildApp>) {
@@ -12,14 +12,7 @@ async function seedOrder(app: ReturnType<typeof buildApp>) {
 
 describe('orders', () => {
   beforeEach(async () => {
-    // 保证重复运行（含全量测试）时固定 SKU/名称不触发唯一约束、序号可复现
-    // 先清理引用订单的出货单/运输节点，避免 Shipment 外键阻塞 salesOrder.deleteMany
-    await prisma.shipmentLeg.deleteMany()
-    await prisma.shipment.deleteMany()
-    await prisma.salesOrderItem.deleteMany()
-    await prisma.salesOrder.deleteMany()
-    await prisma.product.deleteMany({ where: { sku: { in: ['F001', 'F002'] } } })
-    await prisma.customer.deleteMany({ where: { name: { in: ['ACME', 'ACME2'] } } })
+    await resetDb()
   })
 
   it('sales 可创建订单，自动生成 orderNo', async () => {

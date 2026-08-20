@@ -1,32 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { buildApp } from '../server'
-import { loginCookie } from './helpers'
+import { loginCookie, resetDb } from './helpers'
 import { prisma } from '../db'
 
 const CUSTOMER_NAME = '客户-BOSS'
 const SUPPLIER_NAME = '供应商-BOSS'
 const PRODUCT_SKU = 'F-BOSS'
 const PART_SKU = 'P-BOSS'
-const ORDER_NOS = ['SO-BOSS-A', 'SO-BOSS-B']
-const PO_NOS = ['PO-BOSS-A', 'PO-BOSS-B']
-
 const DAY = 86_400_000
 
 describe('dashboard', () => {
   beforeEach(async () => {
-    // 保证重复运行（含全量测试）时固定 SKU/名称/单号不触发唯一约束
-    await prisma.shipmentLeg.deleteMany({ where: { shipment: { salesOrder: { orderNo: { in: ORDER_NOS } } } } })
-    await prisma.shipment.deleteMany({ where: { salesOrder: { orderNo: { in: ORDER_NOS } } } })
-    await prisma.customerPayment.deleteMany({ where: { customer: { name: CUSTOMER_NAME } } })
-    await prisma.supplierPayment.deleteMany({ where: { supplier: { name: SUPPLIER_NAME } } })
-    await prisma.purchaseOrderItem.deleteMany({ where: { purchaseOrder: { orderNo: { in: PO_NOS } } } })
-    await prisma.purchaseOrder.deleteMany({ where: { orderNo: { in: PO_NOS } } })
-    await prisma.salesOrderItem.deleteMany({ where: { order: { orderNo: { in: ORDER_NOS } } } })
-    await prisma.salesOrder.deleteMany({ where: { orderNo: { in: ORDER_NOS } } })
-    await prisma.product.deleteMany({ where: { sku: PRODUCT_SKU } })
-    await prisma.part.deleteMany({ where: { sku: PART_SKU } })
-    await prisma.customer.deleteMany({ where: { name: CUSTOMER_NAME } })
-    await prisma.supplier.deleteMany({ where: { name: SUPPLIER_NAME } })
+    await resetDb()
   })
 
   it('boss 可访问，返回数组结构', async () => {

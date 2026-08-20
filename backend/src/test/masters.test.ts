@@ -1,12 +1,10 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { buildApp } from '../server'
-import { prisma } from '../db'
-import { loginCookie } from './helpers'
+import { loginCookie, resetDb } from './helpers'
 
 describe('masters', () => {
-  beforeAll(async () => {
-    // 保证重复运行（含全量测试）时固定 SKU 不触发唯一约束
-    await prisma.part.deleteMany({ where: { sku: { in: ['P001', 'P002'] } } })
+  beforeEach(async () => {
+    await resetDb()
   })
 
   it('purchase 可创建零件', async () => {

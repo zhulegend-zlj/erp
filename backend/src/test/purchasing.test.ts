@@ -1,37 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { buildApp } from '../server'
-import { loginCookie } from './helpers'
+import { loginCookie, resetDb } from './helpers'
 import { prisma } from '../db'
-
-const SUPPLIERS = ['供应商X', '供应商Y']
-const PART_SKUS = ['P100', 'P7-A', 'P7-B']
-const PRODUCT_SKUS = ['F7-1', 'F7-2']
-const CUSTOMERS = ['客户7']
 
 describe('purchasing', () => {
   beforeEach(async () => {
-    // 保证重复运行（含全量测试）时固定 SKU/名称不触发唯一约束
-    const parts = await prisma.part.findMany({ where: { sku: { in: PART_SKUS } }, select: { id: true } })
-    const partIds = parts.map((p) => p.id)
-    if (partIds.length > 0) {
-      await prisma.receipt.deleteMany({ where: { partId: { in: partIds } } })
-      await prisma.purchaseOrderItem.deleteMany({ where: { partId: { in: partIds } } })
-      await prisma.issue.deleteMany({ where: { partId: { in: partIds } } })
-      await prisma.stock.deleteMany({ where: { itemType: 'part', itemId: { in: partIds } } })
-      await prisma.inventoryLedger.deleteMany({ where: { itemType: 'part', itemId: { in: partIds } } })
-    }
-    const products = await prisma.product.findMany({ where: { sku: { in: PRODUCT_SKUS } }, select: { id: true } })
-    const productIds = products.map((p) => p.id)
-    if (productIds.length > 0) {
-      await prisma.bom.deleteMany({ where: { productId: { in: productIds } } })
-      await prisma.salesOrderItem.deleteMany({ where: { productId: { in: productIds } } })
-    }
-    await prisma.purchaseOrder.deleteMany({ where: { supplier: { name: { in: SUPPLIERS } } } })
-    await prisma.salesOrder.deleteMany({ where: { customer: { name: { in: CUSTOMERS } } } })
-    await prisma.customer.deleteMany({ where: { name: { in: CUSTOMERS } } })
-    await prisma.part.deleteMany({ where: { sku: { in: PART_SKUS } } })
-    await prisma.product.deleteMany({ where: { sku: { in: PRODUCT_SKUS } } })
-    await prisma.supplier.deleteMany({ where: { name: { in: SUPPLIERS } } })
+    await resetDb()
   })
 
   it('收货后零件库存增加', async () => {

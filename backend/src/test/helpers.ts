@@ -10,6 +10,31 @@ export function createTestApp(): FastifyInstance {
 }
 
 /**
+ * 按外键依赖顺序清空所有业务表，保证集成测试在共享 PostgreSQL 上互相隔离。
+ * 注意：user 表不动，loginCookie 依赖对测试账号的 upsert。
+ */
+export async function resetDb(): Promise<void> {
+  await prisma.shipmentLeg.deleteMany()
+  await prisma.shipment.deleteMany()
+  await prisma.customerPayment.deleteMany()
+  await prisma.supplierPayment.deleteMany()
+  await prisma.receipt.deleteMany()
+  await prisma.issue.deleteMany()
+  await prisma.productionEntry.deleteMany()
+  await prisma.purchaseOrderItem.deleteMany()
+  await prisma.purchaseOrder.deleteMany()
+  await prisma.salesOrderItem.deleteMany()
+  await prisma.salesOrder.deleteMany()
+  await prisma.bom.deleteMany()
+  await prisma.stock.deleteMany()
+  await prisma.inventoryLedger.deleteMany()
+  await prisma.part.deleteMany()
+  await prisma.product.deleteMany()
+  await prisma.customer.deleteMany()
+  await prisma.supplier.deleteMany()
+}
+
+/**
  * 为 5 个角色之一 upsert 测试用户（username = role，密码统一 secret123），
  * 登录后返回可直接用于后续请求的 cookie 字符串（如 "token=..."）。
  */

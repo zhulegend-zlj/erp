@@ -1,35 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { buildApp } from '../server'
-import { loginCookie } from './helpers'
+import { loginCookie, resetDb } from './helpers'
 import { prisma } from '../db'
-
-const PART_SKUS = ['P8-A', 'P8-B']
-const PRODUCT_SKUS = ['F8-1']
-const CUSTOMER_NAMES = ['客户8']
-const ORDER_NOS = ['SO-ISS-1', 'SO-ISS-2', 'SO-PROD-1']
 
 describe('inventory', () => {
   beforeEach(async () => {
-    // 保证重复运行（含全量测试）时固定 SKU/单号不触发唯一约束
-    const parts = await prisma.part.findMany({ where: { sku: { in: PART_SKUS } }, select: { id: true } })
-    const partIds = parts.map((p) => p.id)
-    const products = await prisma.product.findMany({ where: { sku: { in: PRODUCT_SKUS } }, select: { id: true } })
-    const productIds = products.map((p) => p.id)
-
-    if (partIds.length > 0) {
-      await prisma.inventoryLedger.deleteMany({ where: { itemType: 'part', itemId: { in: partIds } } })
-      await prisma.stock.deleteMany({ where: { itemType: 'part', itemId: { in: partIds } } })
-      await prisma.issue.deleteMany({ where: { partId: { in: partIds } } })
-    }
-    if (productIds.length > 0) {
-      await prisma.inventoryLedger.deleteMany({ where: { itemType: 'product', itemId: { in: productIds } } })
-      await prisma.stock.deleteMany({ where: { itemType: 'product', itemId: { in: productIds } } })
-      await prisma.productionEntry.deleteMany({ where: { productId: { in: productIds } } })
-    }
-    await prisma.salesOrder.deleteMany({ where: { orderNo: { in: ORDER_NOS } } })
-    await prisma.customer.deleteMany({ where: { name: { in: CUSTOMER_NAMES } } })
-    await prisma.part.deleteMany({ where: { sku: { in: PART_SKUS } } })
-    await prisma.product.deleteMany({ where: { sku: { in: PRODUCT_SKUS } } })
+    await resetDb()
   })
 
   it('领料出库减少库存，记录领料人', async () => {
