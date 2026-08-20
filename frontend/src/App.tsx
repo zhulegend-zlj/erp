@@ -32,6 +32,7 @@ import MastersPage from './pages/Masters'
 import PurchasingPage from './pages/Purchasing'
 import InventoryPage from './pages/Inventory'
 import FinancePage from './pages/Finance'
+import FeedbackWidget from './components/FeedbackWidget'
 
 const { Header, Sider, Content } = Layout
 
@@ -231,6 +232,7 @@ function AppShell() {
         <Content style={{ margin: 16 }}>
           <Outlet />
         </Content>
+        <FeedbackWidget />
       </Layout>
     </Layout>
   )

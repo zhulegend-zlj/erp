@@ -10,6 +10,7 @@ import { inventoryRoutes } from './routes/inventory'
 import { shippingRoutes } from './routes/shipping'
 import { financeRoutes } from './routes/finance'
 import { dashboardRoutes } from './routes/dashboard'
+import { feedbackRoutes } from './routes/feedback'
 
 export function buildApp() {
   const app = Fastify({ logger: true })
@@ -23,6 +24,7 @@ export function buildApp() {
   shippingRoutes(app)
   financeRoutes(app)
   dashboardRoutes(app)
+  feedbackRoutes(app)
   return app
 }
 
