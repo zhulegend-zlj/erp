@@ -6,6 +6,7 @@ import { authRoutes } from './routes/auth'
 import { mastersRoutes } from './routes/masters'
 import { ordersRoutes } from './routes/orders'
 import { purchasingRoutes } from './routes/purchasing'
+import { inventoryRoutes } from './routes/inventory'
 
 export function buildApp() {
   const app = Fastify({ logger: true })
@@ -15,6 +16,7 @@ export function buildApp() {
   mastersRoutes(app)
   ordersRoutes(app)
   purchasingRoutes(app)
+  inventoryRoutes(app)
   return app
 }
 
