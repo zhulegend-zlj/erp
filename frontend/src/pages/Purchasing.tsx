@@ -16,13 +16,24 @@ import {
 import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { dateTimeStr, money, notifyError, statusLabel } from './common'
+import { dateStr, dateTimeStr, money, notifyError, statusLabel } from './common'
 
 interface SalesOrder {
   id: number
   orderNo: string
   status: string
   customer: { name: string }
+}
+
+interface SalesOrderDetail extends SalesOrder {
+  deliveryDate: string
+  items: {
+    id: number
+    productId: number
+    qty: number
+    unitPrice: string
+    product: { sku: string; name: string }
+  }[]
 }
 
 interface Supplier {
@@ -80,6 +91,8 @@ export default function Purchasing() {
   const [orderId, setOrderId] = useState<number | undefined>()
   const [requirements, setRequirements] = useState<Requirement[]>([])
   const [reqLoading, setReqLoading] = useState(false)
+  const [orderDetail, setOrderDetail] = useState<SalesOrderDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [lastPos, setLastPos] = useState<PurchaseOrder[]>([])
@@ -108,17 +121,36 @@ export default function Purchasing() {
   useEffect(() => {
     if (!orderId) {
       setRequirements([])
+      setOrderDetail(null)
       return
     }
     setReqLoading(true)
-    api
-      .get<Requirement[]>('/purchasing/requirements', { params: { orderId } })
-      .then(({ data }) => setRequirements(data))
+    setDetailLoading(true)
+    void Promise.all([
+      api.get<Requirement[]>('/purchasing/requirements', { params: { orderId } }),
+      api.get<SalesOrderDetail>('/orders/' + orderId),
+    ])
+      .then(([r, d]) => {
+        setRequirements(r.data)
+        setOrderDetail(d.data)
+      })
       .catch(notifyError)
-      .finally(() => setReqLoading(false))
+      .finally(() => {
+        setReqLoading(false)
+        setDetailLoading(false)
+      })
   }, [orderId])
 
   const gaps = requirements.filter((r) => r.gapQty > 0)
+
+  const watchedItems = Form.useWatch('items', form) as PoItemField[] | undefined
+  const supplierGroupMap = new Map<string, number>()
+  for (const it of watchedItems ?? []) {
+    const req = requirements.find((r) => r.partId === it.partId)
+    const name = req?.supplierName || '未设置供应商'
+    supplierGroupMap.set(name, (supplierGroupMap.get(name) ?? 0) + 1)
+  }
+  const supplierGroups = [...supplierGroupMap.entries()]
 
   function openCreatePo() {
     form.setFieldsValue({
@@ -192,6 +224,23 @@ export default function Purchasing() {
             </Button>
           ) : null}
         </Space>
+        {orderDetail ? (
+          <Card size="small" title={'销售订单明细：' + orderDetail.orderNo} style={{ marginBottom: 16 }} loading={detailLoading}>
+            <div>
+              <b>客户：</b>
+              {orderDetail.customer.name}　<b>交期：</b>
+              {dateStr(orderDetail.deliveryDate)}　<b>状态：</b>
+              {statusLabel(orderDetail.status)}
+            </div>
+            <div style={{ marginTop: 8 }}>
+              {orderDetail.items.map((it) => (
+                <div key={it.id}>
+                  {it.product.name}（{it.product.sku}）× {it.qty}　单价 ¥{money(it.unitPrice)}
+                </div>
+              ))}
+            </div>
+          </Card>
+        ) : null}
         {orderId && gaps.length === 0 && !reqLoading ? (
           <Alert type="success" message="该订单当前无零件缺口" showIcon />
         ) : null}
@@ -305,7 +354,12 @@ export default function Purchasing() {
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
-            message="系统会按零件的供应商自动分组，每组生成一张采购单。"
+            message={'预计生成 ' + supplierGroups.length + ' 张采购单'}
+            description={
+              supplierGroups.length > 0
+                ? supplierGroups.map(([name, count]) => name + '：' + count + ' 项').join('；')
+                : '请添加采购明细，系统将按零件供应商自动分组。'
+            }
           />
           <Form.List name="items">
             {(fields, { add, remove }) => (
