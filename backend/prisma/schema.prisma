@@ -62,6 +62,10 @@ model Part {
   unit   String @default("个")
   spec   String?
   imageUrl String?
+  drawingsUrl String?
+  tooling String?
+  moq    Int?
+  price  Decimal? @db.Decimal(12,4)
   supplier   Supplier? @relation(fields: [supplierId], references: [id])
   supplierId Int?
   boms   Bom[]

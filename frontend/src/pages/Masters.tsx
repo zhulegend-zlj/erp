@@ -23,7 +23,7 @@ import { notifyError } from './common'
 interface CrudField {
   key: string
   label: string
-  type?: 'text' | 'supplier' | 'image'
+  type?: 'text' | 'supplier' | 'image' | 'number'
   required?: boolean
 }
 
@@ -120,6 +120,10 @@ const RESOURCES: CrudResource[] = [
       { key: 'unit', label: '单位' },
       { key: 'spec', label: '规格' },
       { key: 'imageUrl', label: '图片地址', type: 'image' },
+      { key: 'drawingsUrl', label: '图档地址' },
+      { key: 'tooling', label: '模具' },
+      { key: 'moq', label: 'MOQ', type: 'number' },
+      { key: 'price', label: '价格', type: 'number' },
       { key: 'supplierId', label: '供应商', type: 'supplier' },
     ],
   },
@@ -180,10 +184,10 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
     setSubmitting(true)
     const payload: Record<string, any> = { ...values }
     for (const f of resource.fields) {
-      if (f.type === 'supplier') {
+      if (f.type === 'supplier' || f.type === 'number') {
         const v = payload[f.key]
         payload[f.key] = v === '' || v === null || v === undefined ? null : Number(v)
-      } else if (f.type === 'image' || f.key === 'spec') {
+      } else if (f.type === 'image' || f.key === 'spec' || f.key === 'drawingsUrl' || f.key === 'tooling') {
         if (payload[f.key] === '') payload[f.key] = null
       }
     }
@@ -281,7 +285,7 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
               key={f.key}
               name={f.key}
               label={f.label}
-              rules={f.type === 'supplier' || f.type === 'image' || f.key === 'spec'
+              rules={f.type === 'supplier' || f.type === 'image' || f.type === 'number' || f.key === 'spec' || f.key === 'drawingsUrl' || f.key === 'tooling'
                 ? []
                 : [{ required: true, message: '请输入' + f.label }]}
             >
@@ -293,6 +297,8 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
                 />
               ) : f.type === 'image' ? (
                 <ImageUpload />
+              ) : f.type === 'number' ? (
+                <InputNumber min={0} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
               ) : (
                 <Input />
               )}

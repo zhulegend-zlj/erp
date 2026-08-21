@@ -31,6 +31,10 @@ const partSchema = z.object({
   unit: z.string().optional(),
   spec: z.string().nullable().optional(),
   imageUrl: z.string().nullable().optional(),
+  drawingsUrl: z.string().nullable().optional(),
+  tooling: z.string().nullable().optional(),
+  moq: z.number({ error: 'MOQ 必须为整数' }).int().positive().nullable().optional(),
+  price: z.number({ error: '价格必须为数字' }).nonnegative().nullable().optional(),
   supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
 })
 
