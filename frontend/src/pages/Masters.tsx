@@ -12,6 +12,7 @@ import {
   Space,
   Table,
   Tabs,
+  Upload,
   message,
 } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
@@ -37,6 +38,49 @@ type CrudRow = { id: number } & Record<string, unknown>
 interface SupplierOption {
   id: number
   name: string
+}
+
+function ImageUpload({
+  value,
+  onChange,
+}: {
+  value?: string
+  onChange?: (v: string | null) => void
+}) {
+  async function customRequest(options: any) {
+    const formData = new FormData()
+    formData.append('file', options.file)
+    try {
+      const { data } = await api.post<{ url: string }>('/uploads', formData)
+      onChange?.(data.url)
+      options.onSuccess?.(data)
+    } catch (err) {
+      notifyError(err)
+      options.onError?.(err)
+    }
+  }
+
+  return (
+    <Upload
+      accept="image/*"
+      listType="picture-card"
+      maxCount={1}
+      customRequest={customRequest}
+      fileList={
+        value
+          ? [{ uid: '-1', name: '物料图片', status: 'done' as const, url: value }]
+          : []
+      }
+      onRemove={() => onChange?.(null)}
+    >
+      {value ? null : (
+        <div>
+          <PlusOutlined />
+          <div style={{ marginTop: 8 }}>上传图片</div>
+        </div>
+      )}
+    </Upload>
+  )
 }
 
 const RESOURCES: CrudResource[] = [
@@ -247,8 +291,10 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
                   placeholder={'请选择' + f.label}
                   options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
                 />
+              ) : f.type === 'image' ? (
+                <ImageUpload />
               ) : (
-                <Input placeholder={f.type === 'image' ? '图片 URL/路径（可选）' : undefined} />
+                <Input />
               )}
             </Form.Item>
           ))}

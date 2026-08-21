@@ -1,5 +1,8 @@
 import Fastify from 'fastify'
 import cookie from '@fastify/cookie'
+import multipart from '@fastify/multipart'
+import fastifyStatic from '@fastify/static'
+import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { authRoutes } from './routes/auth'
@@ -11,6 +14,7 @@ import { shippingRoutes } from './routes/shipping'
 import { financeRoutes } from './routes/finance'
 import { dashboardRoutes } from './routes/dashboard'
 import { feedbackRoutes } from './routes/feedback'
+import { uploadRoutes } from './routes/uploads'
 import { prismaErrorInfo } from './errors'
 
 export function buildApp() {
@@ -24,7 +28,14 @@ export function buildApp() {
     return reply.code(500).send({ error: '服务器错误：' + message })
   })
   app.register(cookie)
+  app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024, files: 1 } })
+
+  const uploadDir = resolve(process.cwd(), 'uploads')
+  mkdirSync(uploadDir, { recursive: true })
+  app.register(fastifyStatic, { root: uploadDir, prefix: '/uploads/' })
+
   app.get('/api/health', async () => ({ status: 'ok' }))
+  uploadRoutes(app)
   authRoutes(app)
   mastersRoutes(app)
   ordersRoutes(app)
