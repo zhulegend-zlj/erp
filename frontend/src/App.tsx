@@ -7,6 +7,7 @@ import {
   Form,
   Input,
   Layout,
+  List,
   Menu,
   Modal,
   Result,
@@ -152,17 +153,50 @@ export function RequireRole({ roles, children }: { roles: Role[]; children: Reac
   return <>{children}</>
 }
 
+const HOME_GUIDES: Record<Role, string[]> = {
+  boss: [
+    '看板：查看应收余额、应付余额、逾期应收、订单进度与成本利润。',
+    '订单 / 出货：查看所有订单和出货进度；老板也可推进或回退订单状态。',
+    '基础资料 / 采购 / 库存 / 财务：均可进入查看。',
+    '意见反馈：点击右下角「意见反馈」提交问题或建议。',
+  ],
+  purchase: [
+    '基础资料：维护客户、供应商、成品、零件、BOM。',
+    '采购：选择销售订单 → 查看零件缺口 → 生成采购单；在采购单列表查看金额、已付、未付。',
+    '意见反馈：点击右下角「意见反馈」提交问题或建议。',
+  ],
+  warehouse: [
+    '库存：收货入库（选择采购单）、领料出库、成品入库。',
+    '查询：查看库存和出入库流水。',
+    '意见反馈：点击右下角「意见反馈」提交问题或建议。',
+  ],
+  sales: [
+    '订单：新建订单、推进订单状态（推进前会二次确认，可回退一步）。',
+    '出货：选择待出货订单出货，添加运输节点。',
+    '意见反馈：点击右下角「意见反馈」提交问题或建议。',
+  ],
+  finance: [
+    '财务：登记供应商付款、客户收款。',
+    '查看：订单成本利润、未来账期提醒。',
+    '意见反馈：点击右下角「意见反馈」提交问题或建议。',
+  ],
+}
+
 function Home() {
   const { user } = useAuth()
+  const guides = user ? HOME_GUIDES[user.role] : []
   return (
     <Card>
       <Typography.Title level={4} style={{ marginTop: 0 }}>
         欢迎，{user?.name}
         {user ? '（' + roleLabels[user.role] + '）' : ''}
       </Typography.Title>
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-        请从左侧菜单进入各业务模块：看板、订单、出货、基础资料、采购、库存、财务。
-      </Typography.Paragraph>
+      <Typography.Paragraph type="secondary">本系统使用说明（按当前账号角色显示）：</Typography.Paragraph>
+      <List
+        size="small"
+        dataSource={guides}
+        renderItem={(item) => <List.Item>{item}</List.Item>}
+      />
     </Card>
   )
 }

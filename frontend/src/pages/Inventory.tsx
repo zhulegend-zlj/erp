@@ -99,12 +99,22 @@ function ReceiptForm({ parts }: { parts: Part[] }) {
   }
 
   return (
-    <Form form={form} layout="vertical" onFinish={submit} initialValues={{ items: [{}] }}>
-      <Form.Item
-        name="purchaseOrderId"
-        label="采购单"
-        rules={[{ required: true, message: '请选择采购单' }]}
-      >
+    <>
+      {purchaseOrders.length === 0 ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="暂无采购单"
+          description="请先由采购在「采购」页选择销售订单并生成采购单，再进行收货入库。"
+        />
+      ) : null}
+      <Form form={form} layout="vertical" onFinish={submit} initialValues={{ items: [{}] }}>
+        <Form.Item
+          name="purchaseOrderId"
+          label="采购单"
+          rules={[{ required: true, message: '请选择采购单' }]}
+        >
         <Select
           showSearch
           placeholder="选择采购单"
@@ -151,7 +161,8 @@ function ReceiptForm({ parts }: { parts: Part[] }) {
       <Button type="primary" htmlType="submit" loading={submitting} style={{ marginTop: 16 }}>
         提交收货
       </Button>
-    </Form>
+      </Form>
+    </>
   )
 }
 
