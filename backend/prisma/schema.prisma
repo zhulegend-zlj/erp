@@ -181,6 +181,9 @@ model Shipment {
   salesOrder   SalesOrder @relation(fields: [salesOrderId], references: [id])
   salesOrderId Int
   shippedAt    DateTime @default(now())
+  deliveryNote String?
+  signer       String?
+  remark       String?
   legs         ShipmentLeg[]
 }
 

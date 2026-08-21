@@ -32,7 +32,15 @@ interface Shipment {
   id: number
   salesOrderId: number
   shippedAt: string
+  deliveryNote: string | null
+  signer: string | null
+  remark: string | null
   legs: ShipmentLeg[]
+  salesOrder?: {
+    orderNo: string
+    customer: { name: string }
+    items: { qty: number; product: { sku: string; name: string; spec: string | null } }[]
+  }
 }
 
 const NODE_OPTIONS = ['备货', '装柜', '开船', '到港', '清关'].map((n) => ({ value: n, label: n }))
@@ -42,7 +50,13 @@ export default function Shipping() {
   const [orders, setOrders] = useState<SalesOrder[]>([])
   const [shipments, setShipments] = useState<Shipment[]>([])
   const [loading, setLoading] = useState(false)
-  const [shipForm] = Form.useForm<{ salesOrderId?: number; shippedAt?: string }>()
+  const [shipForm] = Form.useForm<{
+    salesOrderId?: number
+    shippedAt?: string
+    deliveryNote?: string
+    signer?: string
+    remark?: string
+  }>()
   const [legForm] = Form.useForm<{ node?: string; at?: string; note?: string }>()
   const [shipping, setShipping] = useState(false)
   const [legShipment, setLegShipment] = useState<Shipment | null>(null)
@@ -70,12 +84,21 @@ export default function Shipping() {
     void load()
   }, [])
 
-  async function handleShip(values: { salesOrderId?: number; shippedAt?: string }) {
+  async function handleShip(values: {
+    salesOrderId?: number
+    shippedAt?: string
+    deliveryNote?: string
+    signer?: string
+    remark?: string
+  }) {
     setShipping(true)
     try {
       await api.post('/shipments', {
         salesOrderId: values.salesOrderId,
         shippedAt: values.shippedAt,
+        deliveryNote: values.deliveryNote,
+        signer: values.signer,
+        remark: values.remark,
       })
       message.success('出货成功，订单状态已更新为「已出货」')
       shipForm.resetFields()
@@ -111,8 +134,11 @@ export default function Shipping() {
 
   const columns = [
     { title: '出货单 ID', dataIndex: 'id', key: 'id', width: 100 },
-    { title: '订单 ID', dataIndex: 'salesOrderId', key: 'salesOrderId', width: 100 },
+    { title: '订单号', key: 'orderNo', render: (_: unknown, r: Shipment) => r.salesOrder?.orderNo ?? '-' },
+    { title: '送货单号', dataIndex: 'deliveryNote', key: 'deliveryNote', render: (v: string | null) => v || '-' },
     { title: '出货时间', dataIndex: 'shippedAt', key: 'shippedAt', render: dateTimeStr },
+    { title: '签收人', dataIndex: 'signer', key: 'signer', render: (v: string | null) => v || '-' },
+    { title: '备注', dataIndex: 'remark', key: 'remark', render: (v: string | null) => v || '-' },
     {
       title: '运输节点数',
       key: 'legs',
@@ -160,6 +186,15 @@ export default function Shipping() {
             <Form.Item name="shippedAt" label="出货时间">
               <Input type="date" />
             </Form.Item>
+            <Form.Item name="deliveryNote" label="送货单号">
+              <Input placeholder="送货单号" style={{ width: 140 }} />
+            </Form.Item>
+            <Form.Item name="signer" label="签收人">
+              <Input placeholder="签收人" style={{ width: 120 }} />
+            </Form.Item>
+            <Form.Item name="remark" label="备注">
+              <Input placeholder="备注" style={{ width: 160 }} />
+            </Form.Item>
             <Form.Item>
               <Button type="primary" htmlType="submit" loading={shipping}>
                 出货
@@ -183,17 +218,37 @@ export default function Shipping() {
               const legs = [...r.legs].sort(
                 (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime(),
               )
-              if (legs.length === 0) return <span>暂无运输节点</span>
               return (
-                <Steps
-                  direction="vertical"
-                  size="small"
-                  items={legs.map((leg) => ({
-                    title: leg.node,
-                    description:
-                      dateTimeStr(leg.at) + (leg.note ? '　' + leg.note : ''),
-                  }))}
-                />
+                <div>
+                  {r.salesOrder ? (
+                    <div style={{ marginBottom: 12 }}>
+                      <div>
+                        <b>客户：</b>
+                        {r.salesOrder.customer.name}
+                      </div>
+                      <div style={{ marginTop: 4 }}>
+                        {r.salesOrder.items.map((it, idx) => (
+                          <div key={idx}>
+                            {it.product.name}（{it.product.sku}）{it.product.spec ? ' / ' + it.product.spec : ''} × {it.qty}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {legs.length === 0 ? (
+                    <span>暂无运输节点</span>
+                  ) : (
+                    <Steps
+                      direction="vertical"
+                      size="small"
+                      items={legs.map((leg) => ({
+                        title: leg.node,
+                        description:
+                          dateTimeStr(leg.at) + (leg.note ? '　' + leg.note : ''),
+                      }))}
+                    />
+                  )}
+                </div>
               )
             },
           }}

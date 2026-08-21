@@ -16,6 +16,9 @@ const createShipmentSchema = z.object({
     .string({ error: '出货时间必须为字符串' })
     .refine((v) => !Number.isNaN(Date.parse(v)), '出货时间必须为合法日期')
     .optional(),
+  deliveryNote: z.string().nullable().optional(),
+  signer: z.string().nullable().optional(),
+  remark: z.string().nullable().optional(),
 })
 
 const createLegSchema = z.object({
@@ -61,6 +64,9 @@ export function shippingRoutes(app: FastifyInstance) {
           data: {
             salesOrderId: data.salesOrderId,
             ...(data.shippedAt ? { shippedAt: new Date(data.shippedAt) } : {}),
+            deliveryNote: data.deliveryNote || null,
+            signer: data.signer || null,
+            remark: data.remark || null,
           },
         })
         for (const item of order.items) {
@@ -117,7 +123,15 @@ export function shippingRoutes(app: FastifyInstance) {
     return prisma.shipment.findMany({
       where,
       orderBy: { id: 'desc' },
-      include: LEGS_INCLUDE,
+      include: {
+        ...LEGS_INCLUDE,
+        salesOrder: {
+          include: {
+            customer: { select: { name: true } },
+            items: { include: { product: { select: { sku: true, name: true } } } },
+          },
+        },
+      },
     })
   })
 }
