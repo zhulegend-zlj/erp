@@ -112,6 +112,35 @@ describe('purchasing', () => {
     expect(res.statusCode).toBe(403)
   })
 
+  it('GET /api/purchase-orders 返回含供应商与金额的采购单列表', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商-LIST' } })
+    const part = await prisma.part.create({ data: { sku: 'P-LIST', name: '螺丝LIST' } })
+    const po = await prisma.purchaseOrder.create({
+      data: {
+        orderNo: 'PO-LIST',
+        supplierId: supplier.id,
+        items: { create: { partId: part.id, qty: 10, unitPrice: 2.5 } }
+      }
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    const res = await app.inject({ method: 'GET', url: '/api/purchase-orders', headers: { cookie } })
+    expect(res.statusCode).toBe(200)
+    const rows = res.json()
+    const row = rows.find((r: any) => r.id === po.id)
+    expect(row).toMatchObject({
+      id: po.id,
+      orderNo: 'PO-LIST',
+      supplierId: supplier.id,
+      supplierName: '供应商-LIST',
+      totalAmount: 25,
+      paidAmount: 0,
+      outstanding: 25,
+    })
+    expect(row.items).toHaveLength(1)
+    expect(row.items[0]).toMatchObject({ partId: part.id, sku: 'P-LIST', name: '螺丝LIST', qty: 10, unitPrice: 2.5 })
+  })
+
   it('需求计算仅 purchase/boss 可访问（403）', async () => {
     const app = buildApp()
     const cookie = await loginCookie(app, 'warehouse')

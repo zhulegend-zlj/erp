@@ -25,4 +25,26 @@ export function authRoutes(app: FastifyInstance) {
     const user = await prisma.user.findUnique({ where: { id: userId } })
     return { id: user!.id, username: user!.username, name: user!.name, role: user!.role }
   })
+
+  // 修改本人密码：所有已登录角色可操作
+  app.post('/api/auth/change-password', { preHandler: requireRole('boss', 'purchase', 'warehouse', 'sales', 'finance') }, async (req, reply) => {
+    const { oldPassword, newPassword } = req.body as { oldPassword?: unknown; newPassword?: unknown }
+    if (typeof oldPassword !== 'string' || oldPassword.length === 0) {
+      return reply.code(400).send({ error: '请输入原密码' })
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 6) {
+      return reply.code(400).send({ error: '新密码至少 6 位' })
+    }
+
+    const { userId } = (req as any).user as { userId: number }
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    if (!user) return reply.code(404).send({ error: '用户不存在' })
+    if (!(await bcrypt.compare(oldPassword, user.passwordHash))) {
+      return reply.code(400).send({ error: '原密码不正确' })
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+    await prisma.user.update({ where: { id: userId }, data: { passwordHash } })
+    return { ok: true }
+  })
 }

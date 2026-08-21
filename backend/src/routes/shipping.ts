@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
+import { prismaErrorInfo, parsePositiveInt } from '../errors'
 
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 
@@ -54,6 +55,7 @@ export function shippingRoutes(app: FastifyInstance) {
         })
         if (!order) throw new Error('订单不存在')
         if (order.status === 'shipped' || order.status === 'completed') throw new Error('订单已出货')
+        if (order.status !== 'ready') throw new Error('订单未到待出货状态，不能出货')
 
         const created = await tx.shipment.create({
           data: {
@@ -72,14 +74,18 @@ export function shippingRoutes(app: FastifyInstance) {
       const message = err instanceof Error ? err.message : '出货失败'
       if (message.includes('库存不足')) return reply.code(400).send({ error: message })
       if (message.includes('订单已出货')) return reply.code(400).send({ error: message })
+      if (message.includes('待出货状态')) return reply.code(400).send({ error: message })
       if (message.includes('订单不存在')) return reply.code(404).send({ error: message })
+      const info = prismaErrorInfo(err)
+      if (info) return reply.code(info.status).send({ error: info.message })
       return reply.code(500).send({ error: '出货失败：' + message })
     }
   })
 
   // 追加运输节点：仅 sales
   app.post('/api/shipments/:id/legs', { preHandler: requireRole('sales') }, async (req, reply) => {
-    const id = Number((req.params as { id: string }).id)
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '出货单 ID 必须为正整数' })
     const data = parseBody(createLegSchema, req.body, reply)
     if (data === null) return
 

@@ -15,7 +15,7 @@ import {
 import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { notifyError, statusLabel } from './common'
+import { dateTimeStr, money, notifyError, statusLabel } from './common'
 
 interface SalesOrder {
   id: number
@@ -56,6 +56,19 @@ interface PurchaseOrder {
   salesOrderId: number | null
 }
 
+interface PurchaseOrderRow {
+  id: number
+  orderNo: string
+  status: string
+  supplierId: number
+  supplierName: string
+  salesOrderId: number | null
+  totalAmount: number
+  paidAmount: number
+  outstanding: number
+  createdAt: string
+}
+
 export default function Purchasing() {
   const { user } = useAuth()
   const [orders, setOrders] = useState<SalesOrder[]>([])
@@ -66,17 +79,26 @@ export default function Purchasing() {
   const [modalOpen, setModalOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [lastPo, setLastPo] = useState<PurchaseOrder | null>(null)
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderRow[]>([])
+  const [poLoading, setPoLoading] = useState(false)
   const [form] = Form.useForm<PoFormValues>()
 
   const canCreate = user?.role === 'purchase'
 
   useEffect(() => {
-    void Promise.all([api.get<SalesOrder[]>('/orders'), api.get<Supplier[]>('/suppliers')])
-      .then(([o, s]) => {
+    setPoLoading(true)
+    void Promise.all([
+      api.get<SalesOrder[]>('/orders'),
+      api.get<Supplier[]>('/suppliers'),
+      api.get<PurchaseOrderRow[]>('/purchase-orders'),
+    ])
+      .then(([o, s, po]) => {
         setOrders(o.data)
         setSuppliers(s.data)
+        setPurchaseOrders(po.data)
       })
       .catch(notifyError)
+      .finally(() => setPoLoading(false))
   }, [])
 
   useEffect(() => {
@@ -173,6 +195,57 @@ export default function Purchasing() {
             description={lastPo.orderNo}
           />
         ) : null}
+      </Card>
+
+      <Card title="采购单列表" style={{ marginBottom: 16 }}>
+        <Table<PurchaseOrderRow>
+          rowKey="id"
+          loading={poLoading}
+          dataSource={purchaseOrders}
+          pagination={{ pageSize: 10 }}
+          columns={[
+            { title: '采购单号', dataIndex: 'orderNo', key: 'orderNo' },
+            { title: '供应商', dataIndex: 'supplierName', key: 'supplierName' },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              key: 'status',
+              render: (v: string) => {
+                const map: Record<string, { label: string; color: string }> = {
+                  open: { label: '待收货', color: 'orange' },
+                  partial: { label: '部分收货', color: 'blue' },
+                  received: { label: '已收货', color: 'green' },
+                }
+                const item = map[v] ?? { label: v, color: 'default' }
+                return <Tag color={item.color}>{item.label}</Tag>
+              },
+            },
+            {
+              title: '金额',
+              dataIndex: 'totalAmount',
+              key: 'totalAmount',
+              align: 'right' as const,
+              render: (v: number) => '¥' + money(v),
+            },
+            {
+              title: '已付',
+              dataIndex: 'paidAmount',
+              key: 'paidAmount',
+              align: 'right' as const,
+              render: (v: number) => '¥' + money(v),
+            },
+            {
+              title: '未付',
+              dataIndex: 'outstanding',
+              key: 'outstanding',
+              align: 'right' as const,
+              render: (v: number) => (
+                <span style={{ color: v > 0 ? '#cf1322' : undefined }}>¥{money(v)}</span>
+              ),
+            },
+            { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', render: dateTimeStr },
+          ]}
+        />
       </Card>
 
       <Card title="供应商跟催（联系人）">

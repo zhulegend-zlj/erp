@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
+import { parsePositiveInt } from '../errors'
 
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 
@@ -97,7 +98,8 @@ export function ordersRoutes(app: FastifyInstance) {
 
   // 5 角色均可查看详情（含 items 与 product 名称）
   app.get('/api/orders/:id', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
-    const id = Number((req.params as { id: string }).id)
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '订单 ID 必须为正整数' })
     const order = await prisma.salesOrder.findUnique({ where: { id }, include: ITEMS_INCLUDE })
     if (!order) return reply.code(404).send({ error: '订单不存在' })
     return order
@@ -105,7 +107,8 @@ export function ordersRoutes(app: FastifyInstance) {
 
   // sales / boss 可推进状态
   app.patch('/api/orders/:id/status', { preHandler: requireRole('sales', 'boss') }, async (req, reply) => {
-    const id = Number((req.params as { id: string }).id)
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '订单 ID 必须为正整数' })
     const data = parseBody(statusSchema, req.body, reply)
     if (data === null) return
 

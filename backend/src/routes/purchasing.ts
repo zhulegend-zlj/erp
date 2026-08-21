@@ -4,6 +4,7 @@ import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { bomExplode, computePurchaseGap } from '../domain/bom'
 import { applyStockChange } from '../domain/inventory'
+import { prismaErrorInfo } from '../errors'
 
 const purchaseItemSchema = z.object({
   partId: z.number({ error: '零件必填' }).int({ error: '零件必须为整数' }).positive({ error: '零件必须为正整数' }),
@@ -37,6 +38,17 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown, reply: FastifyReply):
   }
   return result.data
 }
+
+const READ_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
+
+const PURCHASE_ORDER_INCLUDE = {
+  supplier: { select: { id: true, name: true } },
+  items: {
+    include: { part: { select: { id: true, sku: true, name: true, unit: true } } },
+    orderBy: { id: 'asc' as const },
+  },
+  payments: true,
+} as const
 
 function utcDateStamp(): string {
   return new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -93,6 +105,58 @@ export function purchasingRoutes(app: FastifyInstance) {
     })
   })
 
+  // 采购单列表：5 角色均可查，可选按状态/供应商/销售订单过滤
+  app.get('/api/purchase-orders', { preHandler: requireRole(...READ_ROLES) }, async (req, reply) => {
+    const query = req.query as { status?: string; supplierId?: string; salesOrderId?: string }
+    const where: { status?: string; supplierId?: number; salesOrderId?: number } = {}
+    if (query.status) where.status = query.status
+    if (query.supplierId) {
+      const supplierId = Number(query.supplierId)
+      if (!Number.isInteger(supplierId) || supplierId <= 0) {
+        return reply.code(400).send({ error: 'supplierId 必须为正整数' })
+      }
+      where.supplierId = supplierId
+    }
+    if (query.salesOrderId) {
+      const salesOrderId = Number(query.salesOrderId)
+      if (!Number.isInteger(salesOrderId) || salesOrderId <= 0) {
+        return reply.code(400).send({ error: 'salesOrderId 必须为正整数' })
+      }
+      where.salesOrderId = salesOrderId
+    }
+
+    const rows = await prisma.purchaseOrder.findMany({
+      where,
+      orderBy: { id: 'desc' as const },
+      include: PURCHASE_ORDER_INCLUDE,
+    })
+    return rows.map((po) => {
+      const totalAmount = po.items.reduce((sum, it) => sum + it.qty * it.unitPrice.toNumber(), 0)
+      const paidAmount = po.payments.reduce((sum, p) => sum + p.amount.toNumber(), 0)
+      return {
+        id: po.id,
+        orderNo: po.orderNo,
+        status: po.status,
+        supplierId: po.supplierId,
+        supplierName: po.supplier.name,
+        salesOrderId: po.salesOrderId,
+        createdAt: po.createdAt,
+        totalAmount,
+        paidAmount,
+        outstanding: Math.max(0, totalAmount - paidAmount),
+        items: po.items.map((it) => ({
+          id: it.id,
+          partId: it.partId,
+          sku: it.part.sku,
+          name: it.part.name,
+          unit: it.part.unit,
+          qty: it.qty,
+          unitPrice: it.unitPrice.toNumber(),
+        })),
+      }
+    })
+  })
+
   // 采购单：仅 purchase 可创建
   app.post('/api/purchase-orders', { preHandler: requireRole('purchase') }, async (req, reply) => {
     const data = parseBody(createPurchaseOrderSchema, req.body, reply)
@@ -139,6 +203,8 @@ export function purchasingRoutes(app: FastifyInstance) {
     } catch (err) {
       const message = err instanceof Error ? err.message : '收货失败'
       if (message.includes('库存不足')) return reply.code(400).send({ error: message })
+      const info = prismaErrorInfo(err)
+      if (info) return reply.code(info.status).send({ error: info.message })
       return reply.code(500).send({ error: '收货失败：' + message })
     }
 

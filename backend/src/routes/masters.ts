@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
+import { parsePositiveInt } from '../errors'
 
 const READ_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 const WRITE_ROLES = ['boss', 'purchase'] as const
@@ -46,6 +47,15 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown, reply: FastifyReply):
   return result.data
 }
 
+function parseId(req: { params: { id: string } }, reply: FastifyReply): number | null {
+  const id = parsePositiveInt(req.params.id)
+  if (id === null) {
+    reply.code(400).send({ error: 'ID 必须为正整数' })
+    return null
+  }
+  return id
+}
+
 interface CrudSpec {
   resource: 'customer' | 'supplier' | 'product' | 'part'
   schema: z.ZodTypeAny
@@ -71,13 +81,15 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
   app.put(`${base}/:id`, { preHandler: write }, async (req, reply) => {
     const data = parseBody(spec.schema, req.body, reply)
     if (data === null) return
-    const id = Number((req.params as { id: string }).id)
+    const id = parseId(req as { params: { id: string } }, reply)
+    if (id === null) return
     const record = await delegate.update({ where: { id }, data })
     return reply.code(200).send(record)
   })
 
   app.delete(`${base}/:id`, { preHandler: write }, async (req, reply) => {
-    const id = Number((req.params as { id: string }).id)
+    const id = parseId(req as { params: { id: string } }, reply)
+    if (id === null) return
     await delegate.delete({ where: { id } })
     return reply.code(200).send({ ok: true })
   })
@@ -89,13 +101,15 @@ export function mastersRoutes(app: FastifyInstance) {
   registerCrud(app, { resource: 'product', schema: productSchema })
   registerCrud(app, { resource: 'part', schema: partSchema })
 
-  app.get('/api/products/:id/bom', { preHandler: requireRole(...READ_ROLES) }, async (req) => {
-    const productId = Number((req.params as { id: string }).id)
+  app.get('/api/products/:id/bom', { preHandler: requireRole(...READ_ROLES) }, async (req, reply) => {
+    const productId = parseId(req as { params: { id: string } }, reply)
+    if (productId === null) return
     return prisma.bom.findMany({ where: { productId }, orderBy: { partId: 'asc' } })
   })
 
   app.put('/api/products/:id/bom', { preHandler: requireRole(...WRITE_ROLES) }, async (req, reply) => {
-    const productId = Number((req.params as { id: string }).id)
+    const productId = parseId(req as { params: { id: string } }, reply)
+    if (productId === null) return
     const items = parseBody(bomSchema, req.body, reply)
     if (items === null) return
     await prisma.$transaction([

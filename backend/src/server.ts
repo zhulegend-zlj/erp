@@ -11,9 +11,18 @@ import { shippingRoutes } from './routes/shipping'
 import { financeRoutes } from './routes/finance'
 import { dashboardRoutes } from './routes/dashboard'
 import { feedbackRoutes } from './routes/feedback'
+import { prismaErrorInfo } from './errors'
 
 export function buildApp() {
   const app = Fastify({ logger: true })
+  app.setErrorHandler((error, _request, reply) => {
+    const info = prismaErrorInfo(error)
+    if (info) {
+      return reply.code(info.status).send({ error: info.message })
+    }
+    const message = (error as { message?: string }).message ?? '未知错误'
+    return reply.code(500).send({ error: '服务器错误：' + message })
+  })
   app.register(cookie)
   app.get('/api/health', async () => ({ status: 'ok' }))
   authRoutes(app)

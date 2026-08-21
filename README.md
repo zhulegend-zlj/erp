@@ -201,7 +201,7 @@ cd backend
 npx tsx --env-file=.env prisma/seed.ts
 ```
 
-> 🔒 上线后请登录系统为每个账号修改初始密码；如需重置，可修改 `prisma/seed.ts` 中的密码后重跑该命令。
+> 🔒 系统右上角提供「修改密码」入口（POST /api/auth/change-password），各角色登录后可自行修改初始密码；如需重置，可修改 `prisma/seed.ts` 中的密码后重跑该命令。
 
 ---
 

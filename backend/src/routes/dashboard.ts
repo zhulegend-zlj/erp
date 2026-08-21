@@ -55,11 +55,12 @@ export function dashboardRoutes(app: FastifyInstance) {
       const earliest = order.shipments[0]
       const due = earliest ? formatDate(dueDate(earliest.shippedAt)) : null
 
-      // 应收：有出货订单的订单金额合计；已过账期：最早出货 +60 天已过
+      // 应收余额：有出货的订单金额扣除已收款，只统计仍未收回的部分
       if (earliest) {
-        receivableTotal += amount
+        const outstanding = Math.max(0, amount - totalReceived)
+        receivableTotal += outstanding
         if (dueDate(earliest.shippedAt) < now) {
-          overdueReceivable += amount
+          overdueReceivable += outstanding
         }
       }
 
@@ -75,9 +76,13 @@ export function dashboardRoutes(app: FastifyInstance) {
       }
     })
 
-    // 应付：全部采购单金额合计
-    const purchaseOrders = await prisma.purchaseOrder.findMany({ include: { items: true } })
-    const payableTotal = purchaseOrders.reduce((sum, po) => sum + orderAmount(po.items), 0)
+    // 应付余额：采购单金额扣除已关联该采购单的付款，只统计仍未付清的部分
+    const purchaseOrders = await prisma.purchaseOrder.findMany({ include: { items: true, payments: true } })
+    const payableTotal = purchaseOrders.reduce((sum, po) => {
+      const amount = orderAmount(po.items)
+      const paid = po.payments.reduce((s, p) => s + p.amount.toNumber(), 0)
+      return sum + Math.max(0, amount - paid)
+    }, 0)
 
     return { orders: rows, receivableTotal, payableTotal, overdueReceivable }
   })

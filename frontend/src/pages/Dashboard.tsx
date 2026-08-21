@@ -81,18 +81,18 @@ export default function Dashboard() {
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={8}>
           <Card>
-            <Statistic title="应收合计" value={summary?.receivableTotal ?? 0} precision={2} prefix="¥" />
+            <Statistic title="应收余额" value={summary?.receivableTotal ?? 0} precision={2} prefix="¥" />
           </Card>
         </Col>
         <Col span={8}>
           <Card>
-            <Statistic title="应付合计" value={summary?.payableTotal ?? 0} precision={2} prefix="¥" />
+            <Statistic title="应付余额" value={summary?.payableTotal ?? 0} precision={2} prefix="¥" />
           </Card>
         </Col>
         <Col span={8}>
           <Card>
             <Statistic
-              title="逾期应收"
+              title="逾期应收余额"
               value={summary?.overdueReceivable ?? 0}
               precision={2}
               prefix="¥"

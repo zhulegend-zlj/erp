@@ -17,6 +17,7 @@ describe('shipping', () => {
         orderNo: 'SO-S1',
         customerId: customer.id,
         deliveryDate: new Date(),
+        status: 'ready',
         items: { create: { productId: product.id, qty: 100, unitPrice: 5 } }
       }
     })
@@ -62,6 +63,7 @@ describe('shipping', () => {
         orderNo: 'SO-S2',
         customerId: customer.id,
         deliveryDate: new Date(),
+        status: 'ready',
         items: { create: { productId: product.id, qty: 20, unitPrice: 5 } }
       }
     })
@@ -80,7 +82,7 @@ describe('shipping', () => {
     })
     expect(stock?.qtyOnHand).toBe(10)
     const updatedOrder = await prisma.salesOrder.findUnique({ where: { id: order.id } })
-    expect(updatedOrder?.status).toBe('draft')
+    expect(updatedOrder?.status).toBe('ready')
     const shipmentCount = await prisma.shipment.count({ where: { salesOrderId: order.id } })
     expect(shipmentCount).toBe(0)
   })
@@ -94,6 +96,7 @@ describe('shipping', () => {
         orderNo: 'SO-S1',
         customerId: customer.id,
         deliveryDate: new Date(),
+        status: 'ready',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } }
       }
     })
@@ -137,6 +140,7 @@ describe('shipping', () => {
         orderNo: 'SO-S3',
         customerId: customer.id,
         deliveryDate: new Date(),
+        status: 'ready',
         items: { create: { productId: product.id, qty: 1, unitPrice: 5 } }
       }
     })
@@ -185,6 +189,34 @@ describe('shipping', () => {
     expect(Array.isArray(res.json())).toBe(true)
   })
 
+  it('订单未到待出货状态不能出货（400）', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F303', name: '成品DRAFT' } })
+    await prisma.stock.create({ data: { itemType: 'product', itemId: product.id, qtyOnHand: 100 } })
+    const customer = await prisma.customer.create({ data: { name: 'C3' } })
+    const order = await prisma.salesOrder.create({
+      data: {
+        orderNo: 'SO-S-DRAFT',
+        customerId: customer.id,
+        deliveryDate: new Date(),
+        items: { create: { productId: product.id, qty: 1, unitPrice: 5 } }
+      }
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'sales')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/shipments',
+      headers: { cookie },
+      payload: { salesOrderId: order.id }
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('待出货')
+    const stock = await prisma.stock.findUnique({
+      where: { itemType_itemId: { itemType: 'product', itemId: product.id } }
+    })
+    expect(stock?.qtyOnHand).toBe(100)
+  })
+
   it('非 sales 角色无权出货与追加运输节点（403）', async () => {
     const app = buildApp()
     const warehouse = await loginCookie(app, 'warehouse')
@@ -223,6 +255,7 @@ describe('shipping', () => {
         orderNo: 'SO-S1',
         customerId: customer.id,
         deliveryDate: new Date(),
+        status: 'ready',
         items: { create: { productId: product.id, qty: 100, unitPrice: 5 } }
       }
     })

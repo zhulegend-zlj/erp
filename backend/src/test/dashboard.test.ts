@@ -105,8 +105,10 @@ describe('dashboard', () => {
     expect(b).toMatchObject({ status: 'shipped', progress: 95, cost: 0, profit: 0, dueDate: null })
 
     // 合计至少包含本次种子数据（共享库可能残留其它测试数据）
-    expect(body.receivableTotal).toBeGreaterThanOrEqual(200)
-    expect(body.overdueReceivable).toBeGreaterThanOrEqual(200)
-    expect(body.payableTotal).toBeGreaterThanOrEqual(100)
+    // 余额口径：订单 A 应收 200，已收 120，故应收/逾期应收余额均为 80；
+    // 应付余额 = PO-BOSS-A(30) + PO-BOSS-B(100)，均未付款，合计 130。
+    expect(body.receivableTotal).toBeGreaterThanOrEqual(80)
+    expect(body.overdueReceivable).toBeGreaterThanOrEqual(80)
+    expect(body.payableTotal).toBeGreaterThanOrEqual(130)
   })
 })

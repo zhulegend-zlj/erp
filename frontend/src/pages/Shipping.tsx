@@ -107,7 +107,7 @@ export default function Shipping() {
     }
   }
 
-  const shippableOrders = orders.filter((o) => o.status !== 'shipped' && o.status !== 'completed')
+  const shippableOrders = orders.filter((o) => o.status === 'ready')
 
   const columns = [
     { title: '出货单 ID', dataIndex: 'id', key: 'id', width: 100 },

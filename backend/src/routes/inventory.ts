@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
+import { prismaErrorInfo } from '../errors'
 
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 
@@ -66,6 +67,8 @@ export function inventoryRoutes(app: FastifyInstance) {
     } catch (err) {
       const message = err instanceof Error ? err.message : '领料失败'
       if (message.includes('库存不足')) return reply.code(400).send({ error: message })
+      const info = prismaErrorInfo(err)
+      if (info) return reply.code(info.status).send({ error: info.message })
       return reply.code(500).send({ error: '领料失败：' + message })
     }
   })
@@ -92,6 +95,8 @@ export function inventoryRoutes(app: FastifyInstance) {
     } catch (err) {
       const message = err instanceof Error ? err.message : '成品入库失败'
       if (message.includes('库存不足')) return reply.code(400).send({ error: message })
+      const info = prismaErrorInfo(err)
+      if (info) return reply.code(info.status).send({ error: info.message })
       return reply.code(500).send({ error: '成品入库失败：' + message })
     }
   })

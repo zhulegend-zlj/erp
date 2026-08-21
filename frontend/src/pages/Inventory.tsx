@@ -60,9 +60,24 @@ interface PartItemField {
   qty?: number | null
 }
 
+interface PurchaseOrderOption {
+  id: number
+  orderNo: string
+  supplierName: string
+  status: string
+}
+
 function ReceiptForm({ parts }: { parts: Part[] }) {
   const [submitting, setSubmitting] = useState(false)
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderOption[]>([])
   const [form] = Form.useForm<{ purchaseOrderId?: number; items?: PartItemField[] }>()
+
+  useEffect(() => {
+    api
+      .get<PurchaseOrderOption[]>('/purchase-orders')
+      .then(({ data }) => setPurchaseOrders(data))
+      .catch(notifyError)
+  }, [])
 
   async function submit(values: { purchaseOrderId?: number; items?: PartItemField[] }) {
     setSubmitting(true)
@@ -87,10 +102,19 @@ function ReceiptForm({ parts }: { parts: Part[] }) {
     <Form form={form} layout="vertical" onFinish={submit} initialValues={{ items: [{}] }}>
       <Form.Item
         name="purchaseOrderId"
-        label="采购单 ID"
-        rules={[{ required: true, message: '请输入采购单 ID' }]}
+        label="采购单"
+        rules={[{ required: true, message: '请选择采购单' }]}
       >
-        <InputNumber min={1} placeholder="采购单 ID（由采购人员提供）" style={{ width: 240 }} />
+        <Select
+          showSearch
+          placeholder="选择采购单"
+          style={{ width: 360 }}
+          optionFilterProp="label"
+          options={purchaseOrders.map((po) => ({
+            value: po.id,
+            label: po.orderNo + '（' + po.supplierName + '）',
+          }))}
+        />
       </Form.Item>
       <Form.List name="items">
         {(fields, { add, remove }) => (
