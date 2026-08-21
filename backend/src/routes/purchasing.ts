@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
+import type { Prisma } from '@prisma/client'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { bomExplode, computePurchaseGap } from '../domain/bom'
@@ -14,6 +15,11 @@ const purchaseItemSchema = z.object({
 
 const createPurchaseOrderSchema = z.object({
   supplierId: z.number({ error: '供应商必填' }).int({ error: '供应商必须为整数' }).positive({ error: '供应商必须为正整数' }),
+  salesOrderId: z.number().int().positive().optional(),
+  items: z.array(purchaseItemSchema, { error: '明细必填' }).min(1, '采购单至少包含一个明细'),
+})
+
+const batchPurchaseOrderSchema = z.object({
   salesOrderId: z.number().int().positive().optional(),
   items: z.array(purchaseItemSchema, { error: '明细必填' }).min(1, '采购单至少包含一个明细'),
 })
@@ -60,6 +66,12 @@ async function generatePurchaseOrderNo(): Promise<string> {
   return `${prefix}${String(count + 1).padStart(3, '0')}`
 }
 
+async function generatePurchaseOrderNoFor(tx: Prisma.TransactionClient): Promise<string> {
+  const prefix = `PO-${utcDateStamp()}-`
+  const count = await tx.purchaseOrder.count({ where: { orderNo: { startsWith: prefix } } })
+  return `${prefix}${String(count + 1).padStart(3, '0')}`
+}
+
 export function purchasingRoutes(app: FastifyInstance) {
   // 需求计算：purchase / boss 可查
   app.get('/api/purchasing/requirements', { preHandler: requireRole('purchase', 'boss') }, async (req, reply) => {
@@ -86,18 +98,25 @@ export function purchasingRoutes(app: FastifyInstance) {
     const partIds = requirements.map((r) => r.partId)
 
     const [parts, stocks] = await Promise.all([
-      prisma.part.findMany({ where: { id: { in: partIds } } }),
+      prisma.part.findMany({
+        where: { id: { in: partIds } },
+        include: { supplier: { select: { id: true, name: true } } },
+      }),
       prisma.stock.findMany({ where: { itemType: 'part', itemId: { in: partIds } } }),
     ])
-    const partNameMap = new Map(parts.map((p) => [p.id, p.name]))
+    const partMap = new Map(parts.map((p) => [p.id, p]))
     const stockMap = new Map(stocks.map((s) => [s.itemId, s.qtyOnHand]))
     const gapMap = new Map(computePurchaseGap(requirements, stockMap).map((g) => [g.partId, g.gapQty]))
 
     return requirements.map((r) => {
+      const part = partMap.get(r.partId)
       const onHand = stockMap.get(r.partId) ?? 0
       return {
         partId: r.partId,
-        partName: partNameMap.get(r.partId) ?? '',
+        sku: part?.sku ?? '',
+        partName: part?.name ?? '',
+        supplierId: part?.supplierId ?? null,
+        supplierName: part?.supplier?.name ?? '',
         requiredQty: r.requiredQty,
         onHand,
         gapQty: gapMap.get(r.partId) ?? 0,
@@ -184,6 +203,65 @@ export function purchasingRoutes(app: FastifyInstance) {
     })
 
     return reply.code(200).send(order)
+  })
+
+  // 批量生成采购单：按零件供应商自动分组，每组一张采购单
+  app.post('/api/purchase-orders/batch', { preHandler: requireRole('purchase') }, async (req, reply) => {
+    const data = parseBody(batchPurchaseOrderSchema, req.body, reply)
+    if (data === null) return
+
+    const partIds = [...new Set(data.items.map((item) => item.partId))]
+    const parts = await prisma.part.findMany({
+      where: { id: { in: partIds } },
+      include: { supplier: { select: { id: true, name: true } } },
+    })
+    const partMap = new Map(parts.map((p) => [p.id, p]))
+
+    const missingSupplier = data.items.filter((item) => !partMap.get(item.partId)?.supplierId)
+    if (missingSupplier.length > 0) {
+      const names = missingSupplier
+        .map((item) => partMap.get(item.partId)?.name ?? String(item.partId))
+        .join('、')
+      return reply.code(400).send({ error: '零件「' + names + '」未设置供应商，不能生成采购单' })
+    }
+
+    const groups = new Map<number, { partId: number; qty: number; unitPrice: number }[]>()
+    for (const item of data.items) {
+      const supplierId = partMap.get(item.partId)!.supplierId!
+      const list = groups.get(supplierId) ?? []
+      list.push(item)
+      groups.set(supplierId, list)
+    }
+
+    const orders = await prisma.$transaction(async (tx) => {
+      const createdOrders: any[] = []
+      for (const [supplierId, items] of groups.entries()) {
+        const orderNo = await generatePurchaseOrderNoFor(tx)
+        const created = await tx.purchaseOrder.create({
+          data: { orderNo, supplierId, salesOrderId: data.salesOrderId ?? null },
+        })
+        for (const item of items) {
+          await tx.purchaseOrderItem.create({
+            data: { purchaseOrderId: created.id, partId: item.partId, qty: item.qty, unitPrice: item.unitPrice },
+          })
+        }
+        createdOrders.push(
+          await tx.purchaseOrder.findUniqueOrThrow({
+            where: { id: created.id },
+            include: {
+              supplier: { select: { id: true, name: true } },
+              items: {
+                include: { part: { select: { id: true, sku: true, name: true } } },
+                orderBy: { id: 'asc' as const },
+              },
+            },
+          }),
+        )
+      }
+      return createdOrders
+    })
+
+    return reply.code(200).send(orders)
   })
 
   // 收货：仅 warehouse 可操作，事务内写 Receipt 并入库

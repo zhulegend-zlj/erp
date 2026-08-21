@@ -149,4 +149,43 @@ describe('purchasing', () => {
     })
     expect(res.statusCode).toBe(403)
   })
+
+  it('批量生成采购单按零件供应商自动分组', async () => {
+    const s1 = await prisma.supplier.create({ data: { name: '供应商-B1' } })
+    const s2 = await prisma.supplier.create({ data: { name: '供应商-B2' } })
+    const p1 = await prisma.part.create({ data: { sku: 'P-B1', name: '零件B1', supplierId: s1.id } })
+    const p2 = await prisma.part.create({ data: { sku: 'P-B2', name: '零件B2', supplierId: s2.id } })
+
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/purchase-orders/batch',
+      headers: { cookie },
+      payload: {
+        items: [
+          { partId: p1.id, qty: 10, unitPrice: 1 },
+          { partId: p2.id, qty: 20, unitPrice: 2 },
+        ]
+      }
+    })
+    expect(res.statusCode).toBe(200)
+    const orders = res.json()
+    expect(orders).toHaveLength(2)
+    expect(orders.map((o: any) => o.supplierId).sort()).toEqual([s1.id, s2.id].sort())
+  })
+
+  it('零件未设置供应商时批量生成返回 400', async () => {
+    const part = await prisma.part.create({ data: { sku: 'P-B3', name: '零件B3' } })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/purchase-orders/batch',
+      headers: { cookie },
+      payload: { items: [{ partId: part.id, qty: 1, unitPrice: 1 }] }
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('未设置供应商')
+  })
 })

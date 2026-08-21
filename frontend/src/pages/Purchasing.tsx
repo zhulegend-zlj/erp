@@ -33,7 +33,10 @@ interface Supplier {
 
 interface Requirement {
   partId: number
+  sku: string
   partName: string
+  supplierId: number | null
+  supplierName: string
   requiredQty: number
   onHand: number
   gapQty: number
@@ -46,7 +49,6 @@ interface PoItemField {
 }
 
 interface PoFormValues {
-  supplierId?: number
   items?: PoItemField[]
 }
 
@@ -80,7 +82,7 @@ export default function Purchasing() {
   const [reqLoading, setReqLoading] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [lastPo, setLastPo] = useState<PurchaseOrder | null>(null)
+  const [lastPos, setLastPos] = useState<PurchaseOrder[]>([])
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderRow[]>([])
   const [poLoading, setPoLoading] = useState(false)
   const [form] = Form.useForm<PoFormValues>()
@@ -120,7 +122,6 @@ export default function Purchasing() {
 
   function openCreatePo() {
     form.setFieldsValue({
-      supplierId: undefined,
       items: gaps.map((g) => ({ partId: g.partId, qty: g.gapQty, unitPrice: undefined })),
     })
     setModalOpen(true)
@@ -129,8 +130,7 @@ export default function Purchasing() {
   async function handleCreate(values: PoFormValues) {
     setSubmitting(true)
     try {
-      const { data } = await api.post<PurchaseOrder>('/purchase-orders', {
-        supplierId: values.supplierId,
+      const { data } = await api.post<PurchaseOrder[]>('/purchase-orders/batch', {
         salesOrderId: orderId,
         items: (values.items ?? []).map((it) => ({
           partId: Number(it.partId ?? 0),
@@ -138,9 +138,13 @@ export default function Purchasing() {
           unitPrice: Number(it.unitPrice ?? 0),
         })),
       })
-      setLastPo(data)
-      message.success('采购单已生成：' + data.orderNo)
+      setLastPos(data)
+      message.success('已按供应商生成 ' + data.length + ' 张采购单：' + data.map((o) => o.orderNo).join('、'))
       setModalOpen(false)
+      setPoLoading(true)
+      const { data: poRows } = await api.get<PurchaseOrderRow[]>('/purchase-orders')
+      setPurchaseOrders(poRows)
+      setPoLoading(false)
     } catch (err) {
       notifyError(err)
     } finally {
@@ -208,13 +212,13 @@ export default function Purchasing() {
             },
           ]}
         />
-        {lastPo ? (
+        {lastPos.length > 0 ? (
           <Alert
             style={{ marginTop: 16 }}
             type="success"
             showIcon
             message="最近生成的采购单"
-            description={lastPo.orderNo}
+            description={lastPos.map((po) => po.orderNo).join('、')}
           />
         ) : null}
       </Card>
@@ -297,16 +301,12 @@ export default function Purchasing() {
         destroyOnClose
       >
         <Form form={form} layout="vertical" onFinish={handleCreate}>
-          <Form.Item
-            name="supplierId"
-            label="供应商"
-            rules={[{ required: true, message: '请选择供应商' }]}
-          >
-            <Select
-              placeholder="选择供应商"
-              options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
-            />
-          </Form.Item>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="系统会按零件的供应商自动分组，每组生成一张采购单。"
+          />
           <Form.List name="items">
             {(fields, { add, remove }) => (
               <>
@@ -318,9 +318,12 @@ export default function Purchasing() {
                       style={{ marginBottom: 0 }}
                     >
                       <Select
-                        style={{ width: 200 }}
+                        style={{ width: 240 }}
                         placeholder="零件"
-                        options={requirements.map((r) => ({ value: r.partId, label: r.partName }))}
+                        options={requirements.map((r) => ({
+                          value: r.partId,
+                          label: r.partName + '（' + (r.supplierName || '未设置供应商') + '）',
+                        }))}
                       />
                     </Form.Item>
                     <Form.Item
