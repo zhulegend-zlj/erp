@@ -42,6 +42,7 @@ model Supplier {
   purchaseOrders PurchaseOrder[]
   supplierPayments SupplierPayment[]
   parts     Part[]
+  returnReplenishments ReturnReplenish[]
 }
 
 model Product {
@@ -72,6 +73,7 @@ model Part {
   purchaseItems PurchaseOrderItem[]
   receipts Receipt[]
   issues   Issue[]
+  returnReplenishments ReturnReplenish[]
 }
 
 model Bom {
@@ -224,9 +226,25 @@ model InventoryLedger {
   itemId    Int
   delta     Int
   balance   Int
-  refType   String   // receipt/issue/production/shipment
+  refType   String   // receipt/issue/production/shipment/return/replenish
   refId     Int
   salesOrder   SalesOrder? @relation(fields: [salesOrderId], references: [id])
   salesOrderId Int?
   at        DateTime @default(now())
+}
+
+model ReturnReplenish {
+  id        Int      @id @default(autoincrement())
+  part      Part     @relation(fields: [partId], references: [id])
+  partId    Int
+  supplier  Supplier @relation(fields: [supplierId], references: [id])
+  supplierId Int
+  returnDate DateTime?
+  returnQty Int      @default(0)
+  replenishDate DateTime?
+  replenishQty Int  @default(0)
+  purchaseOrderNo String?
+  lotNo      String?
+  note       String?
+  createdAt  DateTime @default(now())
 }

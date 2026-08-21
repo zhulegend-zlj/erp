@@ -16,7 +16,7 @@ import {
 import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { dateTimeStr, notifyError } from './common'
+import { dateStr, dateTimeStr, notifyError } from './common'
 
 interface SalesOrder {
   id: number
@@ -29,6 +29,7 @@ interface Part {
   sku: string
   name: string
   unit: string
+  supplierId?: number | null
 }
 
 interface Product {
@@ -69,6 +70,11 @@ interface PurchaseOrderOption {
   orderNo: string
   supplierName: string
   status: string
+}
+
+interface SupplierOption {
+  id: number
+  name: string
 }
 
 function ReceiptForm({ parts, onDone }: { parts: Part[]; onDone?: () => void }) {
@@ -734,6 +740,176 @@ function OrderMaterialsTab({ orders }: { orders: SalesOrder[] }) {
   )
 }
 
+interface ReturnReplenishRow {
+  id: number
+  partId: number
+  supplierId: number
+  returnDate: string | null
+  returnQty: number
+  replenishDate: string | null
+  replenishQty: number
+  purchaseOrderNo: string | null
+  lotNo: string | null
+  note: string | null
+  part: { sku: string; name: string }
+  supplier: { name: string }
+}
+
+function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => void }) {
+  const [rows, setRows] = useState<ReturnReplenishRow[]>([])
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
+  const [loading, setLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [form] = Form.useForm<{
+    partId?: number
+    supplierId?: number
+    returnDate?: string
+    returnQty?: number
+    replenishDate?: string
+    replenishQty?: number
+    purchaseOrderNo?: string
+    lotNo?: string
+    note?: string
+  }>()
+
+  async function load() {
+    setLoading(true)
+    try {
+      const [r, s] = await Promise.all([
+        api.get<ReturnReplenishRow[]>('/return-replenishments'),
+        api.get<SupplierOption[]>('/suppliers'),
+      ])
+      setRows(r.data)
+      setSuppliers(s.data)
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load()
+  }, [])
+
+  async function submit(values: {
+    partId?: number
+    supplierId?: number
+    returnDate?: string
+    returnQty?: number
+    replenishDate?: string
+    replenishQty?: number
+    purchaseOrderNo?: string
+    lotNo?: string
+    note?: string
+  }) {
+    setSubmitting(true)
+    try {
+      await api.post('/return-replenishments', {
+        partId: values.partId,
+        supplierId: values.supplierId,
+        returnDate: values.returnDate,
+        returnQty: values.returnQty ?? 0,
+        replenishDate: values.replenishDate,
+        replenishQty: values.replenishQty ?? 0,
+        purchaseOrderNo: values.purchaseOrderNo,
+        lotNo: values.lotNo,
+        note: values.note,
+      })
+      message.success('退补货已登记')
+      form.resetFields()
+      onDone?.()
+      await load()
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div>
+      <Form form={form} layout="vertical" onFinish={submit} style={{ maxWidth: 900, marginBottom: 24 }}>
+        <Space style={{ display: 'flex' }} align="start" wrap>
+          <Form.Item name="partId" label="物料" rules={[{ required: true, message: '选择物料' }]}>
+            <Select
+              showSearch
+              placeholder="选择物料"
+              style={{ width: 260 }}
+              optionFilterProp="label"
+              onChange={(v) => {
+                const part = parts.find((p) => p.id === v)
+                if (part?.supplierId) form.setFieldValue('supplierId', part.supplierId)
+              }}
+              options={parts.map((p) => ({
+                value: p.id,
+                label: p.name + '（' + p.sku + '）',
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="supplierId" label="供应商" rules={[{ required: true, message: '选择供应商' }]}>
+            <Select
+              placeholder="选择供应商"
+              style={{ width: 200 }}
+              options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+            />
+          </Form.Item>
+          <Form.Item name="returnDate" label="退货日期">
+            <Input type="date" />
+          </Form.Item>
+          <Form.Item name="returnQty" label="退货数量">
+            <InputNumber min={0} placeholder="0" />
+          </Form.Item>
+          <Form.Item name="replenishDate" label="补货日期">
+            <Input type="date" />
+          </Form.Item>
+          <Form.Item name="replenishQty" label="补货数量">
+            <InputNumber min={0} placeholder="0" />
+          </Form.Item>
+          <Form.Item name="purchaseOrderNo" label="采购单号">
+            <Input placeholder="PO-..." />
+          </Form.Item>
+          <Form.Item name="lotNo" label="来料单号">
+            <Input placeholder="来料单号" />
+          </Form.Item>
+          <Form.Item name="note" label="备注">
+            <Input placeholder="备注" />
+          </Form.Item>
+        </Space>
+        <Button type="primary" htmlType="submit" loading={submitting}>
+          登记退补货
+        </Button>
+      </Form>
+
+      <Table<ReturnReplenishRow>
+        rowKey="id"
+        loading={loading}
+        dataSource={rows}
+        pagination={{ pageSize: 10 }}
+        columns={[
+          {
+            title: '物料',
+            key: 'part',
+            render: (_: unknown, r: ReturnReplenishRow) => r.part.name + '（' + r.part.sku + '）',
+          },
+          {
+            title: '供应商',
+            key: 'supplier',
+            render: (_: unknown, r: ReturnReplenishRow) => r.supplier.name,
+          },
+          { title: '退货日期', dataIndex: 'returnDate', key: 'returnDate', render: dateStr },
+          { title: '退货数量', dataIndex: 'returnQty', key: 'returnQty' },
+          { title: '补货日期', dataIndex: 'replenishDate', key: 'replenishDate', render: dateStr },
+          { title: '补货数量', dataIndex: 'replenishQty', key: 'replenishQty' },
+          { title: '采购单号', dataIndex: 'purchaseOrderNo', key: 'purchaseOrderNo' },
+          { title: '来料单号', dataIndex: 'lotNo', key: 'lotNo' },
+          { title: '备注', dataIndex: 'note', key: 'note' },
+        ]}
+      />
+    </div>
+  )
+}
+
 export default function Inventory() {
   const { user } = useAuth()
   const [orders, setOrders] = useState<SalesOrder[]>([])
@@ -806,6 +982,11 @@ export default function Inventory() {
       ),
     },
     { key: 'order-materials', label: '订单物料计算', children: <OrderMaterialsTab orders={orders} /> },
+    {
+      key: 'return-replenish',
+      label: '退补货',
+      children: <ReturnReplenishTab parts={parts} onDone={() => setRefreshToken((t) => t + 1)} />,
+    },
   ]
 
   return (

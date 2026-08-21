@@ -15,6 +15,7 @@ import { financeRoutes } from './routes/finance'
 import { dashboardRoutes } from './routes/dashboard'
 import { feedbackRoutes } from './routes/feedback'
 import { uploadRoutes } from './routes/uploads'
+import { returnReplenishRoutes } from './routes/returnReplenish'
 import { prismaErrorInfo } from './errors'
 
 export function buildApp() {
@@ -36,6 +37,7 @@ export function buildApp() {
 
   app.get('/api/health', async () => ({ status: 'ok' }))
   uploadRoutes(app)
+  returnReplenishRoutes(app)
   authRoutes(app)
   mastersRoutes(app)
   ordersRoutes(app)
