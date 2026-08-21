@@ -64,7 +64,7 @@ export function shippingRoutes(app: FastifyInstance) {
           },
         })
         for (const item of order.items) {
-          await applyStockChange(tx, 'product', item.productId, -item.qty, 'shipment', created.id)
+          await applyStockChange(tx, 'product', item.productId, -item.qty, 'shipment', created.id, order.id)
         }
         await tx.salesOrder.update({ where: { id: order.id }, data: { status: 'shipped' } })
         return created

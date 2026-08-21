@@ -131,4 +131,72 @@ describe('inventory', () => {
     })
     expect(res.statusCode).toBe(403)
   })
+
+  it('订单物料计算返回需求/已出库/差值', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商A' } })
+    const part = await prisma.part.create({ data: { sku: 'P-MAT', name: '螺丝', spec: 'M4', supplierId: supplier.id } })
+    const product = await prisma.product.create({ data: { sku: 'F-MAT', name: '成品' } })
+    await prisma.bom.create({ data: { productId: product.id, partId: part.id, qty: 2 } })
+    const customer = await prisma.customer.create({ data: { name: '客户MAT' } })
+    const order = await prisma.salesOrder.create({
+      data: {
+        orderNo: 'SO-MAT',
+        customerId: customer.id,
+        deliveryDate: new Date('2026-09-30'),
+        items: { create: { productId: product.id, qty: 10, unitPrice: 5 } }
+      }
+    })
+    await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 50 } })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    const issue = await app.inject({
+      method: 'POST', url: '/api/issues', headers: { cookie },
+      payload: { salesOrderId: order.id, issuedBy: '组长', items: [{ partId: part.id, qty: 12 }] }
+    })
+    expect(issue.statusCode).toBe(200)
+
+    const res = await app.inject({
+      method: 'GET', url: '/api/inventory/order-materials?orderNo=' + order.orderNo, headers: { cookie }
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.orderQty).toBe(10)
+    expect(body.items).toHaveLength(1)
+    expect(body.items[0]).toMatchObject({
+      partId: part.id,
+      sku: 'P-MAT',
+      name: '螺丝',
+      spec: 'M4',
+      supplierName: '供应商A',
+      requiredQty: 20,
+      issuedQty: 12,
+      variance: -8
+    })
+  })
+
+  it('订单流水查询返回流水并汇总出库', async () => {
+    const part = await prisma.part.create({ data: { sku: 'P-LED', name: '木板' } })
+    await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 100 } })
+    const customer = await prisma.customer.create({ data: { name: '客户LED' } })
+    const order = await prisma.salesOrder.create({
+      data: { orderNo: 'SO-LED', customerId: customer.id, deliveryDate: new Date('2026-09-30') }
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    const issue = await app.inject({
+      method: 'POST', url: '/api/issues', headers: { cookie },
+      payload: { salesOrderId: order.id, issuedBy: '组长', items: [{ partId: part.id, qty: 10 }] }
+    })
+    expect(issue.statusCode).toBe(200)
+
+    const res = await app.inject({
+      method: 'GET', url: '/api/inventory/order-ledger?orderNo=' + order.orderNo, headers: { cookie }
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.orderNo).toBe('SO-LED')
+    expect(body.totalOutboundQty).toBe(10)
+    expect(body.rows.length).toBeGreaterThanOrEqual(1)
+    expect(body.rows[0]).toMatchObject({ itemType: 'part', itemId: part.id, delta: -10 })
+  })
 })

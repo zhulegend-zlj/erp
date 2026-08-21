@@ -41,6 +41,7 @@ model Supplier {
   createdAt DateTime @default(now())
   purchaseOrders PurchaseOrder[]
   supplierPayments SupplierPayment[]
+  parts     Part[]
 }
 
 model Product {
@@ -48,6 +49,7 @@ model Product {
   sku    String @unique
   name   String
   unit   String @default("件")
+  imageUrl String?
   boms   Bom[]
   orderItems SalesOrderItem[]
   productionEntries ProductionEntry[]
@@ -58,6 +60,10 @@ model Part {
   sku    String @unique
   name   String
   unit   String @default("个")
+  spec   String?
+  imageUrl String?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id])
+  supplierId Int?
   boms   Bom[]
   purchaseItems PurchaseOrderItem[]
   receipts Receipt[]
@@ -89,6 +95,7 @@ model SalesOrder {
   productionEntries ProductionEntry[]
   shipments    Shipment[]
   customerPayments CustomerPayment[]
+  inventoryLedgers InventoryLedger[]
 }
 
 model SalesOrderItem {
@@ -212,5 +219,7 @@ model InventoryLedger {
   balance   Int
   refType   String   // receipt/issue/production/shipment
   refId     Int
+  salesOrder   SalesOrder? @relation(fields: [salesOrderId], references: [id])
+  salesOrderId Int?
   at        DateTime @default(now())
 }

@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Form,
+  Image,
   Input,
   InputNumber,
   Select,
@@ -67,7 +68,7 @@ interface PurchaseOrderOption {
   status: string
 }
 
-function ReceiptForm({ parts }: { parts: Part[] }) {
+function ReceiptForm({ parts, onDone }: { parts: Part[]; onDone?: () => void }) {
   const [submitting, setSubmitting] = useState(false)
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderOption[]>([])
   const [form] = Form.useForm<{ purchaseOrderId?: number; items?: PartItemField[] }>()
@@ -91,6 +92,7 @@ function ReceiptForm({ parts }: { parts: Part[] }) {
       })
       message.success('收货入库成功')
       form.resetFields()
+      onDone?.()
     } catch (err) {
       notifyError(err)
     } finally {
@@ -166,7 +168,7 @@ function ReceiptForm({ parts }: { parts: Part[] }) {
   )
 }
 
-function IssueForm({ orders, parts }: { orders: SalesOrder[]; parts: Part[] }) {
+function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Part[]; onDone?: () => void }) {
   const [submitting, setSubmitting] = useState(false)
   const [form] = Form.useForm<{
     salesOrderId?: number
@@ -194,6 +196,7 @@ function IssueForm({ orders, parts }: { orders: SalesOrder[]; parts: Part[] }) {
       })
       message.success('领料出库成功')
       form.resetFields()
+      onDone?.()
     } catch (err) {
       notifyError(err)
     } finally {
@@ -266,7 +269,7 @@ function IssueForm({ orders, parts }: { orders: SalesOrder[]; parts: Part[] }) {
   )
 }
 
-function ProductionForm({ orders, products }: { orders: SalesOrder[]; products: Product[] }) {
+function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; products: Product[]; onDone?: () => void }) {
   const [submitting, setSubmitting] = useState(false)
   const [form] = Form.useForm<{
     salesOrderId?: number
@@ -291,6 +294,7 @@ function ProductionForm({ orders, products }: { orders: SalesOrder[]; products: 
       })
       message.success('成品入库成功')
       form.resetFields()
+      onDone?.()
     } catch (err) {
       notifyError(err)
     } finally {
@@ -337,7 +341,7 @@ function ProductionForm({ orders, products }: { orders: SalesOrder[]; products: 
   )
 }
 
-function StockTab() {
+function StockTab({ refreshToken }: { refreshToken?: number }) {
   const [rows, setRows] = useState<StockRow[]>([])
   const [loading, setLoading] = useState(false)
   const [itemType, setItemType] = useState<string | undefined>()
@@ -360,7 +364,7 @@ function StockTab() {
   useEffect(() => {
     void load(itemType, keyword)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemType])
+  }, [itemType, refreshToken])
 
   return (
     <div>
@@ -406,15 +410,51 @@ function StockTab() {
   )
 }
 
-function LedgerTab({ parts, products }: { parts: Part[]; products: Product[] }) {
+interface OrderLedgerRow {
+  id: number
+  itemType: string
+  itemId: number
+  itemName: string
+  delta: number
+  balance: number
+  refType: string
+  refId: number
+  at: string
+  orderNo: string
+}
+
+interface OrderLedgerResult {
+  orderNo: string
+  totalOutboundQty: number
+  rows: OrderLedgerRow[]
+}
+
+function signedDelta(v: number): string {
+  return v > 0 ? '+' + v : String(v)
+}
+
+function LedgerTab({
+  parts,
+  products,
+  orders,
+  refreshToken,
+}: {
+  parts: Part[]
+  products: Product[]
+  orders: SalesOrder[]
+  refreshToken?: number
+}) {
   const [itemType, setItemType] = useState<'part' | 'product'>('part')
   const [itemId, setItemId] = useState<number | undefined>()
   const [rows, setRows] = useState<LedgerRow[]>([])
   const [loading, setLoading] = useState(false)
+  const [orderNo, setOrderNo] = useState<string | undefined>()
+  const [orderResult, setOrderResult] = useState<OrderLedgerResult | null>(null)
+  const [orderLoading, setOrderLoading] = useState(false)
 
   const options = itemType === 'part' ? parts : products
 
-  async function query() {
+  async function queryItem() {
     if (!itemId) {
       message.warning('请先选择' + (itemType === 'part' ? '零件' : '成品'))
       return
@@ -432,9 +472,34 @@ function LedgerTab({ parts, products }: { parts: Part[]; products: Product[] }) 
     }
   }
 
+  async function queryOrder() {
+    if (!orderNo) {
+      message.warning('请先选择订单号')
+      return
+    }
+    setOrderLoading(true)
+    try {
+      const { data } = await api.get<OrderLedgerResult>('/inventory/order-ledger', {
+        params: { orderNo },
+      })
+      setOrderResult(data)
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setOrderLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (refreshToken === undefined) return
+    if (orderNo) void queryOrder()
+    else if (itemId) void queryItem()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken])
+
   return (
     <div>
-      <Space style={{ marginBottom: 16 }}>
+      <Space style={{ marginBottom: 16 }} wrap>
         <Select
           value={itemType}
           style={{ width: 140 }}
@@ -455,10 +520,55 @@ function LedgerTab({ parts, products }: { parts: Part[]; products: Product[] }) 
           onChange={(v) => setItemId(v)}
           options={options.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
         />
-        <Button type="primary" onClick={() => void query()}>
-          查询流水
+        <Button onClick={() => void queryItem()}>查询流水</Button>
+        <Select
+          showSearch
+          placeholder="按订单号查询"
+          style={{ width: 280 }}
+          value={orderNo}
+          onChange={(v) => {
+            setOrderNo(v)
+            setOrderResult(null)
+          }}
+          optionFilterProp="label"
+          options={orders.map((o) => ({ value: o.orderNo, label: o.orderNo }))}
+        />
+        <Button type="primary" onClick={() => void queryOrder()}>
+          查询订单流水
         </Button>
       </Space>
+
+      {orderResult ? (
+        <>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={'订单 ' + orderResult.orderNo + ' 已出库合计：' + orderResult.totalOutboundQty}
+          />
+          <Table<OrderLedgerRow>
+            rowKey="id"
+            loading={orderLoading}
+            dataSource={orderResult.rows}
+            pagination={{ pageSize: 10 }}
+            style={{ marginBottom: 24 }}
+            columns={[
+              { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr },
+              { title: '物料', dataIndex: 'itemName', key: 'itemName' },
+              {
+                title: '变动',
+                dataIndex: 'delta',
+                key: 'delta',
+                render: (v: number) => signedDelta(v),
+              },
+              { title: '结存', dataIndex: 'balance', key: 'balance' },
+              { title: '来源类型', dataIndex: 'refType', key: 'refType' },
+              { title: '来源 ID', dataIndex: 'refId', key: 'refId' },
+            ]}
+          />
+        </>
+      ) : null}
+
       <Table<LedgerRow>
         rowKey="id"
         loading={loading}
@@ -466,10 +576,123 @@ function LedgerTab({ parts, products }: { parts: Part[]; products: Product[] }) 
         pagination={{ pageSize: 10 }}
         columns={[
           { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr },
-          { title: '变动', dataIndex: 'delta', key: 'delta' },
+          {
+            title: '变动',
+            dataIndex: 'delta',
+            key: 'delta',
+            render: (v: number) => signedDelta(v),
+          },
           { title: '结存', dataIndex: 'balance', key: 'balance' },
           { title: '来源类型', dataIndex: 'refType', key: 'refType' },
           { title: '来源 ID', dataIndex: 'refId', key: 'refId' },
+        ]}
+      />
+    </div>
+  )
+}
+
+interface OrderMaterialRow {
+  seq: number
+  partId: number
+  sku: string
+  name: string
+  imageUrl: string
+  supplierName: string
+  spec: string
+  unit: string
+  usage: number
+  requiredQty: number
+  issuedQty: number
+  variance: number
+}
+
+interface OrderMaterialsResult {
+  orderNo: string
+  orderQty: number
+  items: OrderMaterialRow[]
+}
+
+function OrderMaterialsTab({ orders }: { orders: SalesOrder[] }) {
+  const [orderNo, setOrderNo] = useState<string | undefined>()
+  const [result, setResult] = useState<OrderMaterialsResult | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  async function calc() {
+    if (!orderNo) {
+      message.warning('请选择销售订单')
+      return
+    }
+    setLoading(true)
+    try {
+      const { data } = await api.get<OrderMaterialsResult>('/inventory/order-materials', {
+        params: { orderNo },
+      })
+      setResult(data)
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div>
+      <Space style={{ marginBottom: 16 }}>
+        <Select
+          showSearch
+          placeholder="选择销售订单"
+          style={{ width: 320 }}
+          value={orderNo}
+          onChange={(v) => {
+            setOrderNo(v)
+            setResult(null)
+          }}
+          optionFilterProp="label"
+          options={orders.map((o) => ({ value: o.orderNo, label: o.orderNo }))}
+        />
+        <Button type="primary" onClick={() => void calc()} disabled={!orderNo}>
+          计算
+        </Button>
+      </Space>
+      {result ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={'订单 ' + result.orderNo + '，订单数：' + result.orderQty}
+        />
+      ) : null}
+      <Table<OrderMaterialRow>
+        rowKey="partId"
+        loading={loading}
+        dataSource={result?.items ?? []}
+        pagination={false}
+        columns={[
+          { title: '序号', dataIndex: 'seq', key: 'seq', width: 70 },
+          {
+            title: '料号+物料名称',
+            key: 'material',
+            render: (_: unknown, r: OrderMaterialRow) => r.sku + ' ' + r.name,
+          },
+          {
+            title: '物料图片',
+            dataIndex: 'imageUrl',
+            key: 'imageUrl',
+            render: (v: string) =>
+              v ? <Image src={v} width={48} height={48} style={{ objectFit: 'cover' }} /> : '-',
+          },
+          { title: '供应商', dataIndex: 'supplierName', key: 'supplierName' },
+          { title: '规格', dataIndex: 'spec', key: 'spec', render: (v: string) => v || '-' },
+          { title: '用量', dataIndex: 'usage', key: 'usage' },
+          { title: '已出库 (PCS)', dataIndex: 'issuedQty', key: 'issuedQty' },
+          {
+            title: '差值',
+            dataIndex: 'variance',
+            key: 'variance',
+            render: (v: number) => (
+              <span style={{ color: v === 0 ? undefined : v > 0 ? '#cf1322' : '#3f8600' }}>{v}</span>
+            ),
+          },
         ]}
       />
     </div>
@@ -481,6 +704,7 @@ export default function Inventory() {
   const [orders, setOrders] = useState<SalesOrder[]>([])
   const [parts, setParts] = useState<Part[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [refreshToken, setRefreshToken] = useState(0)
 
   useEffect(() => {
     void Promise.all([
@@ -501,16 +725,26 @@ export default function Inventory() {
   const items = [
     ...(canOperate
       ? [
-          { key: 'receipt', label: '收货入库', children: <ReceiptForm parts={parts} /> },
+          {
+            key: 'receipt',
+            label: '收货入库',
+            children: <ReceiptForm parts={parts} onDone={() => setRefreshToken((t) => t + 1)} />,
+          },
           {
             key: 'issue',
             label: '领料出库',
-            children: <IssueForm orders={orders} parts={parts} />,
+            children: <IssueForm orders={orders} parts={parts} onDone={() => setRefreshToken((t) => t + 1)} />,
           },
           {
             key: 'production',
             label: '成品入库',
-            children: <ProductionForm orders={orders} products={products} />,
+            children: (
+              <ProductionForm
+                orders={orders}
+                products={products}
+                onDone={() => setRefreshToken((t) => t + 1)}
+              />
+            ),
           },
         ]
       : [
@@ -520,8 +754,13 @@ export default function Inventory() {
             children: <Alert type="info" showIcon message="当前账号为只读（老板），仅可查看库存与流水。" />,
           },
         ]),
-    { key: 'stock', label: '库存查询', children: <StockTab /> },
-    { key: 'ledger', label: '流水', children: <LedgerTab parts={parts} products={products} /> },
+    { key: 'stock', label: '库存查询', children: <StockTab refreshToken={refreshToken} /> },
+    {
+      key: 'ledger',
+      label: '流水',
+      children: <LedgerTab parts={parts} products={products} orders={orders} refreshToken={refreshToken} />,
+    },
+    { key: 'order-materials', label: '订单物料计算', children: <OrderMaterialsTab orders={orders} /> },
   ]
 
   return (

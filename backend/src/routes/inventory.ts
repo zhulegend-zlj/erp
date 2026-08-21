@@ -58,7 +58,7 @@ export function inventoryRoutes(app: FastifyInstance) {
               ...(data.note !== undefined && data.note !== '' ? { note: data.note } : {}),
             },
           })
-          await applyStockChange(tx, 'part', item.partId, -item.qty, 'issue', issue.id)
+          await applyStockChange(tx, 'part', item.partId, -item.qty, 'issue', issue.id, data.salesOrderId)
           created.push({ id: issue.id, partId: item.partId, qty: item.qty })
         }
         return created
@@ -88,7 +88,7 @@ export function inventoryRoutes(app: FastifyInstance) {
             ...(data.entryDate ? { entryDate: new Date(data.entryDate) } : {}),
           },
         })
-        await applyStockChange(tx, 'product', data.productId, data.qty, 'production', created.id)
+        await applyStockChange(tx, 'product', data.productId, data.qty, 'production', created.id, data.salesOrderId)
         return created
       })
       return reply.code(200).send(entry)
@@ -148,5 +148,108 @@ export function inventoryRoutes(app: FastifyInstance) {
       where: { itemType, itemId },
       orderBy: [{ at: 'desc' }, { id: 'desc' }],
     })
+  })
+
+  // 订单物料计算：按销售订单号统计零件需求、已出库、差值（参考用户 Excel 布局）
+  app.get('/api/inventory/order-materials', { preHandler: requireRole('warehouse', 'boss') }, async (req, reply) => {
+    const raw = (req.query as { orderNo?: string }).orderNo
+    if (!raw || !raw.trim()) {
+      return reply.code(400).send({ error: 'orderNo 必填' })
+    }
+    const orderNo = raw.trim()
+
+    const order = await prisma.salesOrder.findUnique({ where: { orderNo }, include: { items: true } })
+    if (!order) return reply.code(404).send({ error: '订单不存在' })
+
+    const totalOrderQty = order.items.reduce((sum, it) => sum + it.qty, 0)
+    const productIds = [...new Set(order.items.map((it) => it.productId))]
+    const boms = await prisma.bom.findMany({ where: { productId: { in: productIds } } })
+
+    const requiredMap = new Map<number, number>()
+    for (const item of order.items) {
+      for (const b of boms) {
+        if (b.productId !== item.productId) continue
+        requiredMap.set(b.partId, (requiredMap.get(b.partId) ?? 0) + b.qty * item.qty)
+      }
+    }
+    const partIds = [...requiredMap.keys()]
+
+    const [parts, issueGroups] = await Promise.all([
+      prisma.part.findMany({
+        where: { id: { in: partIds } },
+        include: { supplier: { select: { name: true } } },
+      }),
+      prisma.issue.groupBy({
+        by: ['partId'],
+        where: { salesOrderId: order.id, partId: { in: partIds } },
+        _sum: { qty: true },
+      }),
+    ])
+
+    const issueMap = new Map(issueGroups.map((g) => [g.partId, g._sum.qty ?? 0]))
+    const items = parts.map((part, index) => {
+      const requiredQty = requiredMap.get(part.id) ?? 0
+      const issuedQty = issueMap.get(part.id) ?? 0
+      return {
+        seq: index + 1,
+        partId: part.id,
+        sku: part.sku,
+        name: part.name,
+        imageUrl: part.imageUrl ?? '',
+        supplierName: part.supplier?.name ?? '',
+        spec: part.spec ?? '',
+        unit: part.unit,
+        usage: totalOrderQty > 0 ? requiredQty / totalOrderQty : 0,
+        requiredQty,
+        issuedQty,
+        variance: issuedQty - requiredQty,
+      }
+    })
+
+    return { orderNo: order.orderNo, orderQty: totalOrderQty, items }
+  })
+
+  // 订单流水：按销售订单号查询该订单全部出入库流水，并汇总出库数量
+  app.get('/api/inventory/order-ledger', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
+    const raw = (req.query as { orderNo?: string }).orderNo
+    if (!raw || !raw.trim()) {
+      return reply.code(400).send({ error: 'orderNo 必填' })
+    }
+    const orderNo = raw.trim()
+
+    const order = await prisma.salesOrder.findUnique({ where: { orderNo }, select: { id: true, orderNo: true } })
+    if (!order) return reply.code(404).send({ error: '订单不存在' })
+
+    const rows = await prisma.inventoryLedger.findMany({
+      where: { salesOrderId: order.id },
+      orderBy: [{ at: 'desc' }, { id: 'desc' }],
+    })
+
+    const partIds = [...new Set(rows.filter((r) => r.itemType === 'part').map((r) => r.itemId))]
+    const productIds = [...new Set(rows.filter((r) => r.itemType === 'product').map((r) => r.itemId))]
+    const [parts, products] = await Promise.all([
+      prisma.part.findMany({ where: { id: { in: partIds } } }),
+      prisma.product.findMany({ where: { id: { in: productIds } } }),
+    ])
+    const partNameMap = new Map(parts.map((p) => [p.id, p.name + '（' + p.sku + '）']))
+    const productNameMap = new Map(products.map((p) => [p.id, p.name + '（' + p.sku + '）']))
+
+    const totalOutboundQty = rows.reduce((sum, r) => sum + (r.delta < 0 ? -r.delta : 0), 0)
+    return {
+      orderNo: order.orderNo,
+      totalOutboundQty,
+      rows: rows.map((r) => ({
+        id: r.id,
+        itemType: r.itemType,
+        itemId: r.itemId,
+        itemName: r.itemType === 'part' ? (partNameMap.get(r.itemId) ?? '') : (productNameMap.get(r.itemId) ?? ''),
+        delta: r.delta,
+        balance: r.balance,
+        refType: r.refType,
+        refId: r.refId,
+        at: r.at,
+        orderNo: order.orderNo,
+      })),
+    }
   })
 }

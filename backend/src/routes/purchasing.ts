@@ -193,11 +193,15 @@ export function purchasingRoutes(app: FastifyInstance) {
 
     try {
       await prisma.$transaction(async (tx) => {
+        const purchaseOrder = await tx.purchaseOrder.findUnique({
+          where: { id: data.purchaseOrderId },
+          select: { salesOrderId: true },
+        })
         for (const item of data.items) {
           const receipt = await tx.receipt.create({
             data: { purchaseOrderId: data.purchaseOrderId, partId: item.partId, qty: item.qty },
           })
-          await applyStockChange(tx, 'part', item.partId, item.qty, 'receipt', receipt.id)
+          await applyStockChange(tx, 'part', item.partId, item.qty, 'receipt', receipt.id, purchaseOrder?.salesOrderId)
         }
       })
     } catch (err) {

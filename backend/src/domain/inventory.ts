@@ -6,7 +6,8 @@ export async function applyStockChange(
   itemId: number,
   delta: number,
   refType: string,
-  refId: number
+  refId: number,
+  salesOrderId?: number | null
 ): Promise<number> {
   const stock = await tx.stock.findUnique({ where: { itemType_itemId: { itemType, itemId } } })
   const current = stock?.qtyOnHand ?? 0
@@ -17,6 +18,8 @@ export async function applyStockChange(
     update: { qtyOnHand: next },
     create: { itemType, itemId, qtyOnHand: next }
   })
-  await tx.inventoryLedger.create({ data: { itemType, itemId, delta, balance: next, refType, refId } })
+  await tx.inventoryLedger.create({
+    data: { itemType, itemId, delta, balance: next, refType, refId, salesOrderId: salesOrderId ?? null }
+  })
   return next
 }

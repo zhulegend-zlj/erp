@@ -22,12 +22,16 @@ const productSchema = z.object({
   sku: z.string({ error: 'SKU 必填' }).min(1, 'SKU 必填'),
   name: z.string({ error: '名称必填' }).min(1, '名称必填'),
   unit: z.string().optional(),
+  imageUrl: z.string().nullable().optional(),
 })
 
 const partSchema = z.object({
   sku: z.string({ error: 'SKU 必填' }).min(1, 'SKU 必填'),
   name: z.string({ error: '名称必填' }).min(1, '名称必填'),
   unit: z.string().optional(),
+  spec: z.string().nullable().optional(),
+  imageUrl: z.string().nullable().optional(),
+  supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
 })
 
 const bomSchema = z.array(

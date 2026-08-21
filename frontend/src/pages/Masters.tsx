@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   Form,
+  Image,
   Input,
   InputNumber,
   Modal,
@@ -21,6 +22,8 @@ import { notifyError } from './common'
 interface CrudField {
   key: string
   label: string
+  type?: 'text' | 'supplier' | 'image'
+  required?: boolean
 }
 
 interface CrudResource {
@@ -30,6 +33,11 @@ interface CrudResource {
 }
 
 type CrudRow = { id: number } & Record<string, unknown>
+
+interface SupplierOption {
+  id: number
+  name: string
+}
 
 const RESOURCES: CrudResource[] = [
   {
@@ -56,6 +64,7 @@ const RESOURCES: CrudResource[] = [
       { key: 'sku', label: 'SKU' },
       { key: 'name', label: '名称' },
       { key: 'unit', label: '单位' },
+      { key: 'imageUrl', label: '图片地址', type: 'image' },
     ],
   },
   {
@@ -65,17 +74,21 @@ const RESOURCES: CrudResource[] = [
       { key: 'sku', label: 'SKU' },
       { key: 'name', label: '名称' },
       { key: 'unit', label: '单位' },
+      { key: 'spec', label: '规格' },
+      { key: 'imageUrl', label: '图片地址', type: 'image' },
+      { key: 'supplierId', label: '供应商', type: 'supplier' },
     ],
   },
 ]
 
 function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boolean }) {
   const [rows, setRows] = useState<CrudRow[]>([])
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
   const [loading, setLoading] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<CrudRow | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [form] = Form.useForm<Record<string, string>>()
+  const [form] = Form.useForm<Record<string, any>>()
 
   async function load() {
     setLoading(true)
@@ -93,6 +106,15 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
     void load()
   }, [resource.path])
 
+  useEffect(() => {
+    if (resource.path === '/parts') {
+      void api
+        .get<SupplierOption[]>('/suppliers')
+        .then(({ data }) => setSuppliers(data))
+        .catch(notifyError)
+    }
+  }, [resource.path])
+
   function openCreate() {
     setEditing(null)
     form.resetFields()
@@ -101,22 +123,32 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
 
   function openEdit(row: CrudRow) {
     setEditing(row)
-    const values: Record<string, string> = {}
+    const values: Record<string, any> = {}
     for (const f of resource.fields) {
-      values[f.key] = row[f.key] === null || row[f.key] === undefined ? '' : String(row[f.key])
+      const v = row[f.key]
+      values[f.key] = v === null || v === undefined ? undefined : v
     }
     form.setFieldsValue(values)
     setModalOpen(true)
   }
 
-  async function handleSubmit(values: Record<string, string>) {
+  async function handleSubmit(values: Record<string, any>) {
     setSubmitting(true)
+    const payload: Record<string, any> = { ...values }
+    for (const f of resource.fields) {
+      if (f.type === 'supplier') {
+        const v = payload[f.key]
+        payload[f.key] = v === '' || v === null || v === undefined ? null : Number(v)
+      } else if (f.type === 'image' || f.key === 'spec') {
+        if (payload[f.key] === '') payload[f.key] = null
+      }
+    }
     try {
       if (editing) {
-        await api.put(resource.path + '/' + editing.id, values)
+        await api.put(resource.path + '/' + editing.id, payload)
         message.success('已保存')
       } else {
-        await api.post(resource.path, values)
+        await api.post(resource.path, payload)
         message.success('已创建')
       }
       setModalOpen(false)
@@ -143,7 +175,17 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
       title: f.label,
       dataIndex: f.key,
       key: f.key,
-      render: (v: unknown) => (v === null || v === undefined || v === '' ? '-' : String(v)),
+      render: (v: unknown) => {
+        if (v === null || v === undefined || v === '') return '-'
+        if (f.type === 'image') {
+          return <Image src={String(v)} width={48} height={48} style={{ objectFit: 'cover' }} />
+        }
+        if (f.type === 'supplier') {
+          const supplier = suppliers.find((s) => s.id === Number(v))
+          return supplier ? supplier.name : String(v)
+        }
+        return String(v)
+      },
     })),
     ...(canWrite
       ? [
@@ -195,9 +237,19 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
               key={f.key}
               name={f.key}
               label={f.label}
-              rules={[{ required: true, message: '请输入' + f.label }]}
+              rules={f.type === 'supplier' || f.type === 'image' || f.key === 'spec'
+                ? []
+                : [{ required: true, message: '请输入' + f.label }]}
             >
-              <Input />
+              {f.type === 'supplier' ? (
+                <Select
+                  allowClear
+                  placeholder={'请选择' + f.label}
+                  options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+                />
+              ) : (
+                <Input placeholder={f.type === 'image' ? '图片 URL/路径（可选）' : undefined} />
+              )}
             </Form.Item>
           ))}
         </Form>
