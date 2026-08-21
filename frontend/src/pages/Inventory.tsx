@@ -59,6 +59,9 @@ interface LedgerRow {
 interface PartItemField {
   partId?: number
   qty?: number | null
+  lotNo?: string
+  qcStatus?: string
+  defectiveQty?: number | null
 }
 
 interface PurchaseOrderOption {
@@ -88,6 +91,9 @@ function ReceiptForm({ parts, onDone }: { parts: Part[]; onDone?: () => void }) 
         items: (values.items ?? []).map((it) => ({
           partId: Number(it.partId ?? 0),
           qty: Number(it.qty ?? 0),
+          lotNo: it.lotNo || null,
+          qcStatus: it.qcStatus || null,
+          defectiveQty: it.defectiveQty === undefined || it.defectiveQty === null ? 0 : Number(it.defectiveQty),
         })),
       })
       message.success('收货入库成功')
@@ -132,7 +138,7 @@ function ReceiptForm({ parts, onDone }: { parts: Part[]; onDone?: () => void }) 
         {(fields, { add, remove }) => (
           <>
             {fields.map((field) => (
-              <Space key={field.key} align="start" style={{ display: 'flex', marginBottom: 8 }}>
+              <Space key={field.key} align="start" style={{ display: 'flex', marginBottom: 8 }} wrap>
                 <Form.Item
                   name={[field.name, 'partId']}
                   rules={[{ required: true, message: '选择零件' }]}
@@ -150,6 +156,24 @@ function ReceiptForm({ parts, onDone }: { parts: Part[]; onDone?: () => void }) 
                   style={{ marginBottom: 0 }}
                 >
                   <InputNumber min={1} placeholder="数量" />
+                </Form.Item>
+                <Form.Item name={[field.name, 'lotNo']} style={{ marginBottom: 0 }}>
+                  <Input placeholder="来料单号（可选）" style={{ width: 160 }} />
+                </Form.Item>
+                <Form.Item name={[field.name, 'qcStatus']} style={{ marginBottom: 0 }}>
+                  <Select
+                    allowClear
+                    placeholder="QC"
+                    style={{ width: 110 }}
+                    options={[
+                      { value: 'ok', label: 'OK' },
+                      { value: 'pending', label: '待检' },
+                      { value: 'reject', label: '不良' },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name={[field.name, 'defectiveQty']} style={{ marginBottom: 0 }}>
+                  <InputNumber min={0} placeholder="不良品" style={{ width: 100 }} />
                 </Form.Item>
                 <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />
               </Space>
@@ -417,6 +441,7 @@ interface PoLedgerRow {
   name: string
   requiredQty: number
   receivedQty: number
+  defectiveQty: number
   outstanding: number
   balance: number
 }
@@ -494,8 +519,8 @@ function LedgerTab({
 
   useEffect(() => {
     if (refreshToken === undefined) return
-    if (mode === 'po') void queryPo()
-    else void queryItem()
+    if (mode === 'po' && poNo) void queryPo()
+    else if (mode === 'item' && itemId) void queryItem()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken])
 
@@ -590,6 +615,7 @@ function LedgerTab({
               },
               { title: '需求数', dataIndex: 'requiredQty', key: 'requiredQty' },
               { title: '已入库', dataIndex: 'receivedQty', key: 'receivedQty' },
+              { title: '不良品', dataIndex: 'defectiveQty', key: 'defectiveQty' },
               { title: '未到', dataIndex: 'outstanding', key: 'outstanding' },
               { title: '结存', dataIndex: 'balance', key: 'balance' },
             ]}

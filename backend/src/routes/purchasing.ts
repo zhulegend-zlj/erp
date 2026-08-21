@@ -30,6 +30,9 @@ const receiptSchema = z.object({
     z.object({
       partId: z.number({ error: '零件必填' }).int({ error: '零件必须为整数' }).positive({ error: '零件必须为正整数' }),
       qty: z.number({ error: '数量必填' }).int({ error: '数量必须为整数' }).positive({ error: '数量必须为正整数' }),
+      lotNo: z.string().nullable().optional(),
+      qcStatus: z.string().nullable().optional(),
+      defectiveQty: z.number({ error: '不良品数量必须为整数' }).int().nonnegative().nullable().optional(),
     }),
     { error: '明细必填' }
   ).min(1, '收货至少包含一个明细'),
@@ -277,7 +280,14 @@ export function purchasingRoutes(app: FastifyInstance) {
         })
         for (const item of data.items) {
           const receipt = await tx.receipt.create({
-            data: { purchaseOrderId: data.purchaseOrderId, partId: item.partId, qty: item.qty },
+            data: {
+              purchaseOrderId: data.purchaseOrderId,
+              partId: item.partId,
+              qty: item.qty,
+              lotNo: item.lotNo || null,
+              qcStatus: item.qcStatus || null,
+              defectiveQty: item.defectiveQty ?? 0,
+            },
           })
           await applyStockChange(tx, 'part', item.partId, item.qty, 'receipt', receipt.id, purchaseOrder?.salesOrderId)
         }

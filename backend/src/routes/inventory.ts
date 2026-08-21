@@ -278,16 +278,18 @@ export function inventoryRoutes(app: FastifyInstance) {
       prisma.receipt.groupBy({
         by: ['partId'],
         where: { purchaseOrderId: po.id, partId: { in: partIds } },
-        _sum: { qty: true },
+        _sum: { qty: true, defectiveQty: true },
       }),
       prisma.stock.findMany({ where: { itemType: 'part', itemId: { in: partIds } } }),
     ])
     const receivedMap = new Map(receiptGroups.map((g) => [g.partId, g._sum.qty ?? 0]))
+    const defectiveMap = new Map(receiptGroups.map((g) => [g.partId, g._sum.defectiveQty ?? 0]))
     const stockMap = new Map(stocks.map((s) => [s.itemId, s.qtyOnHand]))
 
     const items = po.items.map((item, index) => {
       const requiredQty = item.qty
       const receivedQty = receivedMap.get(item.partId) ?? 0
+      const defectiveQty = defectiveMap.get(item.partId) ?? 0
       return {
         seq: index + 1,
         partId: item.partId,
@@ -295,6 +297,7 @@ export function inventoryRoutes(app: FastifyInstance) {
         name: item.part.name,
         requiredQty,
         receivedQty,
+        defectiveQty,
         outstanding: Math.max(0, requiredQty - receivedQty),
         balance: stockMap.get(item.partId) ?? 0,
       }

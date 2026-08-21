@@ -145,6 +145,9 @@ model Receipt {
   part            Part     @relation(fields: [partId], references: [id])
   partId          Int
   qty             Int
+  lotNo           String?
+  qcStatus        String?
+  defectiveQty    Int      @default(0)
   receivedAt      DateTime @default(now())
   createdAt       DateTime @default(now())
 }
