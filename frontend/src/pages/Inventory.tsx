@@ -910,6 +910,109 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
   )
 }
 
+interface WarehouseLedgerRow {
+  id: number
+  at: string
+  itemType: string
+  sku: string
+  name: string
+  imageUrl: string
+  supplierName: string
+  spec: string
+  orderNo: string
+  lotNo: string
+  inQty: number
+  outQty: number
+  balance: number
+}
+
+function WarehouseLedgerTab() {
+  const [rows, setRows] = useState<WarehouseLedgerRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const [itemType, setItemType] = useState<string | undefined>()
+  const [keyword, setKeyword] = useState('')
+  const [orderNo, setOrderNo] = useState('')
+
+  async function load() {
+    setLoading(true)
+    try {
+      const { data } = await api.get<WarehouseLedgerRow[]>('/inventory/warehouse-ledger', {
+        params: { itemType: itemType || undefined, keyword: keyword || undefined, orderNo: orderNo || undefined },
+      })
+      setRows(data)
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <div>
+      <Space style={{ marginBottom: 16 }} wrap>
+        <Select
+          allowClear
+          placeholder="类型"
+          style={{ width: 140 }}
+          value={itemType}
+          onChange={setItemType}
+          options={[
+            { value: 'part', label: '零件' },
+            { value: 'product', label: '成品' },
+          ]}
+        />
+        <Input.Search
+          allowClear
+          placeholder="物料名称/料号"
+          style={{ width: 220 }}
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          onSearch={() => void load()}
+        />
+        <Input.Search
+          allowClear
+          placeholder="订单号"
+          style={{ width: 200 }}
+          value={orderNo}
+          onChange={(e) => setOrderNo(e.target.value)}
+          onSearch={() => void load()}
+        />
+        <Button onClick={() => void load()}>查询台账</Button>
+      </Space>
+      <Table<WarehouseLedgerRow>
+        rowKey="id"
+        loading={loading}
+        dataSource={rows}
+        pagination={{ pageSize: 10 }}
+        columns={[
+          { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr },
+          {
+            title: '图片',
+            dataIndex: 'imageUrl',
+            key: 'imageUrl',
+            render: (v: string) =>
+              v ? <Image src={v} width={36} height={36} style={{ objectFit: 'cover' }} /> : '-',
+          },
+          { title: '料号', dataIndex: 'sku', key: 'sku' },
+          { title: '物料名称', dataIndex: 'name', key: 'name' },
+          { title: '供应商', dataIndex: 'supplierName', key: 'supplierName' },
+          { title: '规格', dataIndex: 'spec', key: 'spec', render: (v: string) => v || '-' },
+          { title: '订单号', dataIndex: 'orderNo', key: 'orderNo', render: (v: string) => v || '-' },
+          { title: '来料单号', dataIndex: 'lotNo', key: 'lotNo', render: (v: string) => v || '-' },
+          { title: '入库', dataIndex: 'inQty', key: 'inQty' },
+          { title: '出库', dataIndex: 'outQty', key: 'outQty' },
+          { title: '结存', dataIndex: 'balance', key: 'balance' },
+        ]}
+      />
+    </div>
+  )
+}
+
 export default function Inventory() {
   const { user } = useAuth()
   const [orders, setOrders] = useState<SalesOrder[]>([])
@@ -981,6 +1084,7 @@ export default function Inventory() {
         />
       ),
     },
+    { key: 'warehouse-ledger', label: '收发台账', children: <WarehouseLedgerTab /> },
     { key: 'order-materials', label: '订单物料计算', children: <OrderMaterialsTab orders={orders} /> },
     {
       key: 'return-replenish',
