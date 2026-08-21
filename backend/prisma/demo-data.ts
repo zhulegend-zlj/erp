@@ -159,7 +159,51 @@ async function main() {
     })
   }
 
-  console.log('演示数据已注入：3 个成品 / 18 个零件 / 3 张销售订单')
+  // 7. 采购单 + 收付款（让采购/财务/看板都有数据）
+  for (const od of orderDefs) {
+    const order = await prisma.salesOrder.findUnique({ where: { orderNo: od.orderNo } })
+    if (!order) continue
+
+    const poNo = 'DEMO-PO-' + od.productSku
+    const existingPo = await prisma.purchaseOrder.findUnique({ where: { orderNo: poNo } })
+    const po =
+      existingPo ??
+      (await prisma.purchaseOrder.create({
+        data: {
+          orderNo: poNo,
+          supplierId: suppliers['广祺'],
+          salesOrderId: order.id,
+          status: 'open',
+          items: {
+            create: boms[od.productSku].map((partSku) => ({
+              partId: partIds[partSku],
+              qty: od.qty,
+              unitPrice: 5,
+            })),
+          },
+        },
+      }))
+
+    const supplierPaymentExists = await prisma.supplierPayment.findFirst({
+      where: { purchaseOrderId: po.id, amount: od.qty * 20 },
+    })
+    if (!supplierPaymentExists) {
+      await prisma.supplierPayment.create({
+        data: { supplierId: suppliers['广祺'], purchaseOrderId: po.id, amount: od.qty * 20 },
+      })
+    }
+
+    const customerPaymentExists = await prisma.customerPayment.findFirst({
+      where: { salesOrderId: order.id, amount: od.qty * 100 },
+    })
+    if (!customerPaymentExists) {
+      await prisma.customerPayment.create({
+        data: { customerId: order.customerId, salesOrderId: order.id, amount: od.qty * 100 },
+      })
+    }
+  }
+
+  console.log('演示数据已注入：3 个成品 / 18 个零件 / 3 张销售订单 / 3 张采购单 / 收付款')
 }
 
 main()
