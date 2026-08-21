@@ -92,7 +92,7 @@ describe('inventory', () => {
     expect(productRow).toMatchObject({ itemType: 'product', itemId: product.id, name: '成品柜', qtyOnHand: 8 })
   })
 
-  it('出入库流水按时间倒序返回', async () => {
+  it('出入库流水按时间升序返回', async () => {
     const part = await prisma.part.create({ data: { sku: 'P8-A', name: '木板' } })
     await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 100 } })
     const customer = await prisma.customer.create({ data: { name: '客户8' } })
@@ -118,8 +118,8 @@ describe('inventory', () => {
     expect(res.statusCode).toBe(200)
     const ledger = res.json()
     expect(ledger.length).toBeGreaterThanOrEqual(2)
-    expect(ledger[0].delta).toBe(-5)
-    expect(ledger[1].delta).toBe(-10)
+    expect(ledger[0].delta).toBe(-10)
+    expect(ledger[1].delta).toBe(-5)
   })
 
   it('非 warehouse 无权领料（403）', async () => {
@@ -198,5 +198,41 @@ describe('inventory', () => {
     expect(body.totalOutboundQty).toBe(10)
     expect(body.rows.length).toBeGreaterThanOrEqual(1)
     expect(body.rows[0]).toMatchObject({ itemType: 'part', itemId: part.id, delta: -10 })
+  })
+
+  it('采购单流水返回需求/已入库/未到/结存', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商-PO-LED' } })
+    const part = await prisma.part.create({ data: { sku: 'P-PO-LED', name: '采购零件' } })
+    const po = await prisma.purchaseOrder.create({
+      data: {
+        orderNo: 'PO-LED-TEST',
+        supplierId: supplier.id,
+        items: { create: { partId: part.id, qty: 100, unitPrice: 1 } }
+      }
+    })
+    await prisma.receipt.create({
+      data: { purchaseOrderId: po.id, partId: part.id, qty: 30 }
+    })
+    await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 30 } })
+
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    const res = await app.inject({
+      method: 'GET', url: '/api/inventory/po-ledger?purchaseOrderNo=' + po.orderNo, headers: { cookie }
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.purchaseOrderNo).toBe('PO-LED-TEST')
+    expect(body.supplierName).toBe('供应商-PO-LED')
+    expect(body.items).toHaveLength(1)
+    expect(body.items[0]).toMatchObject({
+      partId: part.id,
+      sku: 'P-PO-LED',
+      name: '采购零件',
+      requiredQty: 100,
+      receivedQty: 30,
+      outstanding: 70,
+      balance: 30,
+    })
   })
 })

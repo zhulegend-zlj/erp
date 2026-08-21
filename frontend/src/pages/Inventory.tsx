@@ -410,23 +410,21 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
   )
 }
 
-interface OrderLedgerRow {
-  id: number
-  itemType: string
-  itemId: number
-  itemName: string
-  delta: number
+interface PoLedgerRow {
+  seq: number
+  partId: number
+  sku: string
+  name: string
+  requiredQty: number
+  receivedQty: number
+  outstanding: number
   balance: number
-  refType: string
-  refId: number
-  at: string
-  orderNo: string
 }
 
-interface OrderLedgerResult {
-  orderNo: string
-  totalOutboundQty: number
-  rows: OrderLedgerRow[]
+interface PoLedgerResult {
+  purchaseOrderNo: string
+  supplierName: string
+  items: PoLedgerRow[]
 }
 
 function signedDelta(v: number): string {
@@ -436,64 +434,68 @@ function signedDelta(v: number): string {
 function LedgerTab({
   parts,
   products,
-  orders,
+  purchaseOrders,
   refreshToken,
 }: {
   parts: Part[]
   products: Product[]
-  orders: SalesOrder[]
+  purchaseOrders: PurchaseOrderOption[]
   refreshToken?: number
 }) {
+  const [mode, setMode] = useState<'item' | 'po'>('item')
   const [itemType, setItemType] = useState<'part' | 'product'>('part')
   const [itemId, setItemId] = useState<number | undefined>()
-  const [rows, setRows] = useState<LedgerRow[]>([])
-  const [loading, setLoading] = useState(false)
-  const [orderNo, setOrderNo] = useState<string | undefined>()
-  const [orderResult, setOrderResult] = useState<OrderLedgerResult | null>(null)
-  const [orderLoading, setOrderLoading] = useState(false)
+  const [itemRows, setItemRows] = useState<LedgerRow[]>([])
+  const [itemLoading, setItemLoading] = useState(false)
+  const [poNo, setPoNo] = useState<string | undefined>()
+  const [poResult, setPoResult] = useState<PoLedgerResult | null>(null)
+  const [poLoading, setPoLoading] = useState(false)
 
   const options = itemType === 'part' ? parts : products
+  const selectedItem = options.find((p) => p.id === itemId)
 
   async function queryItem() {
     if (!itemId) {
       message.warning('请先选择' + (itemType === 'part' ? '零件' : '成品'))
       return
     }
-    setLoading(true)
+    setMode('item')
+    setItemLoading(true)
     try {
       const { data } = await api.get<LedgerRow[]>('/stock/ledger', {
         params: { itemType, itemId },
       })
-      setRows(data)
+      setItemRows(data)
     } catch (err) {
       notifyError(err)
     } finally {
-      setLoading(false)
+      setItemLoading(false)
     }
   }
 
-  async function queryOrder() {
-    if (!orderNo) {
-      message.warning('请先选择订单号')
+  async function queryPo() {
+    if (!poNo) {
+      message.warning('请先选择采购单')
       return
     }
-    setOrderLoading(true)
+    setMode('po')
+    setPoLoading(true)
     try {
-      const { data } = await api.get<OrderLedgerResult>('/inventory/order-ledger', {
-        params: { orderNo },
+      const { data } = await api.get<PoLedgerResult>('/inventory/po-ledger', {
+        params: { purchaseOrderNo: poNo },
       })
-      setOrderResult(data)
+      setPoResult(data)
     } catch (err) {
       notifyError(err)
     } finally {
-      setOrderLoading(false)
+      setPoLoading(false)
     }
   }
 
   useEffect(() => {
     if (refreshToken === undefined) return
-    if (orderNo) void queryOrder()
-    else if (itemId) void queryItem()
+    if (mode === 'po') void queryPo()
+    else void queryItem()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken])
 
@@ -502,11 +504,11 @@ function LedgerTab({
       <Space style={{ marginBottom: 16 }} wrap>
         <Select
           value={itemType}
-          style={{ width: 140 }}
+          style={{ width: 120 }}
           onChange={(v) => {
             setItemType(v)
             setItemId(undefined)
-            setRows([])
+            setItemRows([])
           }}
           options={[
             { value: 'part', label: '零件' },
@@ -515,78 +517,85 @@ function LedgerTab({
         />
         <Select
           placeholder="选择物料"
-          style={{ width: 280 }}
+          style={{ width: 260 }}
           value={itemId}
           onChange={(v) => setItemId(v)}
           options={options.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
         />
         <Button onClick={() => void queryItem()}>查询流水</Button>
+      </Space>
+
+      <Space style={{ marginBottom: 16 }} wrap>
         <Select
           showSearch
-          placeholder="按订单号查询"
-          style={{ width: 280 }}
-          value={orderNo}
+          placeholder="按采购单查询"
+          style={{ width: 300 }}
+          value={poNo}
           onChange={(v) => {
-            setOrderNo(v)
-            setOrderResult(null)
+            setPoNo(v)
+            setPoResult(null)
           }}
           optionFilterProp="label"
-          options={orders.map((o) => ({ value: o.orderNo, label: o.orderNo }))}
+          options={purchaseOrders.map((po) => ({
+            value: po.orderNo,
+            label: po.orderNo + '（' + po.supplierName + '）',
+          }))}
         />
-        <Button type="primary" onClick={() => void queryOrder()}>
-          查询订单流水
+        <Button type="primary" onClick={() => void queryPo()}>
+          查询采购单流水
         </Button>
       </Space>
 
-      {orderResult ? (
+      {mode === 'item' ? (
+        <Table<LedgerRow>
+          rowKey="id"
+          loading={itemLoading}
+          dataSource={itemRows}
+          pagination={{ pageSize: 10 }}
+          columns={[
+            { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr },
+            {
+              title: '物料',
+              key: 'material',
+              render: () => (selectedItem ? selectedItem.name + '（' + selectedItem.sku + '）' : '-'),
+            },
+            {
+              title: '变动',
+              dataIndex: 'delta',
+              key: 'delta',
+              render: (v: number) => signedDelta(v),
+            },
+            { title: '结存', dataIndex: 'balance', key: 'balance' },
+          ]}
+        />
+      ) : poResult ? (
         <>
           <Alert
             type="info"
             showIcon
             style={{ marginBottom: 12 }}
-            message={'订单 ' + orderResult.orderNo + ' 已出库合计：' + orderResult.totalOutboundQty}
+            message={'采购单 ' + poResult.purchaseOrderNo + '（' + poResult.supplierName + '）'}
           />
-          <Table<OrderLedgerRow>
-            rowKey="id"
-            loading={orderLoading}
-            dataSource={orderResult.rows}
+          <Table<PoLedgerRow>
+            rowKey="partId"
+            loading={poLoading}
+            dataSource={poResult.items}
             pagination={{ pageSize: 10 }}
-            style={{ marginBottom: 24 }}
             columns={[
-              { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr },
-              { title: '物料', dataIndex: 'itemName', key: 'itemName' },
+              { title: '序号', dataIndex: 'seq', key: 'seq', width: 70 },
               {
-                title: '变动',
-                dataIndex: 'delta',
-                key: 'delta',
-                render: (v: number) => signedDelta(v),
+                title: '料号+物料名称',
+                key: 'material',
+                render: (_: unknown, r: PoLedgerRow) => r.sku + ' ' + r.name,
               },
+              { title: '需求数', dataIndex: 'requiredQty', key: 'requiredQty' },
+              { title: '已入库', dataIndex: 'receivedQty', key: 'receivedQty' },
+              { title: '未到', dataIndex: 'outstanding', key: 'outstanding' },
               { title: '结存', dataIndex: 'balance', key: 'balance' },
-              { title: '来源类型', dataIndex: 'refType', key: 'refType' },
-              { title: '来源 ID', dataIndex: 'refId', key: 'refId' },
             ]}
           />
         </>
       ) : null}
-
-      <Table<LedgerRow>
-        rowKey="id"
-        loading={loading}
-        dataSource={rows}
-        pagination={{ pageSize: 10 }}
-        columns={[
-          { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr },
-          {
-            title: '变动',
-            dataIndex: 'delta',
-            key: 'delta',
-            render: (v: number) => signedDelta(v),
-          },
-          { title: '结存', dataIndex: 'balance', key: 'balance' },
-          { title: '来源类型', dataIndex: 'refType', key: 'refType' },
-          { title: '来源 ID', dataIndex: 'refId', key: 'refId' },
-        ]}
-      />
     </div>
   )
 }
@@ -704,6 +713,7 @@ export default function Inventory() {
   const [orders, setOrders] = useState<SalesOrder[]>([])
   const [parts, setParts] = useState<Part[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderOption[]>([])
   const [refreshToken, setRefreshToken] = useState(0)
 
   useEffect(() => {
@@ -711,11 +721,13 @@ export default function Inventory() {
       api.get<SalesOrder[]>('/orders'),
       api.get<Part[]>('/parts'),
       api.get<Product[]>('/products'),
+      api.get<PurchaseOrderOption[]>('/purchase-orders'),
     ])
-      .then(([o, pt, pd]) => {
+      .then(([o, pt, pd, po]) => {
         setOrders(o.data)
         setParts(pt.data)
         setProducts(pd.data)
+        setPurchaseOrders(po.data)
       })
       .catch(notifyError)
   }, [])
@@ -758,7 +770,14 @@ export default function Inventory() {
     {
       key: 'ledger',
       label: '流水',
-      children: <LedgerTab parts={parts} products={products} orders={orders} refreshToken={refreshToken} />,
+      children: (
+        <LedgerTab
+          parts={parts}
+          products={products}
+          purchaseOrders={purchaseOrders}
+          refreshToken={refreshToken}
+        />
+      ),
     },
     { key: 'order-materials', label: '订单物料计算', children: <OrderMaterialsTab orders={orders} /> },
   ]

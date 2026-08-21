@@ -136,7 +136,7 @@ export function inventoryRoutes(app: FastifyInstance) {
     return rows
   })
 
-  // 出入库流水：5 角色均可查，按时间倒序
+  // 出入库流水：5 角色均可查，按时间升序（早→晚）
   app.get('/api/stock/ledger', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
     const raw = req.query as { itemType?: string; itemId?: string }
     const itemType = raw.itemType
@@ -146,7 +146,7 @@ export function inventoryRoutes(app: FastifyInstance) {
     }
     return prisma.inventoryLedger.findMany({
       where: { itemType, itemId },
-      orderBy: [{ at: 'desc' }, { id: 'desc' }],
+      orderBy: [{ at: 'asc' }, { id: 'asc' }],
     })
   })
 
@@ -222,7 +222,7 @@ export function inventoryRoutes(app: FastifyInstance) {
 
     const rows = await prisma.inventoryLedger.findMany({
       where: { salesOrderId: order.id },
-      orderBy: [{ at: 'desc' }, { id: 'desc' }],
+      orderBy: [{ at: 'asc' }, { id: 'asc' }],
     })
 
     const partIds = [...new Set(rows.filter((r) => r.itemType === 'part').map((r) => r.itemId))]
@@ -251,5 +251,55 @@ export function inventoryRoutes(app: FastifyInstance) {
         orderNo: order.orderNo,
       })),
     }
+  })
+
+  // 采购单流水：按采购单号查询每个零件的收货情况
+  app.get('/api/inventory/po-ledger', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
+    const raw = (req.query as { purchaseOrderNo?: string }).purchaseOrderNo
+    if (!raw || !raw.trim()) {
+      return reply.code(400).send({ error: 'purchaseOrderNo 必填' })
+    }
+    const purchaseOrderNo = raw.trim()
+
+    const po = await prisma.purchaseOrder.findUnique({
+      where: { orderNo: purchaseOrderNo },
+      include: {
+        supplier: { select: { name: true } },
+        items: {
+          include: { part: { select: { id: true, sku: true, name: true } } },
+          orderBy: { partId: 'asc' as const },
+        },
+      },
+    })
+    if (!po) return reply.code(404).send({ error: '采购单不存在' })
+
+    const partIds = po.items.map((item) => item.partId)
+    const [receiptGroups, stocks] = await Promise.all([
+      prisma.receipt.groupBy({
+        by: ['partId'],
+        where: { purchaseOrderId: po.id, partId: { in: partIds } },
+        _sum: { qty: true },
+      }),
+      prisma.stock.findMany({ where: { itemType: 'part', itemId: { in: partIds } } }),
+    ])
+    const receivedMap = new Map(receiptGroups.map((g) => [g.partId, g._sum.qty ?? 0]))
+    const stockMap = new Map(stocks.map((s) => [s.itemId, s.qtyOnHand]))
+
+    const items = po.items.map((item, index) => {
+      const requiredQty = item.qty
+      const receivedQty = receivedMap.get(item.partId) ?? 0
+      return {
+        seq: index + 1,
+        partId: item.partId,
+        sku: item.part.sku,
+        name: item.part.name,
+        requiredQty,
+        receivedQty,
+        outstanding: Math.max(0, requiredQty - receivedQty),
+        balance: stockMap.get(item.partId) ?? 0,
+      }
+    })
+
+    return { purchaseOrderNo: po.orderNo, supplierName: po.supplier.name, items }
   })
 }
