@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'antd'
+import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, message } from 'antd'
 import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { dateStr, nextStatus, notifyError, statusColor, statusLabel } from './common'
+import { dateStr, nextStatus, notifyError, prevStatus, statusColor, statusLabel } from './common'
 
 interface Customer {
   id: number
@@ -114,11 +114,11 @@ export default function Orders() {
     }
   }
 
-  async function handleAdvance(id: number, status: string) {
+  async function handleStatusChange(id: number, status: string, action: 'advance' | 'rollback') {
     setAdvancingId(id)
     try {
       await api.patch('/orders/' + id + '/status', { status })
-      message.success('订单已推进至「' + statusLabel(status) + '」')
+      message.success(action === 'advance' ? '订单已推进至「' + statusLabel(status) + '」' : '订单已回退至「' + statusLabel(status) + '」')
       await load()
     } catch (err) {
       notifyError(err)
@@ -153,17 +153,41 @@ export default function Orders() {
       key: 'action',
       render: (_: unknown, r: SalesOrder) => {
         const next = nextStatus(r.status)
-        if (!next || !canAdvance) return null
+        const prev = prevStatus(r.status)
+        if (!canAdvance) return null
         return (
-          <Button
-            size="small"
-            type="primary"
-            ghost
-            loading={advancingId === r.id}
-            onClick={() => void handleAdvance(r.id, next)}
-          >
-            推进至「{statusLabel(next)}」
-          </Button>
+          <Space>
+            {next ? (
+              <Popconfirm
+                title={'确认推进到「' + statusLabel(next) + '」？'}
+                okText="确认推进"
+                cancelText="取消"
+                onConfirm={() => void handleStatusChange(r.id, next, 'advance')}
+              >
+                <Button
+                  size="small"
+                  type="primary"
+                  ghost
+                  loading={advancingId === r.id}
+                >
+                  推进至「{statusLabel(next)}」
+                </Button>
+              </Popconfirm>
+            ) : null}
+            {prev ? (
+              <Popconfirm
+                title={'确认回退到「' + statusLabel(prev) + '」？'}
+                okText="确认回退"
+                cancelText="取消"
+                onConfirm={() => void handleStatusChange(r.id, prev, 'rollback')}
+              >
+                <Button size="small" loading={advancingId === r.id}>
+                  回退至「{statusLabel(prev)}」
+                </Button>
+              </Popconfirm>
+            ) : null}
+            {!next && !prev ? <span>-</span> : null}
+          </Space>
         )
       },
     },

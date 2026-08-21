@@ -7,11 +7,12 @@ import { parsePositiveInt } from '../errors'
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 
 // 状态机：draft → confirmed → in_production → ready → shipped → completed
+// 允许在未出货前回退一步（confirmed/in_production/ready 可退回上一状态）
 const STATUS_FLOW: Record<string, string[]> = {
   draft: ['confirmed'],
-  confirmed: ['in_production'],
-  in_production: ['ready'],
-  ready: ['shipped'],
+  confirmed: ['in_production', 'draft'],
+  in_production: ['ready', 'confirmed'],
+  ready: ['shipped', 'in_production'],
   shipped: ['completed'],
   completed: [],
 }

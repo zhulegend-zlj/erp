@@ -190,4 +190,44 @@ describe('orders', () => {
     })
     expect(bad.statusCode).toBe(400)
   })
+
+  it('未出货前可回退一步', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/orders',
+      headers: { cookie },
+      payload: {
+        customerId: customer.id,
+        deliveryDate: '2026-09-30',
+        items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
+      }
+    })
+    const orderId = createRes.json().id
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/orders/${orderId}/status`,
+      headers: { cookie },
+      payload: { status: 'confirmed' }
+    })
+    const toProduction = await app.inject({
+      method: 'PATCH',
+      url: `/api/orders/${orderId}/status`,
+      headers: { cookie },
+      payload: { status: 'in_production' }
+    })
+    expect(toProduction.statusCode).toBe(200)
+    expect(toProduction.json().status).toBe('in_production')
+
+    const rollback = await app.inject({
+      method: 'PATCH',
+      url: `/api/orders/${orderId}/status`,
+      headers: { cookie },
+      payload: { status: 'confirmed' }
+    })
+    expect(rollback.statusCode).toBe(200)
+    expect(rollback.json().status).toBe('confirmed')
+  })
 })

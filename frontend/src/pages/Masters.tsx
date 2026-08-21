@@ -220,9 +220,20 @@ interface Part {
   unit: string
 }
 
+interface BomItem {
+  id: number
+  productId: number
+  partId: number
+  qty: number
+  part: { id: number; sku: string; name: string }
+}
+
 interface BomRow {
+  id?: number
   partId?: number
   qty?: number | null
+  partName?: string
+  sku?: string
 }
 
 function BomTab({ canWrite }: { canWrite: boolean }) {
@@ -258,11 +269,20 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
       return
     }
     setLoading(true)
+    void refreshParts()
     api
-      .get<Array<{ id: number; productId: number; partId: number; qty: number }>>(
-        '/products/' + productId + '/bom',
+      .get<BomItem[]>('/products/' + productId + '/bom')
+      .then(({ data }) =>
+        setRows(
+          data.map((b) => ({
+            id: b.id,
+            partId: b.partId,
+            qty: b.qty,
+            partName: b.part.name,
+            sku: b.part.sku,
+          })),
+        ),
       )
-      .then(({ data }) => setRows(data.map((b) => ({ partId: b.partId, qty: b.qty }))))
       .catch(notifyError)
       .finally(() => setLoading(false))
   }, [productId])
@@ -283,10 +303,16 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
     try {
       await api.put('/products/' + productId + '/bom', items)
       message.success('BOM 已保存')
-      const { data } = await api.get<Array<{ id: number; productId: number; partId: number; qty: number }>>(
-        '/products/' + productId + '/bom',
+      const { data } = await api.get<BomItem[]>('/products/' + productId + '/bom')
+      setRows(
+        data.map((b) => ({
+          id: b.id,
+          partId: b.partId,
+          qty: b.qty,
+          partName: b.part.name,
+          sku: b.part.sku,
+        })),
       )
-      setRows(data.map((b) => ({ partId: b.partId, qty: b.qty })))
     } catch (err) {
       notifyError(err)
     } finally {
@@ -317,7 +343,10 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
         <Space style={{ marginBottom: 8 }}>
           <Button
             icon={<PlusOutlined />}
-            onClick={() => setRows((prev) => [...prev, {}])}
+            onClick={() => {
+              void refreshParts()
+              setRows((prev) => [...prev, {}])
+            }}
           >
             添加零件
           </Button>
@@ -332,19 +361,24 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
           {
             title: '零件',
             key: 'partId',
-            render: (_: unknown, r: BomRow, index: number) => (
-              <Select
-                style={{ width: 280 }}
-                placeholder="选择零件"
-                value={r.partId}
-                disabled={!canWrite}
-                onChange={(v) => updateRow(index, { partId: v })}
-                onDropdownVisibleChange={(open) => {
-                  if (open) void refreshParts()
-                }}
-                options={parts.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
-              />
-            ),
+            render: (_: unknown, r: BomRow, index: number) => {
+              if (r.id) {
+                return <span>{r.partName || r.partId}{r.sku ? '（' + r.sku + '）' : ''}</span>
+              }
+              return (
+                <Select
+                  style={{ width: 280 }}
+                  placeholder="选择零件"
+                  value={r.partId}
+                  disabled={!canWrite}
+                  onChange={(v) => updateRow(index, { partId: v })}
+                  onDropdownVisibleChange={(open) => {
+                    if (open) void refreshParts()
+                  }}
+                  options={parts.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
+                />
+              )
+            },
           },
           {
             title: '用量',

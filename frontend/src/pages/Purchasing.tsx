@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Alert,
   Button,
@@ -71,6 +72,7 @@ interface PurchaseOrderRow {
 
 export default function Purchasing() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [orders, setOrders] = useState<SalesOrder[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [orderId, setOrderId] = useState<number | undefined>()
@@ -149,6 +151,26 @@ export default function Purchasing() {
   return (
     <div>
       <Card title="采购需求" style={{ marginBottom: 16 }}>
+        {orders.length === 0 ? (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="暂无销售订单"
+            description={
+              <span>
+                销售订单由销售或老板在「订单」页面创建；当前账号只能查看和基于订单生成采购单。
+                {user?.role === 'boss' ? (
+                  <Button type="link" style={{ paddingLeft: 8 }} onClick={() => navigate('/orders')}>
+                    去订单页
+                  </Button>
+                ) : (
+                  '请联系销售或老板先录入销售订单。'
+                )}
+              </span>
+            }
+          />
+        ) : null}
         <Space style={{ marginBottom: 16 }}>
           <Select
             placeholder="选择销售订单"

@@ -70,6 +70,17 @@ const STATUS_FLOW: Record<string, string> = {
   shipped: 'completed',
 }
 
+// 未出货前允许回退一步
+const PREV_STATUS: Record<string, string> = {
+  confirmed: 'draft',
+  in_production: 'confirmed',
+  ready: 'in_production',
+}
+
 export function nextStatus(status: string): string | null {
   return STATUS_FLOW[status] ?? null
+}
+
+export function prevStatus(status: string): string | null {
+  return PREV_STATUS[status] ?? null
 }

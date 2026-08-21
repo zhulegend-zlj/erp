@@ -104,7 +104,11 @@ export function mastersRoutes(app: FastifyInstance) {
   app.get('/api/products/:id/bom', { preHandler: requireRole(...READ_ROLES) }, async (req, reply) => {
     const productId = parseId(req as { params: { id: string } }, reply)
     if (productId === null) return
-    return prisma.bom.findMany({ where: { productId }, orderBy: { partId: 'asc' } })
+    return prisma.bom.findMany({
+      where: { productId },
+      orderBy: { partId: 'asc' },
+      include: { part: { select: { id: true, sku: true, name: true } } },
+    })
   })
 
   app.put('/api/products/:id/bom', { preHandler: requireRole(...WRITE_ROLES) }, async (req, reply) => {
@@ -116,7 +120,11 @@ export function mastersRoutes(app: FastifyInstance) {
       prisma.bom.deleteMany({ where: { productId } }),
       prisma.bom.createMany({ data: items.map((item) => ({ productId, ...item })) }),
     ])
-    const boms = await prisma.bom.findMany({ where: { productId }, orderBy: { partId: 'asc' } })
+    const boms = await prisma.bom.findMany({
+      where: { productId },
+      orderBy: { partId: 'asc' },
+      include: { part: { select: { id: true, sku: true, name: true } } },
+    })
     return reply.code(200).send(boms)
   })
 }
