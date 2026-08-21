@@ -133,6 +133,41 @@ describe('masters 权限（工程/采购分工）', () => {
     expect(Array.isArray(list.json())).toBe(true)
   })
 
+  it('零件列表按 SKU 前缀分组、组内数字升序排序', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'engineer')
+    // 故意乱序创建：覆盖「同前缀数字升序（含非补零）」与「不同前缀分组」
+    const skus = ['P1927-14873', 'CSS-012', 'CSS-1', 'CSS-014', 'P1927-14872', 'CSP-003', 'SUP-10345']
+    for (const sku of skus) {
+      const res = await app.inject({
+        method: 'POST', url: '/api/parts', headers: { cookie },
+        payload: { sku, name: '零件' + sku, unit: '个' }
+      })
+      expect(res.statusCode).toBe(200)
+    }
+    const list = await app.inject({ method: 'GET', url: '/api/parts', headers: { cookie } })
+    expect(list.statusCode).toBe(200)
+    const order = (list.json() as { sku: string }[]).map((p) => p.sku)
+    // 前缀组按字母序：csp < css < p < sup；组内数字升序（1 < 12 < 14；14872 < 14873）
+    expect(order).toEqual(['CSP-003', 'CSS-1', 'CSS-012', 'CSS-014', 'P1927-14872', 'P1927-14873', 'SUP-10345'])
+  })
+
+  it('零件列表分页时保持同一排序', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'engineer')
+    for (const sku of ['CSS-2', 'CSS-1', 'CSS-3']) {
+      const res = await app.inject({
+        method: 'POST', url: '/api/parts', headers: { cookie },
+        payload: { sku, name: '零件' + sku, unit: '个' }
+      })
+      expect(res.statusCode).toBe(200)
+    }
+    const page1 = await app.inject({ method: 'GET', url: '/api/parts?page=1&pageSize=2', headers: { cookie } })
+    expect(page1.statusCode).toBe(200)
+    expect((page1.json().items as { sku: string }[]).map((p) => p.sku)).toEqual(['CSS-1', 'CSS-2'])
+    expect(page1.json().total).toBe(3)
+  })
+
   it('warehouse 无权创建零件（403）', async () => {
     const app = buildApp()
     const cookie = await loginCookie(app, 'warehouse')

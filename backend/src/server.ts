@@ -29,7 +29,7 @@ export function buildApp() {
     return reply.code(500).send({ error: '服务器错误：' + message })
   })
   app.register(cookie)
-  app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024, files: 1 } })
+  app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024, files: 1 } })
 
   const uploadDir = resolve(process.cwd(), 'uploads')
   mkdirSync(uploadDir, { recursive: true })

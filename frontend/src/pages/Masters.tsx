@@ -15,7 +15,7 @@ import {
   Upload,
   message,
 } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, LinkOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, DeleteOutlined, LinkOutlined, UploadOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { notifyError } from './common'
@@ -24,7 +24,7 @@ import type { Paged } from './common'
 interface CrudField {
   key: string
   label: string
-  type?: 'text' | 'supplier' | 'image' | 'number'
+  type?: 'text' | 'supplier' | 'image' | 'number' | 'drawing'
   required?: boolean
 }
 
@@ -39,6 +39,59 @@ type CrudRow = { id: number } & Record<string, unknown>
 interface SupplierOption {
   id: number
   name: string
+}
+
+const DRAWING_ACCEPT = '.pdf,.dwg,.dxf,.step,.stp,.igs,.zip,.xlsx,.jpg,.jpeg,.png,.webp,.gif,.svg'
+
+// 图档上传：pdf/dwg/dxf/step/stp/igs/zip/xlsx 或图片，上传后保存 /uploads 地址
+function FileUpload({
+  value,
+  onChange,
+}: {
+  value?: string
+  onChange?: (v: string | null) => void
+}) {
+  async function customRequest(options: any) {
+    const formData = new FormData()
+    formData.append('file', options.file)
+    try {
+      const { data } = await api.post<{ url: string }>('/uploads', formData)
+      onChange?.(data.url)
+      options.onSuccess?.(data)
+      message.success('图档已上传')
+    } catch (err) {
+      notifyError(err)
+      options.onError?.(err)
+    }
+  }
+
+  return (
+    <div>
+      <Upload accept={DRAWING_ACCEPT} maxCount={1} customRequest={customRequest} showUploadList={false}>
+        <Button icon={<UploadOutlined />}>{value ? '重新上传图档' : '上传图档'}</Button>
+      </Upload>
+      {value ? (
+        <div style={{ marginTop: 8 }}>
+          <a href={value} target="_blank" rel="noreferrer">
+            打开已上传图档
+          </a>
+          <Button
+            type="link"
+            danger
+            size="small"
+            style={{ marginLeft: 12 }}
+            onClick={() => onChange?.(null)}
+          >
+            移除
+          </Button>
+        </div>
+      ) : (
+        <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
+          支持 pdf/dwg/dxf/step/stp/igs/zip/xlsx 及图片，单个文件 ≤ 20MB
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ImageUpload({
@@ -121,7 +174,7 @@ const RESOURCES: CrudResource[] = [
       { key: 'unit', label: '单位' },
       { key: 'spec', label: '规格' },
       { key: 'imageUrl', label: '图片地址', type: 'image' },
-      { key: 'drawingsUrl', label: '图档地址' },
+      { key: 'drawingsUrl', label: '图档地址', type: 'drawing' },
       { key: 'tooling', label: '模具' },
       { key: 'moq', label: 'MOQ', type: 'number' },
       { key: 'price', label: '价格', type: 'number' },
@@ -274,6 +327,13 @@ function CrudTab({
         if (f.type === 'image') {
           return <Image src={String(v)} width={48} height={48} style={{ objectFit: 'cover' }} />
         }
+        if (f.type === 'drawing') {
+          return (
+            <a href={String(v)} target="_blank" rel="noreferrer">
+              打开图档
+            </a>
+          )
+        }
         if (f.type === 'supplier') {
           const supplier = suppliers.find((s) => s.id === Number(v))
           return supplier ? supplier.name : String(v)
@@ -361,6 +421,8 @@ function CrudTab({
                 />
               ) : f.type === 'image' ? (
                 <ImageUpload />
+              ) : f.type === 'drawing' ? (
+                <FileUpload />
               ) : f.type === 'number' ? (
                 <InputNumber min={0} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
               ) : (

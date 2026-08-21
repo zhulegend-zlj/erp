@@ -1,0 +1,9 @@
+# 本地运行日志
+*.log
+
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 上传文件（图片/图档）
+backend/uploads/
