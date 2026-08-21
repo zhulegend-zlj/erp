@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { parsePositiveInt } from '../errors'
+import { parsePagination, pagedResult } from '../pagination'
 
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 
@@ -54,6 +55,7 @@ async function generateOrderNo(): Promise<string> {
 }
 
 const ITEMS_INCLUDE = {
+  customer: { select: { name: true } },
   items: {
     include: { product: { select: { id: true, sku: true, name: true } } },
     orderBy: { id: 'asc' as const },
@@ -92,9 +94,25 @@ export function ordersRoutes(app: FastifyInstance) {
     return reply.code(200).send(order)
   })
 
-  // 5 角色均可查看列表
-  app.get('/api/orders', { preHandler: requireRole(...ALL_ROLES) }, async () => {
-    return prisma.salesOrder.findMany({ orderBy: { id: 'desc' }, include: ITEMS_INCLUDE })
+  // 5 角色均可查看列表；可选 page/pageSize 分页
+  app.get('/api/orders', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
+    const pagination = parsePagination(req.query as Record<string, unknown>)
+    if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
+    const orderBy = { id: 'desc' as const }
+    if (pagination.kind === 'none') {
+      return prisma.salesOrder.findMany({ orderBy, include: ITEMS_INCLUDE })
+    }
+    const page = pagination.page
+    const [rows, total] = await Promise.all([
+      prisma.salesOrder.findMany({
+        orderBy,
+        include: ITEMS_INCLUDE,
+        skip: (page.page - 1) * page.pageSize,
+        take: page.pageSize,
+      }),
+      prisma.salesOrder.count(),
+    ])
+    return pagedResult(rows, total, page)
   })
 
   // 5 角色均可查看详情（含 items 与 product 名称）

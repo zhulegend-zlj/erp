@@ -15,10 +15,11 @@ import {
   Upload,
   message,
 } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, DeleteOutlined, LinkOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { notifyError } from './common'
+import type { Paged } from './common'
 
 interface CrudField {
   key: string
@@ -129,20 +130,40 @@ const RESOURCES: CrudResource[] = [
   },
 ]
 
-function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boolean }) {
+function CrudTab({
+  resource,
+  canWrite,
+  linkSupplierOnly,
+}: {
+  resource: CrudResource
+  canWrite: boolean
+  /** 采购在零件页的特殊模式：只能给零件挂供应商，不能增删改其他字段 */
+  linkSupplierOnly?: boolean
+}) {
   const [rows, setRows] = useState<CrudRow[]>([])
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
   const [loading, setLoading] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<CrudRow | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkingRow, setLinkingRow] = useState<CrudRow | null>(null)
+  const [linkSupplierId, setLinkSupplierId] = useState<number | undefined>()
+  const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [form] = Form.useForm<Record<string, any>>()
+  const pageSize = 10
 
-  async function load() {
+  async function load(targetPage = 1) {
     setLoading(true)
     try {
-      const { data } = await api.get<CrudRow[]>(resource.path)
-      setRows(data)
+      const { data } = await api.get<Paged<CrudRow>>(resource.path, {
+        params: { page: targetPage, pageSize },
+      })
+      setRows(data.items)
+      setTotal(data.total)
+      setPage(data.page)
     } catch (err) {
       notifyError(err)
     } finally {
@@ -151,7 +172,8 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
   }
 
   useEffect(() => {
-    void load()
+    void load(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resource.path])
 
   useEffect(() => {
@@ -218,6 +240,30 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
     }
   }
 
+  function openLink(row: CrudRow) {
+    setLinkingRow(row)
+    const v = row.supplierId
+    setLinkSupplierId(typeof v === 'number' ? v : undefined)
+    setLinkOpen(true)
+  }
+
+  async function submitLink() {
+    if (!linkingRow) return
+    setLinkSubmitting(true)
+    try {
+      await api.put(resource.path + '/' + linkingRow.id, {
+        supplierId: linkSupplierId ?? null,
+      })
+      message.success('供应商已更新')
+      setLinkOpen(false)
+      await load()
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setLinkSubmitting(false)
+    }
+  }
+
   const columns = [
     ...resource.fields.map((f) => ({
       title: f.label,
@@ -235,26 +281,38 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
         return String(v)
       },
     })),
-    ...(canWrite
+    ...(linkSupplierOnly
       ? [
           {
             title: '操作',
             key: 'action',
             render: (_: unknown, row: CrudRow) => (
-              <Space>
-                <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
-                  编辑
-                </Button>
-                <Popconfirm title="确认删除？" onConfirm={() => void handleDelete(row)}>
-                  <Button size="small" danger icon={<DeleteOutlined />}>
-                    删除
-                  </Button>
-                </Popconfirm>
-              </Space>
+              <Button size="small" icon={<LinkOutlined />} onClick={() => openLink(row)}>
+                关联供应商
+              </Button>
             ),
           },
         ]
-      : []),
+      : canWrite
+        ? [
+            {
+              title: '操作',
+              key: 'action',
+              render: (_: unknown, row: CrudRow) => (
+                <Space>
+                  <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
+                    编辑
+                  </Button>
+                  <Popconfirm title="确认删除？" onConfirm={() => void handleDelete(row)}>
+                    <Button size="small" danger icon={<DeleteOutlined />}>
+                      删除
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              ),
+            },
+          ]
+        : []),
   ]
 
   return (
@@ -269,7 +327,13 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
         columns={columns}
         dataSource={rows}
         loading={loading}
-        pagination={{ pageSize: 10 }}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: false,
+          onChange: (p) => void load(p),
+        }}
       />
       <Modal
         title={(editing ? '编辑' : '新建') + resource.label}
@@ -306,6 +370,25 @@ function CrudTab({ resource, canWrite }: { resource: CrudResource; canWrite: boo
           ))}
         </Form>
       </Modal>
+      <Modal
+        title={'关联供应商：' + (linkingRow ? String(linkingRow.name ?? linkingRow.sku ?? '') : '')}
+        open={linkOpen}
+        onCancel={() => setLinkOpen(false)}
+        onOk={() => void submitLink()}
+        confirmLoading={linkSubmitting}
+        destroyOnClose
+      >
+        <Select
+          allowClear
+          showSearch
+          placeholder="选择供应商（可清除以取消关联）"
+          style={{ width: '100%' }}
+          value={linkSupplierId}
+          onChange={(v) => setLinkSupplierId(v)}
+          optionFilterProp="label"
+          options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+        />
+      </Modal>
     </>
   )
 }
@@ -322,6 +405,7 @@ interface Part {
   sku: string
   name: string
   unit: string
+  imageUrl?: string | null
 }
 
 interface BomItem {
@@ -449,7 +533,7 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
             icon={<PlusOutlined />}
             onClick={() => {
               void refreshParts()
-              setRows((prev) => [...prev, {}])
+              setRows((prev) => [{}, ...prev])
             }}
           >
             添加零件
@@ -462,6 +546,19 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
         dataSource={rows}
         pagination={false}
         columns={[
+          {
+            title: '图片',
+            key: 'image',
+            width: 80,
+            render: (_: unknown, r: BomRow) => {
+              const url = parts.find((p) => p.id === r.partId)?.imageUrl
+              return url ? (
+                <Image src={url} width={48} height={48} style={{ objectFit: 'cover' }} />
+              ) : (
+                '-'
+              )
+            },
+          },
           {
             title: '零件',
             key: 'partId',
@@ -521,7 +618,13 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
 
 export default function Masters() {
   const { user } = useAuth()
-  const canWrite = user?.role === 'boss' || user?.role === 'purchase'
+  const role = user?.role
+  // 客户/供应商：老板 + 采购
+  const canWriteBusiness = role === 'boss' || role === 'purchase'
+  // 成品/零件/BOM：老板 + 工程
+  const canWriteEngineering = role === 'boss' || role === 'engineer'
+  // 采购在零件页只挂供应商
+  const linkSupplierOnly = role === 'purchase'
 
   return (
     <Card title="基础资料">
@@ -531,24 +634,30 @@ export default function Masters() {
           {
             key: 'customers',
             label: '客户',
-            children: <CrudTab resource={RESOURCES[0]!} canWrite={canWrite} />,
+            children: <CrudTab resource={RESOURCES[0]!} canWrite={canWriteBusiness} />,
           },
           {
             key: 'suppliers',
             label: '供应商',
-            children: <CrudTab resource={RESOURCES[1]!} canWrite={canWrite} />,
+            children: <CrudTab resource={RESOURCES[1]!} canWrite={canWriteBusiness} />,
           },
           {
             key: 'products',
             label: '成品',
-            children: <CrudTab resource={RESOURCES[2]!} canWrite={canWrite} />,
+            children: <CrudTab resource={RESOURCES[2]!} canWrite={canWriteEngineering} />,
           },
           {
             key: 'parts',
             label: '零件',
-            children: <CrudTab resource={RESOURCES[3]!} canWrite={canWrite} />,
+            children: (
+              <CrudTab
+                resource={RESOURCES[3]!}
+                canWrite={canWriteEngineering}
+                linkSupplierOnly={linkSupplierOnly}
+              />
+            ),
           },
-          { key: 'bom', label: 'BOM 维护', children: <BomTab canWrite={canWrite} /> },
+          { key: 'bom', label: 'BOM 维护', children: <BomTab canWrite={canWriteEngineering} /> },
         ]}
       />
     </Card>

@@ -6,6 +6,7 @@ import { requireRole } from '../auth/guard'
 import { bomExplode, computePurchaseGap } from '../domain/bom'
 import { applyStockChange } from '../domain/inventory'
 import { prismaErrorInfo } from '../errors'
+import { parsePagination, pagedResult } from '../pagination'
 
 const purchaseItemSchema = z.object({
   partId: z.number({ error: '零件必填' }).int({ error: '零件必须为整数' }).positive({ error: '零件必须为正整数' }),
@@ -147,12 +148,10 @@ export function purchasingRoutes(app: FastifyInstance) {
       where.salesOrderId = salesOrderId
     }
 
-    const rows = await prisma.purchaseOrder.findMany({
-      where,
-      orderBy: { id: 'desc' as const },
-      include: PURCHASE_ORDER_INCLUDE,
-    })
-    return rows.map((po) => {
+    const pagination = parsePagination(req.query as Record<string, unknown>)
+    if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
+
+    const toRow = (po: Prisma.PurchaseOrderGetPayload<{ include: typeof PURCHASE_ORDER_INCLUDE }>) => {
       const totalAmount = po.items.reduce((sum, it) => sum + it.qty * it.unitPrice.toNumber(), 0)
       const paidAmount = po.payments.reduce((sum, p) => sum + p.amount.toNumber(), 0)
       return {
@@ -176,7 +175,25 @@ export function purchasingRoutes(app: FastifyInstance) {
           unitPrice: it.unitPrice.toNumber(),
         })),
       }
-    })
+    }
+
+    const orderBy = { id: 'desc' as const }
+    if (pagination.kind === 'none') {
+      const rows = await prisma.purchaseOrder.findMany({ where, orderBy, include: PURCHASE_ORDER_INCLUDE })
+      return rows.map(toRow)
+    }
+    const page = pagination.page
+    const [rows, total] = await Promise.all([
+      prisma.purchaseOrder.findMany({
+        where,
+        orderBy,
+        include: PURCHASE_ORDER_INCLUDE,
+        skip: (page.page - 1) * page.pageSize,
+        take: page.pageSize,
+      }),
+      prisma.purchaseOrder.count({ where }),
+    ])
+    return pagedResult(rows.map(toRow), total, page)
   })
 
   // 采购单：仅 purchase 可创建

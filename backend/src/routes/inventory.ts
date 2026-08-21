@@ -4,6 +4,7 @@ import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
 import { prismaErrorInfo } from '../errors'
+import { parsePagination, pagedResult } from '../pagination'
 
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 
@@ -101,15 +102,40 @@ export function inventoryRoutes(app: FastifyInstance) {
     }
   })
 
-  // 库存列表：5 角色均可查
-  app.get('/api/stock', { preHandler: requireRole(...ALL_ROLES) }, async (req) => {
+  // 库存列表：5 角色均可查；可选 page/pageSize 分页；keyword 按物料名称/料号过滤（数据库层）
+  app.get('/api/stock', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
     const query = req.query as { itemType?: string; keyword?: string }
-    const where: { itemType?: string } = {}
-    if (query.itemType) where.itemType = query.itemType
+    const pagination = parsePagination(req.query as Record<string, unknown>)
+    if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
+    const page = pagination.kind === 'ok' ? pagination.page : null
+
+    const and: Record<string, unknown>[] = []
+    if (query.itemType) and.push({ itemType: query.itemType })
+    const kw = query.keyword?.trim()
+    if (kw) {
+      const [partIds, productIds] = await Promise.all([
+        prisma.part.findMany({
+          where: { OR: [{ name: { contains: kw } }, { sku: { contains: kw } }] },
+          select: { id: true },
+        }),
+        prisma.product.findMany({
+          where: { OR: [{ name: { contains: kw } }, { sku: { contains: kw } }] },
+          select: { id: true },
+        }),
+      ])
+      and.push({
+        OR: [
+          { itemType: 'part', itemId: { in: partIds.map((p) => p.id) } },
+          { itemType: 'product', itemId: { in: productIds.map((p) => p.id) } },
+        ],
+      })
+    }
+    const where = and.length > 0 ? { AND: and } : {}
 
     const stocks = await prisma.stock.findMany({
       where,
       orderBy: [{ itemType: 'asc' }, { itemId: 'asc' }],
+      ...(page ? { skip: (page.page - 1) * page.pageSize, take: page.pageSize } : {}),
     })
 
     const partIds = stocks.filter((s) => s.itemType === 'part').map((s) => s.itemId)
@@ -122,21 +148,19 @@ export function inventoryRoutes(app: FastifyInstance) {
     const partNameMap = new Map(parts.map((p) => [p.id, p.name]))
     const productNameMap = new Map(products.map((p) => [p.id, p.name]))
 
-    let rows = stocks.map((s) => ({
+    const rows = stocks.map((s) => ({
       itemType: s.itemType,
       itemId: s.itemId,
       name: s.itemType === 'part' ? (partNameMap.get(s.itemId) ?? '') : (productNameMap.get(s.itemId) ?? ''),
       qtyOnHand: s.qtyOnHand,
     }))
 
-    if (query.keyword) {
-      const kw = query.keyword
-      rows = rows.filter((r) => r.name.includes(kw))
-    }
-    return rows
+    if (!page) return rows
+    const total = await prisma.stock.count({ where })
+    return pagedResult(rows, total, page)
   })
 
-  // 出入库流水：5 角色均可查，按时间升序（早→晚）
+  // 出入库流水：5 角色均可查，按时间升序（早→晚）；可选 page/pageSize 分页
   app.get('/api/stock/ledger', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
     const raw = req.query as { itemType?: string; itemId?: string }
     const itemType = raw.itemType
@@ -144,10 +168,24 @@ export function inventoryRoutes(app: FastifyInstance) {
     if (!itemType || !raw.itemId || !Number.isInteger(itemId) || itemId <= 0) {
       return reply.code(400).send({ error: 'itemType 与 itemId 必填且 itemId 为正整数' })
     }
-    return prisma.inventoryLedger.findMany({
-      where: { itemType, itemId },
-      orderBy: [{ at: 'asc' }, { id: 'asc' }],
-    })
+    const pagination = parsePagination(req.query as Record<string, unknown>)
+    if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
+    const where = { itemType, itemId }
+    const orderBy = [{ at: 'asc' as const }, { id: 'asc' as const }]
+    if (pagination.kind === 'none') {
+      return prisma.inventoryLedger.findMany({ where, orderBy })
+    }
+    const page = pagination.page
+    const [rows, total] = await Promise.all([
+      prisma.inventoryLedger.findMany({
+        where,
+        orderBy,
+        skip: (page.page - 1) * page.pageSize,
+        take: page.pageSize,
+      }),
+      prisma.inventoryLedger.count({ where }),
+    ])
+    return pagedResult(rows, total, page)
   })
 
   // 订单物料计算：按销售订单号统计零件需求、已出库、差值（参考用户 Excel 布局）
@@ -209,19 +247,36 @@ export function inventoryRoutes(app: FastifyInstance) {
     return { orderNo: order.orderNo, orderQty: totalOrderQty, items }
   })
 
-  // 订单流水：按销售订单号查询该订单全部出入库流水，并汇总出库数量
+  // 订单流水：按销售订单号查询该订单全部出入库流水，并汇总出库数量；
+  // 可与物料绑定（itemType+itemId）：只返回该物料流水，并给出该订单该物料的需求/已出库/未出汇总
   app.get('/api/inventory/order-ledger', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
-    const raw = (req.query as { orderNo?: string }).orderNo
+    const query = req.query as { orderNo?: string; itemType?: string; itemId?: string }
+    const raw = query.orderNo
     if (!raw || !raw.trim()) {
       return reply.code(400).send({ error: 'orderNo 必填' })
     }
     const orderNo = raw.trim()
 
+    let bindItem: { itemType: 'part' | 'product'; itemId: number } | null = null
+    if (query.itemType !== undefined && query.itemType !== '') {
+      if (query.itemType !== 'part' && query.itemType !== 'product') {
+        return reply.code(400).send({ error: 'itemType 必须为 part 或 product' })
+      }
+      const itemId = Number(query.itemId)
+      if (!query.itemId || !Number.isInteger(itemId) || itemId <= 0) {
+        return reply.code(400).send({ error: '绑定物料时 itemId 必填且为正整数' })
+      }
+      bindItem = { itemType: query.itemType, itemId }
+    }
+
     const order = await prisma.salesOrder.findUnique({ where: { orderNo }, select: { id: true, orderNo: true } })
     if (!order) return reply.code(404).send({ error: '订单不存在' })
 
     const rows = await prisma.inventoryLedger.findMany({
-      where: { salesOrderId: order.id },
+      where: {
+        salesOrderId: order.id,
+        ...(bindItem ? { itemType: bindItem.itemType, itemId: bindItem.itemId } : {}),
+      },
       orderBy: [{ at: 'asc' }, { id: 'asc' }],
     })
 
@@ -235,8 +290,35 @@ export function inventoryRoutes(app: FastifyInstance) {
     const productNameMap = new Map(products.map((p) => [p.id, p.name + '（' + p.sku + '）']))
 
     const totalOutboundQty = rows.reduce((sum, r) => sum + (r.delta < 0 ? -r.delta : 0), 0)
+
+    // 绑定零件时计算该订单该零件的需求/已出库/未出
+    let bound: { itemName: string; requiredQty: number; issuedQty: number; outstanding: number } | null = null
+    if (bindItem) {
+      const itemName =
+        bindItem.itemType === 'part' ? (partNameMap.get(bindItem.itemId) ?? '') : (productNameMap.get(bindItem.itemId) ?? '')
+      let requiredQty = 0
+      if (bindItem.itemType === 'part') {
+        const orderItems = await prisma.salesOrderItem.findMany({
+          where: { orderId: order.id },
+          select: { productId: true, qty: true },
+        })
+        const productIdsInOrder = [...new Set(orderItems.map((it) => it.productId))]
+        const boms = await prisma.bom.findMany({
+          where: { productId: { in: productIdsInOrder }, partId: bindItem.itemId },
+        })
+        const usageMap = new Map(boms.map((b) => [b.productId, b.qty]))
+        for (const it of orderItems) {
+          requiredQty += (usageMap.get(it.productId) ?? 0) * it.qty
+        }
+      }
+      const issuedQty = rows.reduce((sum, r) => sum + (r.delta < 0 ? -r.delta : 0), 0)
+      bound = { itemName, requiredQty, issuedQty, outstanding: Math.max(0, requiredQty - issuedQty) }
+    }
+
     return {
       orderNo: order.orderNo,
+      ...(bindItem ? { itemType: bindItem.itemType, itemId: bindItem.itemId } : {}),
+      ...(bound ?? {}),
       totalOutboundQty,
       rows: rows.map((r) => ({
         id: r.id,
@@ -306,15 +388,58 @@ export function inventoryRoutes(app: FastifyInstance) {
     return { purchaseOrderNo: po.orderNo, supplierName: po.supplier.name, items }
   })
 
-  // 仓库收发台账：带物料图片/供应商/规格/订单号/来料单号/入库/出库/结存
-  app.get('/api/inventory/warehouse-ledger', { preHandler: requireRole(...ALL_ROLES) }, async (req) => {
+  // 仓库收发台账：带物料图片/供应商/规格/订单号/来料单号/入库/出库/结存；
+  // 可选 page/pageSize 分页；keyword/orderNo 过滤下推到数据库再分页
+  app.get('/api/inventory/warehouse-ledger', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
     const query = req.query as { itemType?: string; keyword?: string; orderNo?: string }
-    const where: { itemType?: string } = {}
-    if (query.itemType) where.itemType = query.itemType
+    const pagination = parsePagination(req.query as Record<string, unknown>)
+    if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
+    const page = pagination.kind === 'ok' ? pagination.page : null
 
+    const and: Record<string, unknown>[] = []
+    if (query.itemType) and.push({ itemType: query.itemType })
+
+    const kw = query.keyword?.trim()
+    if (kw) {
+      const [partIds, productIds] = await Promise.all([
+        prisma.part.findMany({
+          where: { OR: [{ name: { contains: kw } }, { sku: { contains: kw } }] },
+          select: { id: true },
+        }),
+        prisma.product.findMany({
+          where: { OR: [{ name: { contains: kw } }, { sku: { contains: kw } }] },
+          select: { id: true },
+        }),
+      ])
+      and.push({
+        OR: [
+          { itemType: 'part', itemId: { in: partIds.map((p) => p.id) } },
+          { itemType: 'product', itemId: { in: productIds.map((p) => p.id) } },
+        ],
+      })
+    }
+
+    const ono = query.orderNo?.trim()
+    if (ono) {
+      const [issueIds, receiptIds, returnIds] = await Promise.all([
+        prisma.issue.findMany({ where: { salesOrder: { orderNo: { contains: ono } } }, select: { id: true } }),
+        prisma.receipt.findMany({ where: { purchaseOrder: { orderNo: { contains: ono } } }, select: { id: true } }),
+        prisma.returnReplenish.findMany({ where: { purchaseOrderNo: { contains: ono } }, select: { id: true } }),
+      ])
+      and.push({
+        OR: [
+          { refType: 'issue', refId: { in: issueIds.map((i) => i.id) } },
+          { refType: 'receipt', refId: { in: receiptIds.map((i) => i.id) } },
+          { refType: { in: ['return', 'replenish'] }, refId: { in: returnIds.map((i) => i.id) } },
+        ],
+      })
+    }
+
+    const where = and.length > 0 ? { AND: and } : {}
     const rows = await prisma.inventoryLedger.findMany({
       where,
       orderBy: [{ at: 'asc' as const }, { id: 'asc' as const }],
+      ...(page ? { skip: (page.page - 1) * page.pageSize, take: page.pageSize } : {}),
     })
 
     const partIds = [...new Set(rows.filter((r) => r.itemType === 'part').map((r) => r.itemId))]
@@ -346,7 +471,7 @@ export function inventoryRoutes(app: FastifyInstance) {
     const issueMap = new Map(issues.map((r) => [r.id, r]))
     const returnMap = new Map(returns.map((r) => [r.id, r]))
 
-    let items = rows.map((r) => {
+    const items = rows.map((r) => {
       const part = r.itemType === 'part' ? partMap.get(r.itemId) : undefined
       const product = r.itemType === 'product' ? productMap.get(r.itemId) : undefined
       let orderNo = ''
@@ -379,14 +504,8 @@ export function inventoryRoutes(app: FastifyInstance) {
       }
     })
 
-    if (query.keyword) {
-      const kw = query.keyword
-      items = items.filter((it) => it.name.includes(kw) || it.sku.includes(kw))
-    }
-    if (query.orderNo) {
-      const kw = query.orderNo
-      items = items.filter((it) => it.orderNo.includes(kw))
-    }
-    return items
+    if (!page) return items
+    const total = await prisma.inventoryLedger.count({ where })
+    return pagedResult(items, total, page)
   })
 }

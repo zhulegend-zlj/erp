@@ -4,6 +4,7 @@ import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
 import { prismaErrorInfo, parsePositiveInt } from '../errors'
+import { parsePagination, pagedResult } from '../pagination'
 
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 
@@ -120,18 +121,32 @@ export function shippingRoutes(app: FastifyInstance) {
       }
       where = { salesOrderId: orderId }
     }
-    return prisma.shipment.findMany({
-      where,
-      orderBy: { id: 'desc' },
-      include: {
-        ...LEGS_INCLUDE,
-        salesOrder: {
-          include: {
-            customer: { select: { name: true } },
-            items: { include: { product: { select: { sku: true, name: true } } } },
-          },
+    const pagination = parsePagination(req.query as Record<string, unknown>)
+    if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
+    const include = {
+      ...LEGS_INCLUDE,
+      salesOrder: {
+        include: {
+          customer: { select: { name: true } },
+          items: { include: { product: { select: { sku: true, name: true } } } },
         },
       },
-    })
+    } as const
+    const orderBy = { id: 'desc' as const }
+    if (pagination.kind === 'none') {
+      return prisma.shipment.findMany({ where, orderBy, include })
+    }
+    const page = pagination.page
+    const [rows, total] = await Promise.all([
+      prisma.shipment.findMany({
+        where,
+        orderBy,
+        include,
+        skip: (page.page - 1) * page.pageSize,
+        take: page.pageSize,
+      }),
+      prisma.shipment.count({ where }),
+    ])
+    return pagedResult(rows, total, page)
   })
 }

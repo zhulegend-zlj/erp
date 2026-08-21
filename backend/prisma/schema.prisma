@@ -13,6 +13,7 @@ enum Role {
   warehouse
   sales
   finance
+  engineer
 }
 
 model User {

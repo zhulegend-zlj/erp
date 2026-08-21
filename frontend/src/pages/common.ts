@@ -1,5 +1,14 @@
 import { message } from 'antd'
 
+// 后端分页响应统一形状 { items, total, page, pageSize, totalPages }
+export interface Paged<T> {
+  items: T[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
 // 后端错误统一返回 { error: string }，这里提取给 message.error 展示
 export function errMsg(err: unknown): string {
   const e = err as { response?: { data?: { error?: string } } }

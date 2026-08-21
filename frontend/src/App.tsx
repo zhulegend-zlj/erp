@@ -44,7 +44,7 @@ import { notifyError } from './pages/common'
 
 const { Header, Sider, Content } = Layout
 
-export const ALL_ROLES: Role[] = ['boss', 'purchase', 'warehouse', 'sales', 'finance']
+export const ALL_ROLES: Role[] = ['boss', 'purchase', 'warehouse', 'sales', 'finance', 'engineer']
 
 export const roleLabels: Record<Role, string> = {
   boss: '老板',
@@ -52,6 +52,7 @@ export const roleLabels: Record<Role, string> = {
   warehouse: '仓库',
   sales: '销售',
   finance: '财务',
+  engineer: '工程',
 }
 
 interface NavItem {
@@ -84,7 +85,7 @@ const navItems: NavItem[] = [
     key: '/masters',
     label: '基础资料',
     path: '/masters',
-    roles: ['purchase', 'boss'],
+    roles: ['purchase', 'boss', 'engineer'],
     icon: <DatabaseOutlined />,
   },
   {
@@ -161,8 +162,13 @@ const HOME_GUIDES: Record<Role, string[]> = {
     '意见反馈：点击右下角「意见反馈」提交问题或建议。',
   ],
   purchase: [
-    '基础资料：维护客户、供应商、成品、零件、BOM。',
+    '基础资料：维护客户、供应商；在「零件」页给零件挂上对应的供应商。',
     '采购：选择销售订单 → 查看零件缺口 → 生成采购单；在采购单列表查看金额、已付、未付。',
+    '意见反馈：点击右下角「意见反馈」提交问题或建议。',
+  ],
+  engineer: [
+    '基础资料：录入成品、零件（编号/名称/规格/图片/图档/模具/MOQ/价格）与 BOM。',
+    '供应商由采购负责维护并挂到零件上；零件编号为固有编号，请按采购单上的产品编号录入。',
     '意见反馈：点击右下角「意见反馈」提交问题或建议。',
   ],
   warehouse: [
@@ -403,7 +409,7 @@ export default function App() {
         <Route
           path="/masters"
           element={
-            <RequireRole roles={['purchase', 'boss']}>
+            <RequireRole roles={['purchase', 'boss', 'engineer']}>
               <MastersPage />
             </RequireRole>
           }

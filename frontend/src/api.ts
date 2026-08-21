@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-export type Role = 'boss' | 'purchase' | 'warehouse' | 'sales' | 'finance'
+export type Role = 'boss' | 'purchase' | 'warehouse' | 'sales' | 'finance' | 'engineer'
 
 export interface User {
   id: number

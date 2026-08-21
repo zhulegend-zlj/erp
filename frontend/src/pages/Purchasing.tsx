@@ -17,6 +17,7 @@ import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { dateStr, dateTimeStr, money, notifyError, statusLabel } from './common'
+import type { Paged } from './common'
 
 interface SalesOrder {
   id: number
@@ -98,24 +99,41 @@ export default function Purchasing() {
   const [lastPos, setLastPos] = useState<PurchaseOrder[]>([])
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderRow[]>([])
   const [poLoading, setPoLoading] = useState(false)
+  const [poPage, setPoPage] = useState(1)
+  const [poTotal, setPoTotal] = useState(0)
   const [form] = Form.useForm<PoFormValues>()
+  const poPageSize = 10
 
   const canCreate = user?.role === 'purchase'
 
-  useEffect(() => {
+  async function loadPos(targetPage = 1) {
     setPoLoading(true)
+    try {
+      const { data } = await api.get<Paged<PurchaseOrderRow>>('/purchase-orders', {
+        params: { page: targetPage, pageSize: poPageSize },
+      })
+      setPurchaseOrders(data.items)
+      setPoTotal(data.total)
+      setPoPage(data.page)
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setPoLoading(false)
+    }
+  }
+
+  useEffect(() => {
     void Promise.all([
       api.get<SalesOrder[]>('/orders'),
       api.get<Supplier[]>('/suppliers'),
-      api.get<PurchaseOrderRow[]>('/purchase-orders'),
+      loadPos(1),
     ])
-      .then(([o, s, po]) => {
+      .then(([o, s]) => {
         setOrders(o.data)
         setSuppliers(s.data)
-        setPurchaseOrders(po.data)
       })
       .catch(notifyError)
-      .finally(() => setPoLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -173,10 +191,7 @@ export default function Purchasing() {
       setLastPos(data)
       message.success('已按供应商生成 ' + data.length + ' 张采购单：' + data.map((o) => o.orderNo).join('、'))
       setModalOpen(false)
-      setPoLoading(true)
-      const { data: poRows } = await api.get<PurchaseOrderRow[]>('/purchase-orders')
-      setPurchaseOrders(poRows)
-      setPoLoading(false)
+      await loadPos(1)
     } catch (err) {
       notifyError(err)
     } finally {
@@ -277,7 +292,13 @@ export default function Purchasing() {
           rowKey="id"
           loading={poLoading}
           dataSource={purchaseOrders}
-          pagination={{ pageSize: 10 }}
+          pagination={{
+            current: poPage,
+            pageSize: poPageSize,
+            total: poTotal,
+            showSizeChanger: false,
+            onChange: (p) => void loadPos(p),
+          }}
           columns={[
             { title: '采购单号', dataIndex: 'orderNo', key: 'orderNo' },
             { title: '供应商', dataIndex: 'supplierName', key: 'supplierName' },

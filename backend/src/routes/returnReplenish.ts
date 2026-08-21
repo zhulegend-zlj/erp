@@ -4,6 +4,7 @@ import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
 import { prismaErrorInfo } from '../errors'
+import { parsePagination, pagedResult } from '../pagination'
 
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 
@@ -30,14 +31,28 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown, reply: FastifyReply):
 }
 
 export function returnReplenishRoutes(app: FastifyInstance) {
-  app.get('/api/return-replenishments', { preHandler: requireRole(...ALL_ROLES) }, async () => {
-    return prisma.returnReplenish.findMany({
-      orderBy: { createdAt: 'desc' as const },
-      include: {
-        part: { select: { id: true, sku: true, name: true } },
-        supplier: { select: { id: true, name: true } },
-      },
-    })
+  app.get('/api/return-replenishments', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
+    const pagination = parsePagination(req.query as Record<string, unknown>)
+    if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
+    const include = {
+      part: { select: { id: true, sku: true, name: true } },
+      supplier: { select: { id: true, name: true } },
+    } as const
+    const orderBy = { createdAt: 'desc' as const }
+    if (pagination.kind === 'none') {
+      return prisma.returnReplenish.findMany({ orderBy, include })
+    }
+    const page = pagination.page
+    const [rows, total] = await Promise.all([
+      prisma.returnReplenish.findMany({
+        orderBy,
+        include,
+        skip: (page.page - 1) * page.pageSize,
+        take: page.pageSize,
+      }),
+      prisma.returnReplenish.count(),
+    ])
+    return pagedResult(rows, total, page)
   })
 
   app.post('/api/return-replenishments', { preHandler: requireRole('warehouse') }, async (req, reply) => {

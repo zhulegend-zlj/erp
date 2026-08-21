@@ -17,7 +17,7 @@ const EXT_BY_MIME: Record<string, string> = {
 }
 
 export function uploadRoutes(app: FastifyInstance) {
-  app.post('/api/uploads', { preHandler: requireRole('boss', 'purchase', 'warehouse') }, async (req, reply) => {
+  app.post('/api/uploads', { preHandler: requireRole('boss', 'purchase', 'warehouse', 'engineer') }, async (req, reply) => {
     const file = await req.file()
     if (!file) return reply.code(400).send({ error: '未收到文件' })
 

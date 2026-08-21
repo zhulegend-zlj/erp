@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '../db'
 import { buildApp } from '../server'
 
-export type TestRole = 'boss' | 'purchase' | 'warehouse' | 'sales' | 'finance'
+export type TestRole = 'boss' | 'purchase' | 'warehouse' | 'sales' | 'finance' | 'engineer'
 
 export function createTestApp(): FastifyInstance {
   return buildApp()
@@ -28,6 +28,7 @@ export async function resetDb(): Promise<void> {
   await prisma.bom.deleteMany()
   await prisma.stock.deleteMany()
   await prisma.inventoryLedger.deleteMany()
+  await prisma.returnReplenish.deleteMany()
   await prisma.part.deleteMany()
   await prisma.product.deleteMany()
   await prisma.customer.deleteMany()

@@ -17,6 +17,7 @@ import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { dateStr, dateTimeStr, notifyError } from './common'
+import type { Paged } from './common'
 
 interface SalesOrder {
   id: number
@@ -376,14 +377,24 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
   const [loading, setLoading] = useState(false)
   const [itemType, setItemType] = useState<string | undefined>()
   const [keyword, setKeyword] = useState('')
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const pageSize = 10
 
-  async function load(type?: string, kw?: string) {
+  async function load(targetPage = 1, type?: string, kw?: string) {
     setLoading(true)
     try {
-      const { data } = await api.get<StockRow[]>('/stock', {
-        params: { itemType: type || undefined, keyword: kw || undefined },
+      const { data } = await api.get<Paged<StockRow>>('/stock', {
+        params: {
+          itemType: type || undefined,
+          keyword: kw || undefined,
+          page: targetPage,
+          pageSize,
+        },
       })
-      setRows(data)
+      setRows(data.items)
+      setTotal(data.total)
+      setPage(data.page)
     } catch (err) {
       notifyError(err)
     } finally {
@@ -392,7 +403,7 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
   }
 
   useEffect(() => {
-    void load(itemType, keyword)
+    void load(1, itemType, keyword)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemType, refreshToken])
 
@@ -415,7 +426,7 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
           allowClear
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
-          onSearch={(v) => void load(itemType, v)}
+          onSearch={(v) => void load(1, itemType, v)}
           style={{ width: 240 }}
         />
       </Space>
@@ -423,7 +434,13 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
         rowKey={(r) => r.itemType + '-' + r.itemId}
         loading={loading}
         dataSource={rows}
-        pagination={{ pageSize: 10 }}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: false,
+          onChange: (p) => void load(p, itemType, keyword),
+        }}
         columns={[
           {
             title: '类型',
@@ -440,22 +457,26 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
   )
 }
 
-interface PoLedgerRow {
-  seq: number
-  partId: number
-  sku: string
-  name: string
-  requiredQty: number
-  receivedQty: number
-  defectiveQty: number
-  outstanding: number
+interface OrderLedgerRow {
+  id: number
+  itemType: string
+  itemId: number
+  itemName: string
+  delta: number
   balance: number
+  at: string
 }
 
-interface PoLedgerResult {
-  purchaseOrderNo: string
-  supplierName: string
-  items: PoLedgerRow[]
+interface OrderLedgerResult {
+  orderNo: string
+  itemType?: string
+  itemId?: number
+  itemName?: string
+  requiredQty?: number
+  issuedQty?: number
+  outstanding?: number
+  totalOutboundQty: number
+  rows: OrderLedgerRow[]
 }
 
 function signedDelta(v: number): string {
@@ -465,68 +486,55 @@ function signedDelta(v: number): string {
 function LedgerTab({
   parts,
   products,
-  purchaseOrders,
+  orders,
   refreshToken,
 }: {
   parts: Part[]
   products: Product[]
-  purchaseOrders: PurchaseOrderOption[]
+  orders: SalesOrder[]
   refreshToken?: number
 }) {
-  const [mode, setMode] = useState<'item' | 'po'>('item')
   const [itemType, setItemType] = useState<'part' | 'product'>('part')
   const [itemId, setItemId] = useState<number | undefined>()
+  const [orderNo, setOrderNo] = useState<string | undefined>()
   const [itemRows, setItemRows] = useState<LedgerRow[]>([])
-  const [itemLoading, setItemLoading] = useState(false)
-  const [poNo, setPoNo] = useState<string | undefined>()
-  const [poResult, setPoResult] = useState<PoLedgerResult | null>(null)
-  const [poLoading, setPoLoading] = useState(false)
+  const [orderResult, setOrderResult] = useState<OrderLedgerResult | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [lastMode, setLastMode] = useState<'item' | 'order'>('item')
 
   const options = itemType === 'part' ? parts : products
   const selectedItem = options.find((p) => p.id === itemId)
 
-  async function queryItem() {
-    if (!itemId) {
-      message.warning('请先选择' + (itemType === 'part' ? '零件' : '成品'))
+  async function query() {
+    if (!itemId && !orderNo) {
+      message.warning('请先选择物料或销售订单号')
       return
     }
-    setMode('item')
-    setItemLoading(true)
+    setLoading(true)
     try {
-      const { data } = await api.get<LedgerRow[]>('/stock/ledger', {
-        params: { itemType, itemId },
-      })
-      setItemRows(data)
+      if (orderNo) {
+        setLastMode('order')
+        const { data } = await api.get<OrderLedgerResult>('/inventory/order-ledger', {
+          params: { orderNo, itemType: itemId ? itemType : undefined, itemId },
+        })
+        setOrderResult(data)
+      } else {
+        setLastMode('item')
+        const { data } = await api.get<LedgerRow[]>('/stock/ledger', {
+          params: { itemType, itemId },
+        })
+        setItemRows(data)
+      }
     } catch (err) {
       notifyError(err)
     } finally {
-      setItemLoading(false)
-    }
-  }
-
-  async function queryPo() {
-    if (!poNo) {
-      message.warning('请先选择采购单')
-      return
-    }
-    setMode('po')
-    setPoLoading(true)
-    try {
-      const { data } = await api.get<PoLedgerResult>('/inventory/po-ledger', {
-        params: { purchaseOrderNo: poNo },
-      })
-      setPoResult(data)
-    } catch (err) {
-      notifyError(err)
-    } finally {
-      setPoLoading(false)
+      setLoading(false)
     }
   }
 
   useEffect(() => {
     if (refreshToken === undefined) return
-    if (mode === 'po' && poNo) void queryPo()
-    else if (mode === 'item' && itemId) void queryItem()
+    if (orderNo || itemId) void query()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken])
 
@@ -535,11 +543,12 @@ function LedgerTab({
       <Space style={{ marginBottom: 16 }} wrap>
         <Select
           value={itemType}
-          style={{ width: 120 }}
+          style={{ width: 110 }}
           onChange={(v) => {
             setItemType(v)
             setItemId(undefined)
             setItemRows([])
+            setOrderResult(null)
           }}
           options={[
             { value: 'part', label: '零件' },
@@ -547,40 +556,70 @@ function LedgerTab({
           ]}
         />
         <Select
-          placeholder="选择物料"
-          style={{ width: 260 }}
+          placeholder="选择物料（可不选）"
+          style={{ width: 240 }}
           value={itemId}
-          onChange={(v) => setItemId(v)}
+          onChange={(v) => {
+            setItemId(v)
+            setOrderResult(null)
+          }}
           options={options.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
         />
-        <Button onClick={() => void queryItem()}>查询流水</Button>
-      </Space>
-
-      <Space style={{ marginBottom: 16 }} wrap>
         <Select
           showSearch
-          placeholder="按采购单查询"
-          style={{ width: 300 }}
-          value={poNo}
+          allowClear
+          placeholder="选择销售订单号（可不选）"
+          style={{ width: 240 }}
+          value={orderNo}
           onChange={(v) => {
-            setPoNo(v)
-            setPoResult(null)
+            setOrderNo(v)
+            setOrderResult(null)
           }}
           optionFilterProp="label"
-          options={purchaseOrders.map((po) => ({
-            value: po.orderNo,
-            label: po.orderNo + '（' + po.supplierName + '）',
-          }))}
+          options={orders.map((o) => ({ value: o.orderNo, label: o.orderNo }))}
         />
-        <Button type="primary" onClick={() => void queryPo()}>
-          查询采购单流水
+        <Button type="primary" onClick={() => void query()}>
+          查询流水
         </Button>
       </Space>
 
-      {mode === 'item' ? (
+      {lastMode === 'order' && orderResult ? (
+        <>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={
+              '订单 ' +
+              orderResult.orderNo +
+              (orderResult.itemName ? '　物料 ' + orderResult.itemName : '（全部物料）') +
+              (orderResult.requiredQty !== undefined
+                ? '　需求 ' + orderResult.requiredQty + '　已出库 ' + orderResult.issuedQty + '　未出 ' + orderResult.outstanding
+                : '　累计出库 ' + orderResult.totalOutboundQty)
+            }
+          />
+          <Table<OrderLedgerRow>
+            rowKey="id"
+            loading={loading}
+            dataSource={orderResult.rows}
+            pagination={{ pageSize: 10 }}
+            columns={[
+              { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr },
+              { title: '物料', dataIndex: 'itemName', key: 'itemName', render: (v: string) => v || '-' },
+              {
+                title: '变动',
+                dataIndex: 'delta',
+                key: 'delta',
+                render: (v: number) => signedDelta(v),
+              },
+              { title: '结存', dataIndex: 'balance', key: 'balance' },
+            ]}
+          />
+        </>
+      ) : lastMode === 'item' ? (
         <Table<LedgerRow>
           rowKey="id"
-          loading={itemLoading}
+          loading={loading}
           dataSource={itemRows}
           pagination={{ pageSize: 10 }}
           columns={[
@@ -599,34 +638,6 @@ function LedgerTab({
             { title: '结存', dataIndex: 'balance', key: 'balance' },
           ]}
         />
-      ) : poResult ? (
-        <>
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 12 }}
-            message={'采购单 ' + poResult.purchaseOrderNo + '（' + poResult.supplierName + '）'}
-          />
-          <Table<PoLedgerRow>
-            rowKey="partId"
-            loading={poLoading}
-            dataSource={poResult.items}
-            pagination={{ pageSize: 10 }}
-            columns={[
-              { title: '序号', dataIndex: 'seq', key: 'seq', width: 70 },
-              {
-                title: '料号+物料名称',
-                key: 'material',
-                render: (_: unknown, r: PoLedgerRow) => r.sku + ' ' + r.name,
-              },
-              { title: '需求数', dataIndex: 'requiredQty', key: 'requiredQty' },
-              { title: '已入库', dataIndex: 'receivedQty', key: 'receivedQty' },
-              { title: '不良品', dataIndex: 'defectiveQty', key: 'defectiveQty' },
-              { title: '未到', dataIndex: 'outstanding', key: 'outstanding' },
-              { title: '结存', dataIndex: 'balance', key: 'balance' },
-            ]}
-          />
-        </>
       ) : null}
     </div>
   )
@@ -760,6 +771,9 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const pageSize = 10
   const [form] = Form.useForm<{
     partId?: number
     supplierId?: number
@@ -772,14 +786,18 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
     note?: string
   }>()
 
-  async function load() {
+  async function load(targetPage = 1) {
     setLoading(true)
     try {
       const [r, s] = await Promise.all([
-        api.get<ReturnReplenishRow[]>('/return-replenishments'),
+        api.get<Paged<ReturnReplenishRow>>('/return-replenishments', {
+          params: { page: targetPage, pageSize },
+        }),
         api.get<SupplierOption[]>('/suppliers'),
       ])
-      setRows(r.data)
+      setRows(r.data.items)
+      setTotal(r.data.total)
+      setPage(r.data.page)
       setSuppliers(s.data)
     } catch (err) {
       notifyError(err)
@@ -885,7 +903,13 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
         rowKey="id"
         loading={loading}
         dataSource={rows}
-        pagination={{ pageSize: 10 }}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: false,
+          onChange: (p) => void load(p),
+        }}
         columns={[
           {
             title: '物料',
@@ -932,14 +956,25 @@ function WarehouseLedgerTab() {
   const [itemType, setItemType] = useState<string | undefined>()
   const [keyword, setKeyword] = useState('')
   const [orderNo, setOrderNo] = useState('')
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const pageSize = 10
 
-  async function load() {
+  async function load(targetPage = 1) {
     setLoading(true)
     try {
-      const { data } = await api.get<WarehouseLedgerRow[]>('/inventory/warehouse-ledger', {
-        params: { itemType: itemType || undefined, keyword: keyword || undefined, orderNo: orderNo || undefined },
+      const { data } = await api.get<Paged<WarehouseLedgerRow>>('/inventory/warehouse-ledger', {
+        params: {
+          itemType: itemType || undefined,
+          keyword: keyword || undefined,
+          orderNo: orderNo || undefined,
+          page: targetPage,
+          pageSize,
+        },
       })
-      setRows(data)
+      setRows(data.items)
+      setTotal(data.total)
+      setPage(data.page)
     } catch (err) {
       notifyError(err)
     } finally {
@@ -988,7 +1023,13 @@ function WarehouseLedgerTab() {
         rowKey="id"
         loading={loading}
         dataSource={rows}
-        pagination={{ pageSize: 10 }}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: false,
+          onChange: (p) => void load(p),
+        }}
         columns={[
           { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr },
           {
@@ -1018,7 +1059,6 @@ export default function Inventory() {
   const [orders, setOrders] = useState<SalesOrder[]>([])
   const [parts, setParts] = useState<Part[]>([])
   const [products, setProducts] = useState<Product[]>([])
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderOption[]>([])
   const [refreshToken, setRefreshToken] = useState(0)
 
   useEffect(() => {
@@ -1026,13 +1066,11 @@ export default function Inventory() {
       api.get<SalesOrder[]>('/orders'),
       api.get<Part[]>('/parts'),
       api.get<Product[]>('/products'),
-      api.get<PurchaseOrderOption[]>('/purchase-orders'),
     ])
-      .then(([o, pt, pd, po]) => {
+      .then(([o, pt, pd]) => {
         setOrders(o.data)
         setParts(pt.data)
         setProducts(pd.data)
-        setPurchaseOrders(po.data)
       })
       .catch(notifyError)
   }, [])
@@ -1079,7 +1117,7 @@ export default function Inventory() {
         <LedgerTab
           parts={parts}
           products={products}
-          purchaseOrders={purchaseOrders}
+          orders={orders}
           refreshToken={refreshToken}
         />
       ),

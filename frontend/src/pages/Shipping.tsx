@@ -13,6 +13,7 @@ import {
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { dateTimeStr, notifyError, statusLabel } from './common'
+import type { Paged } from './common'
 
 interface SalesOrder {
   id: number
@@ -50,6 +51,9 @@ export default function Shipping() {
   const [orders, setOrders] = useState<SalesOrder[]>([])
   const [shipments, setShipments] = useState<Shipment[]>([])
   const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const pageSize = 10
   const [shipForm] = Form.useForm<{
     salesOrderId?: number
     shippedAt?: string
@@ -64,15 +68,17 @@ export default function Shipping() {
 
   const canOperate = user?.role === 'sales'
 
-  async function load() {
+  async function load(targetPage = page) {
     setLoading(true)
     try {
       const [o, s] = await Promise.all([
         api.get<SalesOrder[]>('/orders'),
-        api.get<Shipment[]>('/shipments'),
+        api.get<Paged<Shipment>>('/shipments', { params: { page: targetPage, pageSize } }),
       ])
       setOrders(o.data)
-      setShipments(s.data)
+      setShipments(s.data.items)
+      setTotal(s.data.total)
+      setPage(s.data.page)
     } catch (err) {
       notifyError(err)
     } finally {
@@ -211,7 +217,13 @@ export default function Shipping() {
           rowKey="id"
           loading={loading}
           dataSource={shipments}
-          pagination={{ pageSize: 10 }}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: false,
+            onChange: (p) => void load(p),
+          }}
           columns={columns}
           expandable={{
             expandedRowRender: (r: Shipment) => {

@@ -3,9 +3,13 @@ import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { parsePositiveInt } from '../errors'
+import { parsePagination, pagedResult } from '../pagination'
 
-const READ_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
-const WRITE_ROLES = ['boss', 'purchase'] as const
+const READ_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance', 'engineer'] as const
+// 客户/供应商：采购与老板维护
+const SUPPLIER_WRITE_ROLES = ['boss', 'purchase'] as const
+// 成品/零件/BOM：工程与老板维护
+const ENGINEER_WRITE_ROLES = ['boss', 'engineer'] as const
 
 const customerSchema = z.object({
   name: z.string({ error: '名称必填' }).min(1, '名称必填'),
@@ -38,6 +42,11 @@ const partSchema = z.object({
   supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
 })
 
+// 采购在零件上的唯一写权限：仅设置供应商（挂链接），其余字段一律拒绝
+const supplierLinkSchema = z.object({
+  supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable(),
+})
+
 const bomSchema = z.array(
   z.object({
     partId: z.number({ error: '零件必填' }).int({ error: '零件必须为整数' }).positive({ error: '零件必须为正整数' }),
@@ -67,16 +76,31 @@ function parseId(req: { params: { id: string } }, reply: FastifyReply): number |
 interface CrudSpec {
   resource: 'customer' | 'supplier' | 'product' | 'part'
   schema: z.ZodTypeAny
+  writeRoles: readonly string[]
 }
 
 function registerCrud(app: FastifyInstance, spec: CrudSpec) {
   const delegate = (prisma as any)[spec.resource]
   const read = requireRole(...READ_ROLES)
-  const write = requireRole(...WRITE_ROLES)
+  const write = requireRole(...spec.writeRoles)
   const base = `/api/${spec.resource}s`
 
-  app.get(base, { preHandler: read }, async () => {
-    return delegate.findMany({ orderBy: { id: 'asc' } })
+  app.get(base, { preHandler: read }, async (req, reply) => {
+    const pagination = parsePagination(req.query as Record<string, unknown>)
+    if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
+    if (pagination.kind === 'none') {
+      return delegate.findMany({ orderBy: { id: 'asc' } })
+    }
+    const page = pagination.page
+    const [rows, total] = await Promise.all([
+      delegate.findMany({
+        orderBy: { id: 'asc' },
+        skip: (page.page - 1) * page.pageSize,
+        take: page.pageSize,
+      }),
+      delegate.count({}),
+    ])
+    return pagedResult(rows as unknown[], total, page)
   })
 
   app.post(base, { preHandler: write }, async (req, reply) => {
@@ -86,11 +110,24 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
     return reply.code(200).send(record)
   })
 
-  app.put(`${base}/:id`, { preHandler: write }, async (req, reply) => {
-    const data = parseBody(spec.schema, req.body, reply)
-    if (data === null) return
+  // 零件特殊：采购只能挂供应商；boss/工程全量修改
+  const putRoles = spec.resource === 'part' ? requireRole('boss', 'engineer', 'purchase') : write
+  app.put(`${base}/:id`, { preHandler: putRoles }, async (req, reply) => {
     const id = parseId(req as { params: { id: string } }, reply)
     if (id === null) return
+    const role = (req as { user?: { role?: string } }).user?.role
+    if (spec.resource === 'part' && role === 'purchase') {
+      const keys = Object.keys((req.body as object) ?? {})
+      if (keys.some((k) => k !== 'supplierId')) {
+        return reply.code(400).send({ error: '采购仅可修改零件的供应商，其他资料请联系工程维护' })
+      }
+      const data = parseBody(supplierLinkSchema, req.body, reply)
+      if (data === null) return
+      const record = await delegate.update({ where: { id }, data })
+      return reply.code(200).send(record)
+    }
+    const data = parseBody(spec.schema, req.body, reply)
+    if (data === null) return
     const record = await delegate.update({ where: { id }, data })
     return reply.code(200).send(record)
   })
@@ -104,10 +141,10 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
 }
 
 export function mastersRoutes(app: FastifyInstance) {
-  registerCrud(app, { resource: 'customer', schema: customerSchema })
-  registerCrud(app, { resource: 'supplier', schema: supplierSchema })
-  registerCrud(app, { resource: 'product', schema: productSchema })
-  registerCrud(app, { resource: 'part', schema: partSchema })
+  registerCrud(app, { resource: 'customer', schema: customerSchema, writeRoles: SUPPLIER_WRITE_ROLES })
+  registerCrud(app, { resource: 'supplier', schema: supplierSchema, writeRoles: SUPPLIER_WRITE_ROLES })
+  registerCrud(app, { resource: 'product', schema: productSchema, writeRoles: ENGINEER_WRITE_ROLES })
+  registerCrud(app, { resource: 'part', schema: partSchema, writeRoles: ENGINEER_WRITE_ROLES })
 
   app.get('/api/products/:id/bom', { preHandler: requireRole(...READ_ROLES) }, async (req, reply) => {
     const productId = parseId(req as { params: { id: string } }, reply)
@@ -119,7 +156,7 @@ export function mastersRoutes(app: FastifyInstance) {
     })
   })
 
-  app.put('/api/products/:id/bom', { preHandler: requireRole(...WRITE_ROLES) }, async (req, reply) => {
+  app.put('/api/products/:id/bom', { preHandler: requireRole(...ENGINEER_WRITE_ROLES) }, async (req, reply) => {
     const productId = parseId(req as { params: { id: string } }, reply)
     if (productId === null) return
     const items = parseBody(bomSchema, req.body, reply)

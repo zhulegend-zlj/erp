@@ -20,14 +20,14 @@ export function authRoutes(app: FastifyInstance) {
     reply.clearCookie('token', { path: '/' })
     return { ok: true }
   })
-  app.get('/api/auth/me', { preHandler: requireRole('boss', 'purchase', 'warehouse', 'sales', 'finance') }, async (req) => {
+  app.get('/api/auth/me', { preHandler: requireRole('boss', 'purchase', 'warehouse', 'sales', 'finance', 'engineer') }, async (req) => {
     const { userId } = (req as any).user
     const user = await prisma.user.findUnique({ where: { id: userId } })
     return { id: user!.id, username: user!.username, name: user!.name, role: user!.role }
   })
 
   // 修改本人密码：所有已登录角色可操作
-  app.post('/api/auth/change-password', { preHandler: requireRole('boss', 'purchase', 'warehouse', 'sales', 'finance') }, async (req, reply) => {
+  app.post('/api/auth/change-password', { preHandler: requireRole('boss', 'purchase', 'warehouse', 'sales', 'finance', 'engineer') }, async (req, reply) => {
     const { oldPassword, newPassword } = req.body as { oldPassword?: unknown; newPassword?: unknown }
     if (typeof oldPassword !== 'string' || oldPassword.length === 0) {
       return reply.code(400).send({ error: '请输入原密码' })

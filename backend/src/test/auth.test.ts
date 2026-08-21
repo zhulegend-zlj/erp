@@ -23,6 +23,14 @@ describe('auth', () => {
     expect(me.json().role).toBe('boss')
   })
 
+  it('engineer 可登录且 /me 返回 engineer 角色', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'engineer')
+    const me = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { cookie } })
+    expect(me.statusCode).toBe(200)
+    expect(me.json().role).toBe('engineer')
+  })
+
   it('密码错误返回 401', async () => {
     const app = buildApp()
     const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'boss', password: 'wrong' } })

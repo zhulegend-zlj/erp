@@ -4,6 +4,7 @@ import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { dateStr, nextStatus, notifyError, prevStatus, statusColor, statusLabel } from './common'
+import type { Paged } from './common'
 
 interface Customer {
   id: number
@@ -56,16 +57,23 @@ export default function Orders() {
   const [modalOpen, setModalOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [advancingId, setAdvancingId] = useState<number | null>(null)
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
   const [form] = Form.useForm<OrderFormValues>()
+  const pageSize = 10
 
   const canCreate = user?.role === 'sales'
   const canAdvance = user?.role === 'sales' || user?.role === 'boss'
 
-  async function load() {
+  async function load(targetPage: number = page) {
     setLoading(true)
     try {
-      const { data } = await api.get<SalesOrder[]>('/orders')
-      setOrders(data)
+      const { data } = await api.get<Paged<SalesOrder>>('/orders', {
+        params: { page: targetPage, pageSize },
+      })
+      setOrders(data.items)
+      setTotal(data.total)
+      setPage(data.page)
     } catch (err) {
       notifyError(err)
     } finally {
@@ -216,7 +224,13 @@ export default function Orders() {
         columns={columns}
         dataSource={orders}
         loading={loading}
-        pagination={{ pageSize: 10 }}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: false,
+          onChange: (p) => void load(p),
+        }}
       />
       <Modal
         title="新建订单"

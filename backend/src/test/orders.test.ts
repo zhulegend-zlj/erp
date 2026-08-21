@@ -135,6 +135,33 @@ describe('orders', () => {
     expect(detail.json().items[0].product.name).toBe('成品A')
   })
 
+  it('订单列表与详情返回客户名称（采购页选中订单后展示客户）', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/orders',
+      headers: { cookie },
+      payload: {
+        customerId: customer.id,
+        deliveryDate: '2026-09-30',
+        items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
+      }
+    })
+    expect(createRes.statusCode).toBe(200)
+    const orderId = createRes.json().id
+
+    const purchaseCookie = await loginCookie(app, 'purchase')
+    const detail = await app.inject({ method: 'GET', url: `/api/orders/${orderId}`, headers: { cookie: purchaseCookie } })
+    expect(detail.statusCode).toBe(200)
+    expect(detail.json().customer).toMatchObject({ name: 'ACME' })
+
+    const list = await app.inject({ method: 'GET', url: '/api/orders', headers: { cookie: purchaseCookie } })
+    expect(list.statusCode).toBe(200)
+    const row = (list.json() as { customer?: { name?: string } }[]).find((o) => o.customer?.name === 'ACME')
+    expect(row).toBeDefined()
+  })
+
   it('状态机允许合法迁移，非法迁移返回 400 中文', async () => {
     const app = buildApp()
     const { customer, product, cookie } = await seedOrder(app)

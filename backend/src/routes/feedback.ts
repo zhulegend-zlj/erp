@@ -39,7 +39,7 @@ function parseFeedback(body: unknown, reply: FastifyReply) {
 export function feedbackRoutes(app: FastifyInstance) {
   app.post(
     '/api/feedback',
-    { preHandler: requireRole('boss', 'purchase', 'warehouse', 'sales', 'finance') },
+    { preHandler: requireRole('boss', 'purchase', 'warehouse', 'sales', 'finance', 'engineer') },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const data = parseFeedback(req.body, reply)
       if (!data) return

@@ -235,4 +235,90 @@ describe('inventory', () => {
       balance: 30,
     })
   })
+
+  it('订单流水绑定物料查询只返回该物料流水并给出需求/出库/未出汇总', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商-OLB' } })
+    const partA = await prisma.part.create({ data: { sku: 'P-OLB-1', name: '螺丝', supplierId: supplier.id } })
+    const partB = await prisma.part.create({ data: { sku: 'P-OLB-2', name: '木板' } })
+    const product = await prisma.product.create({ data: { sku: 'F-OLB', name: '成品' } })
+    await prisma.bom.create({ data: { productId: product.id, partId: partA.id, qty: 2 } })
+    const customer = await prisma.customer.create({ data: { name: '客户OLB' } })
+    const order = await prisma.salesOrder.create({
+      data: {
+        orderNo: 'SO-OLB',
+        customerId: customer.id,
+        deliveryDate: new Date('2026-09-30'),
+        items: { create: { productId: product.id, qty: 10, unitPrice: 5 } }
+      }
+    })
+    await prisma.stock.createMany({
+      data: [
+        { itemType: 'part', itemId: partA.id, qtyOnHand: 100 },
+        { itemType: 'part', itemId: partB.id, qtyOnHand: 100 },
+      ]
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    for (const [partId, qty] of [[partA.id, 12], [partB.id, 5]] as const) {
+      const res = await app.inject({
+        method: 'POST', url: '/api/issues', headers: { cookie },
+        payload: { salesOrderId: order.id, issuedBy: '组长', items: [{ partId, qty }] }
+      })
+      expect(res.statusCode).toBe(200)
+    }
+
+    // 不带物料：返回订单全部流水
+    const all = await app.inject({
+      method: 'GET', url: '/api/inventory/order-ledger?orderNo=' + order.orderNo, headers: { cookie }
+    })
+    expect(all.statusCode).toBe(200)
+    expect(all.json().rows.length).toBeGreaterThanOrEqual(2)
+
+    // 绑定物料：只返回该物料流水，并汇总需求/出库/未出
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/inventory/order-ledger?orderNo=${order.orderNo}&itemType=part&itemId=${partA.id}`,
+      headers: { cookie }
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.orderNo).toBe('SO-OLB')
+    expect(body.itemName).toContain('螺丝')
+    expect(body.requiredQty).toBe(20)
+    expect(body.issuedQty).toBe(12)
+    expect(body.outstanding).toBe(8)
+    expect(body.totalOutboundQty).toBe(12)
+    expect(body.rows).toHaveLength(1)
+    expect(body.rows[0]).toMatchObject({ itemType: 'part', itemId: partA.id, delta: -12 })
+  })
+
+  it('订单流水绑定查询参数不合法返回 400', async () => {
+    const customer = await prisma.customer.create({ data: { name: '客户OLB2' } })
+    const order = await prisma.salesOrder.create({
+      data: { orderNo: 'SO-OLB2', customerId: customer.id, deliveryDate: new Date('2026-09-30') }
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+
+    const onlyType = await app.inject({
+      method: 'GET',
+      url: '/api/inventory/order-ledger?orderNo=' + order.orderNo + '&itemType=part',
+      headers: { cookie }
+    })
+    expect(onlyType.statusCode).toBe(400)
+
+    const badType = await app.inject({
+      method: 'GET',
+      url: '/api/inventory/order-ledger?orderNo=' + order.orderNo + '&itemType=bogus&itemId=1',
+      headers: { cookie }
+    })
+    expect(badType.statusCode).toBe(400)
+
+    const badId = await app.inject({
+      method: 'GET',
+      url: '/api/inventory/order-ledger?orderNo=' + order.orderNo + '&itemType=part&itemId=0',
+      headers: { cookie }
+    })
+    expect(badId.statusCode).toBe(400)
+  })
 })
