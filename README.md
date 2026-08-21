@@ -192,7 +192,7 @@ Vite 开发服务器已配置 `/api` 代理到 `127.0.0.1:3000`（见 `frontend/
 
 ## 9. 创建初始账号（5 个角色）
 
-系统角色：`boss`（老板）、`purchase`（采购）、`warehouse`（仓库）、`sales`（销售）、`finance`（财务）。
+系统登录账号（中文用户名）：`老板`、`采购`、`仓库`、`销售`、`财务`，对应角色分别为 boss / purchase / warehouse / sales / finance。
 
 以下命令用 `backend/prisma/seed.ts` 一次性创建/更新 5 个角色用户（初始密码统一 `88888888`）：
 

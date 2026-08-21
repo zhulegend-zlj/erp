@@ -7,11 +7,11 @@ import bcrypt from 'bcryptjs'
 const prisma = new PrismaClient()
 
 const users = [
-  { username: 'boss', name: '老板', role: 'boss' },
-  { username: 'purchase', name: '采购', role: 'purchase' },
-  { username: 'warehouse', name: '仓库', role: 'warehouse' },
-  { username: 'sales', name: '销售', role: 'sales' },
-  { username: 'finance', name: '财务', role: 'finance' },
+  { username: '老板', name: '老板', role: 'boss' },
+  { username: '采购', name: '采购', role: 'purchase' },
+  { username: '仓库', name: '仓库', role: 'warehouse' },
+  { username: '销售', name: '销售', role: 'sales' },
+  { username: '财务', name: '财务', role: 'finance' },
 ] as const
 
 async function main() {

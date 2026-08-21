@@ -13,7 +13,7 @@ ERP 系统，服务一家**按订单生产（MTO）的组装/贸易企业**。
 - 前端 `frontend/`：登录 + 7 个业务页面 + 右侧"意见反馈"小按钮（提交到 FEEDBACK.md）
 - 部署与备份：`scripts/backup.ps1`、`scripts/deploy.ps1`、`README.md`
 - 测试：后端 48/48 通过（vitest），前端 build 通过
-- 初始账号密码统一 **88888888**（5 角色：boss/purchase/warehouse/sales/finance，上线前必须改）
+- 初始账号密码统一 **88888888**（中文登录账号：老板/采购/仓库/销售/财务，对应角色 boss/purchase/warehouse/sales/finance，上线前必须改）
 
 ## 三、继续开发前必读
 
