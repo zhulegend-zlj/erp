@@ -62,15 +62,22 @@ model Part {
   id     Int    @id @default(autoincrement())
   sku    String @unique
   name   String
+  nameEn String? // 英文品名
   unit   String @default("个")
   spec   String?
+  weight String? // 重量(g)（表格中为文本，含 g/中文备注，故用字符串）
+  revision String? // 版本
+  material String? // 材质
+  dimensions String? // 尺寸规格
+  finish String? // 表面处理
+  artId String? // 图号 Art.ID
   imageUrl String?
   drawingsUrl String?
   tooling String?
   moq    Int?
   price  Decimal? @db.Decimal(12,4)
-  usedIn String? // 用在何处
-  process String? // 生产工艺
+  usedIn String? // 用在何处（暂存未展示）
+  process String? // 生产工艺（暂存未展示）
   supplier   Supplier? @relation(fields: [supplierId], references: [id])
   supplierId Int?
   boms   Bom[]

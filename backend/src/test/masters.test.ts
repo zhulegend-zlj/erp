@@ -231,6 +231,49 @@ describe('masters 权限（工程/采购分工）', () => {
     expect(page1.json().total).toBe(3)
   })
 
+  it('零件支持表格口径新字段（英文品名/重量/版本/材质/尺寸/表面处理/图号）', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'engineer')
+    const payload = {
+      sku: 'P-SHEET',
+      name: '连接活动架',
+      nameEn: 'pedal arm upper link 2',
+      unit: '个',
+      weight: '45.6',
+      revision: '004',
+      material: 'electroplated steel',
+      dimensions: 'D15*50',
+      finish: '喷砂黑色阳极',
+      artId: 'ART-001',
+    }
+    const created = await app.inject({
+      method: 'POST', url: '/api/parts', headers: { cookie }, payload
+    })
+    expect(created.statusCode).toBe(200)
+    expect(created.json().nameEn).toBe('pedal arm upper link 2')
+    expect(created.json().weight).toBe('45.6')
+    expect(created.json().revision).toBe('004')
+    expect(created.json().material).toBe('electroplated steel')
+    expect(created.json().dimensions).toBe('D15*50')
+    expect(created.json().finish).toBe('喷砂黑色阳极')
+    expect(created.json().artId).toBe('ART-001')
+
+    const list = await app.inject({ method: 'GET', url: '/api/parts', headers: { cookie } })
+    const found = (list.json() as { sku: string; nameEn?: string | null; dimensions?: string | null }[]).find((p) => p.sku === 'P-SHEET')
+    expect(found).toBeTruthy()
+    expect(found!.nameEn).toBe('pedal arm upper link 2')
+    expect(found!.dimensions).toBe('D15*50')
+
+    // 清空可选字段（PUT 仍需带 sku/name 必填项）
+    const cleared = await app.inject({
+      method: 'PUT', url: '/api/parts/' + created.json().id, headers: { cookie },
+      payload: { sku: 'P-SHEET', name: '连接活动架', nameEn: '', weight: '', revision: '', material: '', dimensions: '', finish: '', artId: '' }
+    })
+    expect(cleared.statusCode).toBe(200)
+    expect(cleared.json().nameEn).toBeNull()
+    expect(cleared.json().artId).toBeNull()
+  })
+
   it('warehouse 无权创建零件（403）', async () => {
     const app = buildApp()
     const cookie = await loginCookie(app, 'warehouse')

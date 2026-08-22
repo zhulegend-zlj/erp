@@ -1,9 +1,13 @@
 // 从工程提供的 CSP_V3 清单 Excel 批量导入：成品 + 零件 + BOM。
-// 命名规则（方案 1，老板确认）：
+// 命名规则（最终版，老板确认）：
 // - 官方料号照抄（CSP-xxx / F LOGO / Lithium Grease / 49-002769 等）；
 // - CSP-013 七个长度变体 → CSP-013-1 ~ CSP-013-7（按表顺序，长度写在名称里）；
-// - 螺丝/螺母/垫片/机米等标准件 → CSP-S01、CSP-S02…（按表顺序）；
-// - 其余无料号杂项 → CSP-M01、CSP-M02…（按表顺序）。
+// - 螺丝/螺母/垫片/机米等标准件 → 规格+类型（跨机种同规格同料号，如 M3x13-杯头、M6-垫片）；
+// - 其余无料号杂项 → CSP-201、CSP-202…（按表顺序）。
+// 表格列逐列落库：英文品名/重量/版本/材质/尺寸规格/表面处理/图号 存独立字段；
+// Description-EN、用在何处、生产工艺 三列不导入（数据库字段暂存不使用）。
+// 导入方式：先清空该成品的 BOM 与其专属零件（无其他 BOM/业务引用的零件），再按表重新导入；
+// 供应商按名称复用，不删除。可重复执行（幂等）。
 // 每次导入生成对照表：D:/AI/erp-backups/CSP-V3-SKU对照表.xlsx
 // 用法：cd backend && npx tsx --env-file=.env prisma/import-csp-v3.ts
 import { PrismaClient } from '@prisma/client'
@@ -40,12 +44,40 @@ function screwSku(name: string, dims: string): string {
   return name
 }
 
-
 async function main() {
   const wb = XLSX.read(readFileSync(FILE), { type: 'buffer' })
   const ws = wb.Sheets[wb.SheetNames[0]!]
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true }) as unknown[][]
   const data = rows.slice(1).filter((r) => (r[0] ?? '') !== '' || (r[5] ?? '') !== '')
+
+  const product =
+    (await prisma.product.findUnique({ where: { sku: PRODUCT_SKU } })) ??
+    (await prisma.product.create({ data: { sku: PRODUCT_SKU, name: PRODUCT_NAME, unit: '件' } }))
+
+  // —— 清空该成品旧数据（按老板确认的口径：清空 CSP-V3 零件和 BOM 后全新导入）——
+  const oldBoms = await prisma.bom.findMany({ where: { productId: product.id } })
+  await prisma.bom.deleteMany({ where: { productId: product.id } })
+  let deletedParts = 0
+  let keptParts: string[] = []
+  for (const b of oldBoms) {
+    const part = await prisma.part.findUnique({ where: { id: b.partId } })
+    if (!part) continue
+    const [otherBoms, purchaseItems, receipts, issues, rr] = await Promise.all([
+      prisma.bom.count({ where: { partId: part.id } }),
+      prisma.purchaseOrderItem.count({ where: { partId: part.id } }),
+      prisma.receipt.count({ where: { partId: part.id } }),
+      prisma.issue.count({ where: { partId: part.id } }),
+      prisma.returnReplenish.count({ where: { partId: part.id } }),
+    ])
+    if (otherBoms + purchaseItems + receipts + issues + rr === 0) {
+      await prisma.part.delete({ where: { id: part.id } })
+      deletedParts++
+    } else {
+      keptParts.push(part.sku)
+    }
+  }
+  console.log('已清空旧 BOM：', oldBoms.length, '行；删除无引用零件：', deletedParts, '个')
+  if (keptParts.length) console.log('保留仍被引用零件：', keptParts.join(', '))
 
   const skuUsed = new Map<string, number>()
   const assumptions: string[] = []
@@ -55,18 +87,14 @@ async function main() {
   let screwCount = 0
   const bomQty = new Map<number, number>()
 
-  // 成品
-  const existingProduct = await prisma.product.findUnique({ where: { sku: PRODUCT_SKU } })
-  const product =
-    existingProduct ??
-    (await prisma.product.create({ data: { sku: PRODUCT_SKU, name: PRODUCT_NAME, unit: '件' } }))
-  console.log('成品：', product.sku, product.name, existingProduct ? '（已存在，复用）' : '（新建）')
-
   let partCount = 0
   let bomCount = 0
   for (const raw of data) {
     const id = clean(raw[1])
+    const nameEn = clean(raw[4])
     const name = clean(raw[5]) || clean(raw[4]) || clean(raw[3])
+    const weight = clean(raw[6])
+    const revision = clean(raw[7])
     const material = clean(raw[8])
     const dims = clean(raw[9])
     const finish = clean(raw[10])
@@ -74,6 +102,7 @@ async function main() {
     const amount = amountRaw === null || amountRaw === undefined || String(amountRaw).trim() === '' ? 1 : Number(amountRaw)
     const tooling = clean(raw[13])
     const moqRaw = raw[14]
+    const artId = clean(raw[18])
     const vendorRaw = clean(raw[19])
 
     if (!name) {
@@ -84,7 +113,7 @@ async function main() {
       assumptions.push('序号' + clean(raw[0]) + '「' + name + '」用量为空，按 1 处理')
     }
 
-    // 料号处理（方案 1：官方料号照抄优先；CSP-013 变体 -1~-7；无官方号的螺丝 CSP-Sxx；杂项 CSP-Mxx）
+    // 料号处理（最终版：官方料号照抄优先；CSP-013 变体 -1~-7；无官方号的螺丝规格+类型；杂项 CSP-2xx）
     const isFastener = /螺丝|螺母|垫片|机米/.test(name)
     let sku = ''
     if (/^CSP-013$/i.test(id)) {
@@ -130,8 +159,15 @@ async function main() {
     const partData = {
       sku,
       name: name.slice(0, 80),
+      nameEn: nameEn || null,
       unit: '个',
       spec: spec.slice(0, 200) || null,
+      weight: weight || null,
+      revision: revision || null,
+      material: material || null,
+      dimensions: dims || null,
+      finish: finish || null,
+      artId: artId || null,
       tooling: tooling || null,
       moq: moqRaw === '' ? null : Number(moqRaw),
       supplierId,

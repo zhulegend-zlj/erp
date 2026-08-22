@@ -198,16 +198,22 @@ const RESOURCES: CrudResource[] = [
   {
     label: '零件',
     path: '/parts',
+    // 列布局按工程 CSP_V3 清单表格口径：去掉 Description-EN、用在何处、生产工艺、序号、用量、单位
     fields: [
-      { key: 'sku', label: 'SKU' },
-      { key: 'name', label: '名称' },
-      { key: 'unit', label: '单位' },
-      { key: 'spec', label: '规格' },
-      { key: 'imageUrl', label: '图片地址', type: 'image' },
-      { key: 'drawingsUrl', label: '图档地址', type: 'drawing' },
+      { key: 'sku', label: '料号' },
+      { key: 'imageUrl', label: '图片', type: 'image' },
+      { key: 'nameEn', label: '英文品名' },
+      { key: 'name', label: '中文名称' },
+      { key: 'weight', label: '重量(g)' },
+      { key: 'revision', label: '版本' },
+      { key: 'material', label: '材质' },
+      { key: 'dimensions', label: '尺寸规格' },
+      { key: 'finish', label: '表面处理' },
+      { key: 'drawingsUrl', label: '图档', type: 'drawing' },
       { key: 'tooling', label: '模具' },
-      { key: 'moq', label: 'MOQ', type: 'number' },
+      { key: 'moq', label: '起订量', type: 'number' },
       { key: 'price', label: '价格', type: 'number' },
+      { key: 'artId', label: '图号' },
       { key: 'supplierId', label: '供应商', type: 'supplier' },
     ],
   },
@@ -315,7 +321,10 @@ function CrudTab({
       if (f.type === 'supplier' || f.type === 'number') {
         const v = payload[f.key]
         payload[f.key] = v === '' || v === null || v === undefined ? null : Number(v)
-      } else if (f.type === 'image' || f.key === 'spec' || f.key === 'drawingsUrl' || f.key === 'tooling') {
+      } else if (
+        f.type === 'image' ||
+        ['spec', 'drawingsUrl', 'tooling', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId'].includes(f.key)
+      ) {
         if (payload[f.key] === '') payload[f.key] = null
       }
     }
@@ -480,9 +489,14 @@ function CrudTab({
               key={f.key}
               name={f.key}
               label={f.label}
-              rules={f.type === 'supplier' || f.type === 'image' || f.type === 'number' || f.key === 'spec' || f.key === 'drawingsUrl' || f.key === 'tooling' || f.key === 'country' || f.key === 'contact' || f.key === 'unit'
-                ? []
-                : [{ required: true, message: '请输入' + f.label }]}
+              rules={
+                f.type === 'supplier' ||
+                f.type === 'image' ||
+                f.type === 'number' ||
+                ['spec', 'drawingsUrl', 'tooling', 'country', 'contact', 'unit', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId'].includes(f.key)
+                  ? []
+                  : [{ required: true, message: '请输入' + f.label }]
+              }
             >
               {f.type === 'supplier' ? (
                 <Select

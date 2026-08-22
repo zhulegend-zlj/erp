@@ -46,8 +46,15 @@ const productSchema = z.object({
 const partSchema = z.object({
   sku: z.string({ error: 'SKU 必填' }).min(1, 'SKU 必填'),
   name: z.string({ error: '名称必填' }).min(1, '名称必填'),
+  nameEn: z.string().nullable().optional(),
   unit: z.string().optional(),
   spec: z.string().nullable().optional(),
+  weight: z.string().nullable().optional(),
+  revision: z.string().nullable().optional(),
+  material: z.string().nullable().optional(),
+  dimensions: z.string().nullable().optional(),
+  finish: z.string().nullable().optional(),
+  artId: z.string().nullable().optional(),
   imageUrl: z.string().nullable().optional(),
   drawingsUrl: z.string().nullable().optional(),
   tooling: z.string().nullable().optional(),
@@ -94,6 +101,20 @@ async function syncPartUrlsFromFolder(partId: number, relDir: string, files: str
   if (data.imageUrl || data.drawingsUrl) {
     await prisma.part.update({ where: { id: partId }, data })
   }
+}
+
+// 零件可空文本字段：空字符串统一归一为 null（前端与直调接口都安全）
+const PART_NULLABLE_TEXT_KEYS = [
+  'spec', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId',
+  'imageUrl', 'drawingsUrl', 'tooling', 'usedIn', 'process',
+] as const
+
+function normalizePartText(data: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...data }
+  for (const k of PART_NULLABLE_TEXT_KEYS) {
+    if (out[k] === '') out[k] = null
+  }
+  return out
 }
 
 function parseBody<T>(schema: z.ZodType<T>, body: unknown, reply: FastifyReply): T | null {
@@ -179,7 +200,7 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
     }
     const data = parseBody(spec.schema, req.body, reply)
     if (data === null) return
-    const record = await delegate.create({ data })
+    const record = await delegate.create({ data: spec.resource === 'part' ? normalizePartText(data as Record<string, unknown>) : data })
     return reply.code(200).send(record)
   })
 
@@ -215,7 +236,10 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
         : null
     const data = parseBody(spec.schema, req.body, reply)
     if (data === null) return
-    const record = await delegate.update({ where: { id }, data })
+    const record = await delegate.update({
+      where: { id },
+      data: spec.resource === 'part' ? normalizePartText(data as Record<string, unknown>) : data,
+    })
 
     // 零件改名/改 SKU：移动文件夹并同步图片/图档 URL
     if (spec.resource === 'part' && before && (before.sku !== record.sku || before.name !== record.name)) {
