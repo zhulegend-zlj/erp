@@ -5,6 +5,15 @@ import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { parsePositiveInt } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
+import {
+  movePartFolder,
+  moveProductFolder,
+  partDirName,
+  rehomePartFolder,
+  removePartFolder,
+  slugify,
+  urlFor,
+} from '../uploads-store'
 
 const READ_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance', 'engineer'] as const
 // 客户/供应商：采购与老板维护
@@ -55,6 +64,26 @@ const bomSchema = z.array(
     qty: z.number({ error: '数量必填' }).int({ error: '数量必须为整数' }).positive({ error: '数量必须为正整数' }),
   }),
 )
+
+async function productSkusForPart(partId: number): Promise<string[]> {
+  const boms = await prisma.bom.findMany({
+    where: { partId },
+    include: { product: { select: { sku: true } } },
+  })
+  return boms.map((b) => b.product.sku)
+}
+
+/** 按零件文件夹内的文件更新零件图片/图档 URL（归位或改名后调用） */
+async function syncPartUrlsFromFolder(partId: number, relDir: string, files: string[]): Promise<void> {
+  const imageFile = files.find((f) => f.startsWith('图片'))
+  const drawingFile = files.find((f) => f.startsWith('图档'))
+  const data: { imageUrl?: string; drawingsUrl?: string } = {}
+  if (imageFile) data.imageUrl = urlFor(relDir, imageFile)
+  if (drawingFile) data.drawingsUrl = urlFor(relDir, drawingFile)
+  if (data.imageUrl || data.drawingsUrl) {
+    await prisma.part.update({ where: { id: partId }, data })
+  }
+}
 
 function parseBody<T>(schema: z.ZodType<T>, body: unknown, reply: FastifyReply): T | null {
   const result = schema.safeParse(body)
@@ -161,16 +190,61 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
         return reply.code(400).send({ error: '价格由采购维护，工程不可修改' })
       }
     }
+    const before =
+      spec.resource === 'part' || spec.resource === 'product'
+        ? await delegate.findUnique({ where: { id } }).catch(() => null)
+        : null
     const data = parseBody(spec.schema, req.body, reply)
     if (data === null) return
     const record = await delegate.update({ where: { id }, data })
+
+    // 零件改名/改 SKU：移动文件夹并同步图片/图档 URL
+    if (spec.resource === 'part' && before && (before.sku !== record.sku || before.name !== record.name)) {
+      const productSkus = await productSkusForPart(record.id)
+      const moved = await movePartFolder(partDirName(before.sku, before.name), partDirName(record.sku, record.name), productSkus)
+      await syncPartUrlsFromFolder(record.id, moved.relDir, moved.files)
+    }
+    // 成品改 SKU：移动成品目录并更新其中所有文件 URL 前缀
+    if (spec.resource === 'product' && before && before.sku !== record.sku) {
+      const { moved } = await moveProductFolder(before.sku, record.sku)
+      if (moved) {
+        const oldPrefix = '/uploads/' + slugify(before.sku) + '/'
+        const newPrefix = '/uploads/' + slugify(record.sku) + '/'
+        const upd = await prisma.product.findUnique({ where: { id: record.id } })
+        if (upd?.imageUrl?.startsWith(oldPrefix)) {
+          await prisma.product.update({
+            where: { id: record.id },
+            data: { imageUrl: upd.imageUrl.replace(oldPrefix, newPrefix) },
+          })
+        }
+        const parts = await prisma.part.findMany({
+          where: { OR: [{ imageUrl: { startsWith: oldPrefix } }, { drawingsUrl: { startsWith: oldPrefix } }] },
+          select: { id: true, imageUrl: true, drawingsUrl: true },
+        })
+        for (const p of parts) {
+          await prisma.part.update({
+            where: { id: p.id },
+            data: {
+              ...(p.imageUrl?.startsWith(oldPrefix) ? { imageUrl: p.imageUrl.replace(oldPrefix, newPrefix) } : {}),
+              ...(p.drawingsUrl?.startsWith(oldPrefix) ? { drawingsUrl: p.drawingsUrl.replace(oldPrefix, newPrefix) } : {}),
+            },
+          })
+        }
+      }
+    }
     return reply.code(200).send(record)
   })
 
   app.delete(`${base}/:id`, { preHandler: write }, async (req, reply) => {
     const id = parseId(req as { params: { id: string } }, reply)
     if (id === null) return
-    await delegate.delete({ where: { id } })
+    if (spec.resource === 'part') {
+      const before = await delegate.findUnique({ where: { id } }).catch(() => null)
+      await delegate.delete({ where: { id } })
+      if (before) await removePartFolder(partDirName(before.sku, before.name))
+    } else {
+      await delegate.delete({ where: { id } })
+    }
     return reply.code(200).send({ ok: true })
   })
 }
@@ -196,10 +270,20 @@ export function mastersRoutes(app: FastifyInstance) {
     if (productId === null) return
     const items = parseBody(bomSchema, req.body, reply)
     if (items === null) return
+    const oldPartIds = (await prisma.bom.findMany({ where: { productId }, select: { partId: true } })).map((b) => b.partId)
     await prisma.$transaction([
       prisma.bom.deleteMany({ where: { productId } }),
       prisma.bom.createMany({ data: items.map((item) => ({ productId, ...item })) }),
     ])
+    // 保存 BOM 后把受影响的零件文件归位（_未分类 → 成品目录 / _共用），并同步数据库 URL
+    const affected = [...new Set([...oldPartIds, ...items.map((i) => i.partId)])]
+    for (const partId of affected) {
+      const part = await prisma.part.findUnique({ where: { id: partId } })
+      if (!part) continue
+      const productSkus = await productSkusForPart(partId)
+      const result = await rehomePartFolder(partDirName(part.sku, part.name), productSkus)
+      await syncPartUrlsFromFolder(partId, result.relDir, result.files)
+    }
     const boms = await prisma.bom.findMany({
       where: { productId },
       orderBy: { partId: 'asc' },

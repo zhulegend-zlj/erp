@@ -34,7 +34,7 @@ MTO（按单组装/贸易）ERP：销售订单 → BOM 需求 → 采购 → 收
   - BOM 326
 - **待办数据**：P1927-DAPM 新机型的三张采购单（PO-DS-0217A/C/D，供应商晨鑫/铭亚/合丰磁铁）里的零件尚未录入——按分工由「工程」账号在基础资料录入零件（编号用采购单固有编号如 P1927-14872，不填价格），「采购」负责挂供应商、填价格。
 - **数据恢复记录**：2026-08-22 开发时曾误用测试清库脚本清空过开发库，已通过 `npx tsx --env-file=.env prisma/import-real-data.ts` 从微信目录 Excel 全量重导（成品 3 / 零件 557 / 供应商 65 / BOM 326，记录 id 已重新生成）；业务数据（订单/采购单/库存/出货/财务）为空，需重新走流程测试。
-- 图片/图档存储：`backend/uploads/`（已 gitignore），通过 `/uploads/...` 访问；零件图片与图档（pdf/dwg/dxf/step/stp/igs/zip/xlsx，≤20MB）均可上传。
+- 图片/图档存储：`backend/uploads/`（已 gitignore），经 `/uploads/...` 访问。**目录组织策略（2026-08-22 起）**：`<成品SKU>/<零件SKU>-<零件名>/图片.ext|图档.ext`；挂多个成品的进 `_共用/`，未挂 BOM 的进 `_未分类/`（保存 BOM 自动归位并更新 URL）；成品图片 `uploads/<成品SKU>/图片.ext`。旧 uuid 文件已按老板指示全部删除、数据库图片/图档路径已置空，由工程重新上传精准数据。
 - 导入脚本：`backend/prisma/import-real-data.ts`，其中 Excel 路径写死为本机微信目录。
 - **家里数据库迁移**：家里库若缺 `engineer` 枚举值，跑 `cd backend && npx prisma migrate deploy`；6 个账号可用 `npx tsx --env-file=.env prisma/seed.ts` 重建（注意：会把所有账号密码重置回 88888888）。
 

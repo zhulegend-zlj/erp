@@ -47,13 +47,20 @@ const DRAWING_ACCEPT = '.pdf,.dwg,.dxf,.step,.stp,.igs,.zip,.xlsx,.jpg,.jpeg,.pn
 function FileUpload({
   value,
   onChange,
+  partSku,
+  partName,
 }: {
   value?: string
   onChange?: (v: string | null) => void
+  partSku?: string
+  partName?: string
 }) {
   async function customRequest(options: any) {
     const formData = new FormData()
     formData.append('file', options.file)
+    formData.append('kind', 'drawing')
+    if (partSku) formData.append('partSku', partSku)
+    if (partName) formData.append('partName', partName)
     try {
       const { data } = await api.post<{ url: string }>('/uploads', formData)
       onChange?.(data.url)
@@ -97,13 +104,25 @@ function FileUpload({
 function ImageUpload({
   value,
   onChange,
+  kind,
+  partSku,
+  partName,
+  productSku,
 }: {
   value?: string
   onChange?: (v: string | null) => void
+  kind?: 'image' | 'product-image'
+  partSku?: string
+  partName?: string
+  productSku?: string
 }) {
   async function customRequest(options: any) {
     const formData = new FormData()
     formData.append('file', options.file)
+    if (kind) formData.append('kind', kind)
+    if (partSku) formData.append('partSku', partSku)
+    if (partName) formData.append('partName', partName)
+    if (productSku) formData.append('productSku', productSku)
     try {
       const { data } = await api.post<{ url: string }>('/uploads', formData)
       onChange?.(data.url)
@@ -211,6 +230,11 @@ function CrudTab({
   const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [form] = Form.useForm<Record<string, any>>()
   const pageSize = 10
+  // 上传时带上表单中的 SKU/名称，让后端按 成品/零件 目录归位文件
+  const sku = Form.useWatch('sku', form) as string | undefined
+  const name = Form.useWatch('name', form) as string | undefined
+  const isPart = resource.path === '/parts'
+  const isProduct = resource.path === '/products'
 
   async function load(targetPage = 1) {
     setLoading(true)
@@ -427,9 +451,14 @@ function CrudTab({
                   options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
                 />
               ) : f.type === 'image' ? (
-                <ImageUpload />
+                <ImageUpload
+                  kind={isPart ? 'image' : isProduct ? 'product-image' : undefined}
+                  partSku={isPart ? sku : undefined}
+                  partName={isPart ? name : undefined}
+                  productSku={isProduct ? sku : undefined}
+                />
               ) : f.type === 'drawing' ? (
-                <FileUpload />
+                <FileUpload partSku={isPart ? sku : undefined} partName={isPart ? name : undefined} />
               ) : f.type === 'number' ? (
                 <InputNumber min={0} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
               ) : (
