@@ -51,6 +51,8 @@ const partSchema = z.object({
   imageUrl: z.string().nullable().optional(),
   drawingsUrl: z.string().nullable().optional(),
   tooling: z.string().nullable().optional(),
+  usedIn: z.string().nullable().optional(),
+  process: z.string().nullable().optional(),
   moq: z.number({ error: 'MOQ 必须为整数' }).int().positive().max(2147483647, { error: 'MOQ 超出允许范围' }).nullable().optional(),
   price: z
     .number({ error: '价格必须为数字' })

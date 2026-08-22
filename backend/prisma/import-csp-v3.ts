@@ -49,7 +49,7 @@ async function main() {
 
   const skuUsed = new Map<string, number>()
   const assumptions: string[] = []
-  const mapping: unknown[][] = [['表内序号', '原表料号', '新SKU', '零件名称', '用量']]
+  const mapping: unknown[][] = [['表内序号', '原表料号', '新SKU', '零件名称', '用量', '供应商']]
   let csp13Seq = 0
   let mSeq = 0
   let screwCount = 0
@@ -73,6 +73,8 @@ async function main() {
     const amountRaw = raw[11]
     const amount = amountRaw === null || amountRaw === undefined || String(amountRaw).trim() === '' ? 1 : Number(amountRaw)
     const tooling = clean(raw[13])
+    const moqRaw = raw[14]
+    const vendorRaw = clean(raw[19])
 
     if (!name) {
       assumptions.push('跳过无名称行 序号' + clean(raw[0]))
@@ -113,23 +115,38 @@ async function main() {
     }
 
     const spec = [material, dims, finish].filter(Boolean).join('｜')
+    // 供应商（表内 Vendorid 列）：像名字的建/挂供应商，'0'、'自己打印'、'改为自购' 等非供应商值跳过
+    const vendorName = vendorRaw && vendorRaw !== '0' && !vendorRaw.includes('自己打印') && !vendorRaw.includes('改为自购')
+      ? vendorRaw.split('/')[0]!.trim()
+      : ''
+    let supplierId: number | null = null
+    if (vendorName) {
+      const existingSupplier = await prisma.supplier.findFirst({ where: { name: vendorName } })
+      supplierId =
+        existingSupplier?.id ??
+        (await prisma.supplier.create({ data: { name: vendorName } })).id
+    }
     const existingPart = await prisma.part.findUnique({ where: { sku } })
-    const part =
-      existingPart ??
-      (await prisma.part.create({
-        data: {
-          sku,
-          name: name.slice(0, 80),
-          unit: '个',
-          spec: spec.slice(0, 200) || null,
-          tooling: tooling || null,
-        },
-      }))
-    if (!existingPart) partCount++
+    const partData = {
+      sku,
+      name: name.slice(0, 80),
+      unit: '个',
+      spec: spec.slice(0, 200) || null,
+      tooling: tooling || null,
+      moq: moqRaw === '' ? null : Number(moqRaw),
+      supplierId,
+    }
+    let part = existingPart
+    if (!existingPart) {
+      part = await prisma.part.create({ data: partData })
+      partCount++
+    } else {
+      await prisma.part.update({ where: { id: existingPart.id }, data: partData })
+    }
 
     // 同一 SKU 出现多行时用量累加（如跨机种共用螺丝）
     bomQty.set(part.id, (bomQty.get(part.id) ?? 0) + amount)
-    mapping.push([clean(raw[0]), id || '-', sku, name, amount])
+    mapping.push([clean(raw[0]), id || '-', sku, name, amount, vendorRaw])
   }
 
   for (const [partId, qty] of bomQty.entries()) {

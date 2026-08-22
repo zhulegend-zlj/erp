@@ -69,6 +69,8 @@ model Part {
   tooling String?
   moq    Int?
   price  Decimal? @db.Decimal(12,4)
+  usedIn String? // 用在何处
+  process String? // 生产工艺
   supplier   Supplier? @relation(fields: [supplierId], references: [id])
   supplierId Int?
   boms   Bom[]
