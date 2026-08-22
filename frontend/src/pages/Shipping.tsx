@@ -224,11 +224,14 @@ export default function Shipping() {
             total,
             showSizeChanger: true,
             pageSizeOptions: [10, 20, 50, 100],
-            onShowSizeChange: (_c, s) => {
-              setPageSize(s)
-              void load(1, s)
+            onChange: (p, s) => {
+              if (s !== pageSize) {
+                setPageSize(s)
+                void load(1, s)
+              } else {
+                void load(p)
+              }
             },
-            onChange: (p) => void load(p),
           }}
           columns={columns}
           expandable={{

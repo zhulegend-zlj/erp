@@ -396,11 +396,14 @@ export default function Purchasing() {
             total: poTotal,
             showSizeChanger: true,
             pageSizeOptions: [10, 20, 50, 100],
-            onShowSizeChange: (_c, s) => {
-              setPoPageSize(s)
-              void loadPos(1, s)
+            onChange: (p, s) => {
+              if (s !== poPageSize) {
+                setPoPageSize(s)
+                void loadPos(1, s)
+              } else {
+                void loadPos(p)
+              }
             },
-            onChange: (p) => void loadPos(p),
           }}
           columns={[
             { title: '采购单号', dataIndex: 'orderNo', key: 'orderNo' },

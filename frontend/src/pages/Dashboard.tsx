@@ -109,7 +109,7 @@ export default function Dashboard() {
           columns={columns}
           dataSource={summary?.orders ?? []}
           loading={loading}
-          pagination={{ pageSize: 10, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100] }}
+          pagination={{ showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100] }}
         />
       </Card>
     </div>

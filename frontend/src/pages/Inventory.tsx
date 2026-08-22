@@ -422,11 +422,14 @@ function QcPanel({ refreshToken }: { refreshToken: number }) {
           total,
           showSizeChanger: true,
           pageSizeOptions: [10, 20, 50, 100],
-          onShowSizeChange: (_c, s) => {
-            setPageSize(s)
-            void load(1, s)
+          onChange: (p, s) => {
+            if (s !== pageSize) {
+              setPageSize(s)
+              void load(1, s)
+            } else {
+              void load(p)
+            }
           },
-          onChange: (p) => void load(p),
         }}
         columns={[
           { title: '时间', dataIndex: 'receivedAt', key: 'receivedAt', render: dateTimeStr, width: 150 },
@@ -872,11 +875,14 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
           total,
           showSizeChanger: true,
           pageSizeOptions: [10, 20, 50, 100],
-          onShowSizeChange: (_c, s) => {
-            setPageSize(s)
-            void load(1, itemType, keyword, s)
+          onChange: (p, s) => {
+            if (s !== pageSize) {
+              setPageSize(s)
+              void load(1, itemType, keyword, s)
+            } else {
+              void load(p, itemType, keyword)
+            }
           },
-          onChange: (p) => void load(p, itemType, keyword),
         }}
         columns={[
           {
@@ -1037,11 +1043,14 @@ function LedgerTab({ parts, orders }: { parts: Part[]; orders: SalesOrder[] }) {
           total,
           showSizeChanger: true,
           pageSizeOptions: [10, 20, 50, 100],
-          onShowSizeChange: (_c, s) => {
-            setPageSize(s)
-            void query(1, s)
+          onChange: (p, s) => {
+            if (s !== pageSize) {
+              setPageSize(s)
+              void query(1, s)
+            } else {
+              void query(p)
+            }
           },
-          onChange: (p) => void query(p),
         }}
         columns={[
           { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr, width: 150 },
@@ -1455,11 +1464,14 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
           total,
           showSizeChanger: true,
           pageSizeOptions: [10, 20, 50, 100],
-          onShowSizeChange: (_c, s) => {
-            setPageSize(s)
-            void load(1, s)
+          onChange: (p, s) => {
+            if (s !== pageSize) {
+              setPageSize(s)
+              void load(1, s)
+            } else {
+              void load(p)
+            }
           },
-          onChange: (p) => void load(p),
         }}
         columns={[
           {
@@ -1581,11 +1593,14 @@ function WarehouseLedgerTab() {
           total,
           showSizeChanger: true,
           pageSizeOptions: [10, 20, 50, 100],
-          onShowSizeChange: (_c, s) => {
-            setPageSize(s)
-            void load(1, s)
+          onChange: (p, s) => {
+            if (s !== pageSize) {
+              setPageSize(s)
+              void load(1, s)
+            } else {
+              void load(p)
+            }
           },
-          onChange: (p) => void load(p),
         }}
         columns={[
           { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr },
