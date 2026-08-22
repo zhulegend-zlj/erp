@@ -1,4 +1,4 @@
-# 允许局域网访问 ERP（需以管理员身份运行 PowerShell）
+﻿# 允许局域网访问 ERP（需以管理员身份运行 PowerShell）
 # 用法：右键"以管理员身份运行 Windows PowerShell"，然后执行：
 #   Set-ExecutionPolicy -Scope Process Bypass
 #   .\allow-lan-firewall.ps1

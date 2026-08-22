@@ -116,6 +116,35 @@ if (-not (Test-Path $outFile)) {
 $sizeMb = [Math]::Round((Get-Item $outFile).Length / 1MB, 2)
 Write-Log "备份完成: $outFile ($sizeMb MB)"
 
+# 4.5 备份上传文件（图片/图档）——数据库只存路径，文件本身也要备
+$uploadSrc = Join-Path $PSScriptRoot '..\backend\uploads'
+if (Test-Path $uploadSrc) {
+  $uploadDst = Join-Path $BackupDir ("uploads-$stamp")
+  $robocopyArgs = @($uploadSrc, $uploadDst, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NP')
+  $roboOut = & robocopy @robocopyArgs 2>&1
+  $roboExit = $LASTEXITCODE
+  # robocopy 0-7 均视为成功（8+ 才是失败）
+  if ($roboExit -ge 8) {
+    Write-Log "警告：uploads 备份失败，robocopy 退出码 $roboExit"
+    foreach ($line in $roboOut) { Write-Log "robocopy: $line" }
+  } else {
+    $uploadCount = @(Get-ChildItem -Path $uploadDst -Recurse -File -ErrorAction SilentlyContinue).Count
+    Write-Log "uploads 备份完成: $uploadDst（$uploadCount 个文件）"
+  }
+} else {
+  Write-Log "跳过 uploads 备份：目录不存在 $uploadSrc"
+}
+
+# 4.6 清理过期的 uploads 备份（与 SQL 备份同一保留策略）
+$uploadBackups = @(Get-ChildItem -Path $BackupDir -Directory -Filter 'uploads-*' | Sort-Object Name -Descending)
+if ($uploadBackups.Count -gt $Retention) {
+  $oldUploads = $uploadBackups | Select-Object -Skip $Retention
+  foreach ($d in $oldUploads) {
+    Remove-Item $d.FullName -Recurse -Force
+    Write-Log "删除旧 uploads 备份: $($d.Name)"
+  }
+}
+
 # 5. 保留最近 Retention 份，删除更旧的备份
 $backups = @(Get-ChildItem -Path $BackupDir -Filter 'erp-*.sql' -File | Sort-Object Name -Descending)
 if ($backups.Count -gt $Retention) {
