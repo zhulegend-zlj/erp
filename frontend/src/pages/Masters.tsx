@@ -243,6 +243,7 @@ function CrudTab({
   const [submitting, setSubmitting] = useState(false)
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
+  const [keyword, setKeyword] = useState('')
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkingRow, setLinkingRow] = useState<CrudRow | null>(null)
   const [linkSupplierId, setLinkSupplierId] = useState<number | undefined>()
@@ -264,12 +265,15 @@ function CrudTab({
     }
   }
 
-  async function load(targetPage = 1, size?: number) {
+  async function load(targetPage = 1, size?: number, searchTerm?: string) {
     setLoading(true)
     try {
       const ps = size ?? pageSize
+      const kw = searchTerm !== undefined ? searchTerm : keyword
+      const params: Record<string, string | number> = { page: targetPage, pageSize: ps }
+      if (kw) params.search = kw
       const { data } = await api.get<Paged<CrudRow>>(resource.path, {
-        params: { page: targetPage, pageSize: ps },
+        params,
       })
       setRows(data.items)
       setTotal(data.total)
@@ -449,7 +453,26 @@ function CrudTab({
 
   return (
     <>
-      {canWrite ? (
+      {isPart ? (
+        <Space style={{ marginBottom: 16 }} wrap>
+          {canWrite ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建{resource.label}
+            </Button>
+          ) : null}
+          <Input.Search
+            placeholder="按料号/名称/英文品名搜索"
+            allowClear
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            onSearch={(v) => {
+              setKeyword(v)
+              void load(1, undefined, v)
+            }}
+            style={{ width: 260 }}
+          />
+        </Space>
+      ) : canWrite ? (
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate} style={{ marginBottom: 16 }}>
           新建{resource.label}
         </Button>

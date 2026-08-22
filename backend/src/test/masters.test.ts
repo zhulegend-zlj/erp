@@ -215,6 +215,45 @@ describe('masters 权限（工程/采购分工）', () => {
     expect(order).toEqual(['CSP-003', 'CSS-1', 'CSS-012', 'CSS-014', 'P1927-14872', 'P1927-14873', 'SUP-10345'])
   })
 
+  it('零件搜索：料号/中文名/英文名不区分大小写，分页总数同步过滤', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'engineer')
+    const seed = [
+      { sku: 'CSP-013-1', name: '铝套管20*77.8', nameEn: 'aluminium sleeve 77' },
+      { sku: 'M3x13-杯头', name: '杯头内六角螺丝', nameEn: 'socket screw' },
+      { sku: 'P-AAA', name: '弹簧', nameEn: 'spring' },
+    ]
+    for (const p of seed) {
+      const res = await app.inject({
+        method: 'POST', url: '/api/parts', headers: { cookie },
+        payload: { ...p, unit: '个' }
+      })
+      expect(res.statusCode).toBe(200)
+    }
+    // 料号模糊 + 大小写不敏感
+    const bySku = await app.inject({ method: 'GET', url: '/api/parts?search=csp-013', headers: { cookie } })
+    expect(bySku.statusCode).toBe(200)
+    expect((bySku.json() as { sku: string }[]).map((p) => p.sku)).toEqual(['CSP-013-1'])
+    // 中文名称
+    const byName = await app.inject({ method: 'GET', url: '/api/parts?search=' + encodeURIComponent('铝套管'), headers: { cookie } })
+    expect((byName.json() as { sku: string }[]).map((p) => p.sku)).toEqual(['CSP-013-1'])
+    // 英文品名
+    const byEn = await app.inject({ method: 'GET', url: '/api/parts?search=SPRING', headers: { cookie } })
+    expect((byEn.json() as { sku: string }[]).map((p) => p.sku)).toEqual(['P-AAA'])
+    // 分页 total 同步过滤
+    const paged = await app.inject({ method: 'GET', url: '/api/parts?search=' + encodeURIComponent('螺丝') + '&page=1&pageSize=2', headers: { cookie } })
+    expect(paged.statusCode).toBe(200)
+    expect(paged.json().total).toBe(1)
+    expect((paged.json().items as { sku: string }[]).map((p) => p.sku)).toEqual(['M3x13-杯头'])
+    // LIKE 特殊字符不报错、不误匹配
+    const special = await app.inject({ method: 'GET', url: '/api/parts?search=%25_', headers: { cookie } })
+    expect(special.statusCode).toBe(200)
+    expect((special.json() as unknown[]).length).toBe(0)
+    // 非字符串参数 → 400
+    const bad = await app.inject({ method: 'GET', url: '/api/parts?search=1&search=2', headers: { cookie } })
+    expect(bad.statusCode).toBe(400)
+  })
+
   it('零件列表分页时保持同一排序', async () => {
     const app = buildApp()
     const cookie = await loginCookie(app, 'engineer')

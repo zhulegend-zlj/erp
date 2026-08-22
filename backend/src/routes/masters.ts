@@ -155,21 +155,33 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
     // 零件：按 SKU 字母前缀分组（同一产品族排在一起），组内按 SKU 中的数字从小到大排序
     if (spec.resource === 'part') {
       const orderBySql = Prisma.sql`ORDER BY lower(substring("sku" FROM '^[A-Za-z]*')) ASC, (SELECT array_agg(x)::bigint[] FROM regexp_matches("sku", '[0-9]+', 'g') AS x) ASC, "sku" ASC`
+      // 搜索：料号/中文名称/英文品名，不区分大小写模糊匹配（LIKE 特殊字符转义）
+      const searchRaw = (req.query as Record<string, unknown>).search
+      let search = ''
+      if (searchRaw !== undefined && searchRaw !== null) {
+        if (typeof searchRaw !== 'string') return reply.code(400).send({ error: 'search 必须为字符串' })
+        search = searchRaw.trim().slice(0, 100)
+      }
+      const escaped = search.replace(/[\\%_]/g, (c) => '\\' + c)
+      const whereSql = search
+        ? Prisma.sql`WHERE (lower("sku") LIKE lower(${'%' + escaped + '%'}) ESCAPE '\\' OR lower("name") LIKE lower(${'%' + escaped + '%'}) ESCAPE '\\' OR lower(coalesce("nameEn", '')) LIKE lower(${'%' + escaped + '%'}) ESCAPE '\\')`
+        : Prisma.empty
       const role = (req as { user?: { role?: string } }).user?.role ?? ''
       // 采购价格仅采购/老板可见：其余角色（工程/仓库/销售/财务）剥离 price
       const hidePrice = role !== 'purchase' && role !== 'boss'
       const strip = (rows: unknown[]) =>
         hidePrice ? rows.map((r) => { const { price: _price, ...rest } = (r ?? {}) as Record<string, unknown>; return rest }) : rows
       if (pagination.kind === 'none') {
-        const rows = await prisma.$queryRaw(Prisma.sql`SELECT * FROM "Part" ${orderBySql}`)
+        const rows = await prisma.$queryRaw(Prisma.sql`SELECT * FROM "Part" ${whereSql} ${orderBySql}`)
         return strip(rows as unknown[])
       }
       const page = pagination.page
       const offset = (page.page - 1) * page.pageSize
-      const [rows, total] = await Promise.all([
-        prisma.$queryRaw(Prisma.sql`SELECT * FROM "Part" ${orderBySql} LIMIT ${page.pageSize} OFFSET ${offset}`),
-        prisma.part.count(),
+      const [rows, totalRows] = await Promise.all([
+        prisma.$queryRaw(Prisma.sql`SELECT * FROM "Part" ${whereSql} ${orderBySql} LIMIT ${page.pageSize} OFFSET ${offset}`),
+        prisma.$queryRaw`SELECT count(*)::int AS n FROM "Part" ${whereSql}`,
       ])
+      const total = (totalRows as { n: number }[])[0]?.n ?? 0
       return pagedResult(strip(rows as unknown[]), total, page)
     }
 
