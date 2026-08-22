@@ -526,6 +526,28 @@ describe('hardening（加固回归）', () => {
     })
   })
 
+  describe('采购价格可见性', () => {
+    it('零件列表的采购价格仅采购/老板可见，工程/仓库看不到', async () => {
+      const supplier = await prisma.supplier.create({ data: { name: '供应商-PRICE-VIS' } })
+      await prisma.part.create({ data: { sku: 'P-PRICE-VIS', name: '价格可见零件', supplierId: supplier.id, price: 3.25 } })
+      const app = buildApp()
+      for (const role of ['purchase', 'boss'] as const) {
+        const cookie = await loginCookie(app, role)
+        const res = await app.inject({ method: 'GET', url: '/api/parts', headers: { cookie } })
+        const row = (res.json() as { sku: string; price?: unknown }[]).find((r) => r.sku === 'P-PRICE-VIS')
+        expect(row?.price).toBe('3.25')
+      }
+      for (const role of ['engineer', 'warehouse', 'sales', 'finance'] as const) {
+        const cookie = await loginCookie(app, role)
+        const res = await app.inject({ method: 'GET', url: '/api/parts', headers: { cookie } })
+        expect(res.statusCode).toBe(200)
+        const row = (res.json() as { sku: string; price?: unknown }[]).find((r) => r.sku === 'P-PRICE-VIS')
+        expect(row).toBeDefined()
+        expect('price' in (row as object)).toBe(false)
+      }
+    })
+  })
+
   describe('销售单价可见性', () => {
     it('purchase/warehouse/engineer 看不到销售单价，sales/boss 可以看到', async () => {
       const customer = await prisma.customer.create({ data: { name: '客户-PRC' } })

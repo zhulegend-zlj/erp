@@ -218,6 +218,7 @@ function CrudTab({
   canWrite,
   linkSupplierOnly,
   omitFields,
+  hideFields,
 }: {
   resource: CrudResource
   canWrite: boolean
@@ -225,6 +226,8 @@ function CrudTab({
   linkSupplierOnly?: boolean
   /** 表单中不显示的字段（如工程不填价格） */
   omitFields?: string[]
+  /** 列表中不显示的字段（如工程看不到采购价格列） */
+  hideFields?: string[]
 }) {
   const [rows, setRows] = useState<CrudRow[]>([])
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
@@ -305,6 +308,8 @@ function CrudTab({
   async function handleSubmit(values: Record<string, any>) {
     setSubmitting(true)
     const payload: Record<string, any> = { ...values }
+    // 被 omitFields 隐藏的字段即使留在表单 store 里也不提交（如工程的价格/供应商）
+    for (const key of omitFields ?? []) delete payload[key]
     for (const f of resource.fields) {
       if (f.type === 'supplier' || f.type === 'number') {
         const v = payload[f.key]
@@ -368,7 +373,7 @@ function CrudTab({
   }
 
   const columns = [
-    ...resource.fields.map((f) => ({
+    ...resource.fields.filter((f) => !hideFields?.includes(f.key)).map((f) => ({
       title: f.label,
       dataIndex: f.key,
       key: f.key,
@@ -805,6 +810,7 @@ export default function Masters() {
                 canWrite={canWriteEngineering}
                 linkSupplierOnly={linkSupplierOnly}
                 omitFields={role === 'engineer' ? ['price', 'supplierId'] : undefined}
+                hideFields={role === 'engineer' ? ['price'] : undefined}
               />
             ),
           },

@@ -132,9 +132,14 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
     // 零件：按 SKU 字母前缀分组（同一产品族排在一起），组内按 SKU 中的数字从小到大排序
     if (spec.resource === 'part') {
       const orderBySql = Prisma.sql`ORDER BY lower(substring("sku" FROM '^[A-Za-z]*')) ASC, (SELECT array_agg(x)::bigint[] FROM regexp_matches("sku", '[0-9]+', 'g') AS x) ASC, "sku" ASC`
+      const role = (req as { user?: { role?: string } }).user?.role ?? ''
+      // 采购价格仅采购/老板可见：其余角色（工程/仓库/销售/财务）剥离 price
+      const hidePrice = role !== 'purchase' && role !== 'boss'
+      const strip = (rows: unknown[]) =>
+        hidePrice ? rows.map((r) => { const { price: _price, ...rest } = (r ?? {}) as Record<string, unknown>; return rest }) : rows
       if (pagination.kind === 'none') {
         const rows = await prisma.$queryRaw(Prisma.sql`SELECT * FROM "Part" ${orderBySql}`)
-        return rows
+        return strip(rows as unknown[])
       }
       const page = pagination.page
       const offset = (page.page - 1) * page.pageSize
@@ -142,7 +147,7 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
         prisma.$queryRaw(Prisma.sql`SELECT * FROM "Part" ${orderBySql} LIMIT ${page.pageSize} OFFSET ${offset}`),
         prisma.part.count(),
       ])
-      return pagedResult(rows as unknown[], total, page)
+      return pagedResult(strip(rows as unknown[]), total, page)
     }
 
     if (pagination.kind === 'none') {
