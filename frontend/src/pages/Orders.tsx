@@ -67,11 +67,12 @@ export default function Orders() {
   const canCreate = user?.role === 'sales'
   const canAdvance = user?.role === 'sales' || user?.role === 'boss'
 
-  async function load(targetPage: number = page) {
+  async function load(targetPage: number = page, size?: number) {
     setLoading(true)
     try {
+      const ps = size ?? pageSize
       const { data } = await api.get<Paged<SalesOrder>>('/orders', {
-        params: { page: targetPage, pageSize },
+        params: { page: targetPage, pageSize: ps },
       })
       setOrders(data.items)
       setTotal(data.total)
@@ -243,7 +244,7 @@ export default function Orders() {
           pageSizeOptions: [10, 20, 50, 100],
           onShowSizeChange: (_c, s) => {
             setPageSize(s)
-            void load(1)
+            void load(1, s)
           },
           onChange: (p) => void load(p),
         }}

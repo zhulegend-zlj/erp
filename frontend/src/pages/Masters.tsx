@@ -258,11 +258,12 @@ function CrudTab({
     }
   }
 
-  async function load(targetPage = 1) {
+  async function load(targetPage = 1, size?: number) {
     setLoading(true)
     try {
+      const ps = size ?? pageSize
       const { data } = await api.get<Paged<CrudRow>>(resource.path, {
-        params: { page: targetPage, pageSize },
+        params: { page: targetPage, pageSize: ps },
       })
       setRows(data.items)
       setTotal(data.total)
@@ -457,7 +458,7 @@ function CrudTab({
           pageSizeOptions: [10, 20, 50, 100],
           onShowSizeChange: (_c, s) => {
             setPageSize(s)
-            void load(1)
+            void load(1, s)
           },
           onChange: (p) => void load(p),
         }}

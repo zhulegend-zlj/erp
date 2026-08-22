@@ -121,11 +121,12 @@ export default function Purchasing() {
 
   const canCreate = user?.role === 'purchase'
 
-  async function loadPos(targetPage = 1) {
+  async function loadPos(targetPage = 1, size?: number) {
     setPoLoading(true)
     try {
+      const ps = size ?? poPageSize
       const { data } = await api.get<Paged<PurchaseOrderRow>>('/purchase-orders', {
-        params: { page: targetPage, pageSize: poPageSize },
+        params: { page: targetPage, pageSize: ps },
       })
       setPurchaseOrders(data.items)
       setPoTotal(data.total)
@@ -397,7 +398,7 @@ export default function Purchasing() {
             pageSizeOptions: [10, 20, 50, 100],
             onShowSizeChange: (_c, s) => {
               setPoPageSize(s)
-              void loadPos(1)
+              void loadPos(1, s)
             },
             onChange: (p) => void loadPos(p),
           }}

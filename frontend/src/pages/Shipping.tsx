@@ -68,12 +68,13 @@ export default function Shipping() {
 
   const canOperate = user?.role === 'sales'
 
-  async function load(targetPage = page) {
+  async function load(targetPage = page, size?: number) {
     setLoading(true)
     try {
+      const ps = size ?? pageSize
       const [o, s] = await Promise.all([
         api.get<SalesOrder[]>('/orders'),
-        api.get<Paged<Shipment>>('/shipments', { params: { page: targetPage, pageSize } }),
+        api.get<Paged<Shipment>>('/shipments', { params: { page: targetPage, pageSize: ps } }),
       ])
       setOrders(o.data)
       setShipments(s.data.items)
@@ -225,7 +226,7 @@ export default function Shipping() {
             pageSizeOptions: [10, 20, 50, 100],
             onShowSizeChange: (_c, s) => {
               setPageSize(s)
-              void load(1)
+              void load(1, s)
             },
             onChange: (p) => void load(p),
           }}

@@ -351,11 +351,12 @@ function QcPanel({ refreshToken }: { refreshToken: number }) {
   const [form] = Form.useForm<{ qcStatus?: string; defectiveQty?: number; lotNo?: string }>()
   const [pageSize, setPageSize] = useState(10)
 
-  async function load(targetPage = 1) {
+  async function load(targetPage = 1, size?: number) {
     setLoading(true)
     try {
+      const ps = size ?? pageSize
       const { data } = await api.get<Paged<ReceiptRecord>>('/receipts', {
-        params: { page: targetPage, pageSize },
+        params: { page: targetPage, pageSize: ps },
       })
       setRows(data.items)
       setTotal(data.total)
@@ -423,7 +424,7 @@ function QcPanel({ refreshToken }: { refreshToken: number }) {
           pageSizeOptions: [10, 20, 50, 100],
           onShowSizeChange: (_c, s) => {
             setPageSize(s)
-            void load(1)
+            void load(1, s)
           },
           onChange: (p) => void load(p),
         }}
@@ -811,15 +812,16 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
   const [total, setTotal] = useState(0)
   const [pageSize, setPageSize] = useState(10)
 
-  async function load(targetPage = 1, type?: string, kw?: string) {
+  async function load(targetPage = 1, type?: string, kw?: string, size?: number) {
     setLoading(true)
     try {
+      const ps = size ?? pageSize
       const { data } = await api.get<Paged<StockRow>>('/stock', {
         params: {
           itemType: type || undefined,
           keyword: kw || undefined,
           page: targetPage,
-          pageSize,
+          pageSize: ps,
         },
       })
       setRows(data.items)
@@ -872,7 +874,7 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
           pageSizeOptions: [10, 20, 50, 100],
           onShowSizeChange: (_c, s) => {
             setPageSize(s)
-            void load(1, itemType, keyword)
+            void load(1, itemType, keyword, s)
           },
           onChange: (p) => void load(p, itemType, keyword),
         }}
@@ -945,16 +947,17 @@ function LedgerTab({ parts, orders }: { parts: Part[]; orders: SalesOrder[] }) {
       .catch(notifyError)
   }, [])
 
-  async function query(targetPage = 1) {
+  async function query(targetPage = 1, size?: number) {
     setLoading(true)
     try {
+      const ps = size ?? pageSize
       const { data } = await api.get<Paged<LedgerSearchRow>>('/inventory/ledger-search', {
         params: {
           salesOrderNo: salesOrderNo || undefined,
           purchaseOrderNo: purchaseOrderNo || undefined,
           partId: partId || undefined,
           page: targetPage,
-          pageSize,
+          pageSize: ps,
         },
       })
       setRows(data.items)
@@ -1036,7 +1039,7 @@ function LedgerTab({ parts, orders }: { parts: Part[]; orders: SalesOrder[] }) {
           pageSizeOptions: [10, 20, 50, 100],
           onShowSizeChange: (_c, s) => {
             setPageSize(s)
-            void query(1)
+            void query(1, s)
           },
           onChange: (p) => void query(p),
         }}
@@ -1251,12 +1254,13 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
     note?: string
   }>()
 
-  async function load(targetPage = 1) {
+  async function load(targetPage = 1, size?: number) {
     setLoading(true)
     try {
+      const ps = size ?? pageSize
       const [r, s, po] = await Promise.all([
         api.get<Paged<ReturnReplenishRow>>('/return-replenishments', {
-          params: { page: targetPage, pageSize },
+          params: { page: targetPage, pageSize: ps },
         }),
         api.get<SupplierOption[]>('/suppliers'),
         api.get<PoForRR[]>('/purchase-orders'),
@@ -1453,7 +1457,7 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
           pageSizeOptions: [10, 20, 50, 100],
           onShowSizeChange: (_c, s) => {
             setPageSize(s)
-            void load(1)
+            void load(1, s)
           },
           onChange: (p) => void load(p),
         }}
@@ -1507,16 +1511,17 @@ function WarehouseLedgerTab() {
   const [total, setTotal] = useState(0)
   const [pageSize, setPageSize] = useState(10)
 
-  async function load(targetPage = 1) {
+  async function load(targetPage = 1, size?: number) {
     setLoading(true)
     try {
+      const ps = size ?? pageSize
       const { data } = await api.get<Paged<WarehouseLedgerRow>>('/inventory/warehouse-ledger', {
         params: {
           itemType: itemType || undefined,
           keyword: keyword || undefined,
           orderNo: orderNo || undefined,
           page: targetPage,
-          pageSize,
+          pageSize: ps,
         },
       })
       setRows(data.items)
@@ -1578,7 +1583,7 @@ function WarehouseLedgerTab() {
           pageSizeOptions: [10, 20, 50, 100],
           onShowSizeChange: (_c, s) => {
             setPageSize(s)
-            void load(1)
+            void load(1, s)
           },
           onChange: (p) => void load(p),
         }}
