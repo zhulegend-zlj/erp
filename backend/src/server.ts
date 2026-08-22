@@ -17,6 +17,7 @@ import { feedbackRoutes } from './routes/feedback'
 import { uploadRoutes } from './routes/uploads'
 import { returnReplenishRoutes } from './routes/returnReplenish'
 import { prismaErrorInfo } from './errors'
+import { UPLOAD_DIR } from './uploads-store'
 
 export function buildApp() {
   const app = Fastify({ logger: true })
@@ -31,9 +32,8 @@ export function buildApp() {
   app.register(cookie)
   app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024, files: 1 } })
 
-  const uploadDir = resolve(process.cwd(), 'uploads')
-  mkdirSync(uploadDir, { recursive: true })
-  app.register(fastifyStatic, { root: uploadDir, prefix: '/uploads/' })
+  mkdirSync(UPLOAD_DIR, { recursive: true })
+  app.register(fastifyStatic, { root: UPLOAD_DIR, prefix: '/uploads/' })
 
   app.get('/api/health', async () => ({ status: 'ok' }))
   uploadRoutes(app)

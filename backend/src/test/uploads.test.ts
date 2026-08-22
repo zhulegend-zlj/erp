@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest'
 import { rm } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { buildApp } from '../server'
 import { loginCookie, resetDb } from './helpers'
 import { prisma } from '../db'
+import { UPLOAD_DIR } from '../uploads-store'
 
 // 上传产生的文件/目录清理清单（测试结束后删除）
 const created: string[] = []
@@ -30,14 +31,13 @@ describe('uploads', () => {
     await resetDb()
   })
 
+  it('测试上传目录与真实 uploads 隔离', () => {
+    expect(UPLOAD_DIR).not.toBe(resolve(process.cwd(), 'uploads'))
+  })
+
   afterAll(async () => {
-    for (const f of created) {
-      try {
-        await rm(resolve(dirname(f)), { recursive: true, force: true })
-      } catch {
-        /* 忽略 */
-      }
-    }
+    // 整个测试上传目录位于系统临时目录，直接整体删除即可，不会碰真实 uploads
+    await rm(UPLOAD_DIR, { recursive: true, force: true }).catch(() => {})
   })
 
   async function upload(
@@ -182,6 +182,34 @@ describe('uploads', () => {
     expect(updated?.imageUrl).toBe('/uploads/ORG-P1/ORG-003-活块/图片.png')
     created.push(join(process.cwd(), '/uploads/ORG-P1/ORG-003-活块/图片.png'))
     created.push(join(process.cwd(), '/uploads/_未分类/ORG-003-活块/图片.png'))
+  })
+
+  it('保存 BOM 时把根目录 uuid 文件也归位到零件文件夹', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'engineer')
+    const part = await prisma.part.create({
+      data: { sku: 'ORG-005', name: '旧图零件', imageUrl: '/uploads/fixed-uuid-1234567890.png' },
+    })
+    const prod = await prisma.product.create({ data: { sku: 'ORG-P1', name: '成品P1' } })
+    // 模拟旧版兜底：文件躺在 uploads 根目录（测试隔离目录）
+    const { writeFile, mkdir } = await import('node:fs/promises')
+    await mkdir(UPLOAD_DIR, { recursive: true })
+    const rootFile = resolve(UPLOAD_DIR, 'fixed-uuid-1234567890.png')
+    await writeFile(rootFile, 'png')
+    created.push(rootFile)
+
+    const bom = await app.inject({
+      method: 'PUT', url: '/api/products/' + prod.id + '/bom', headers: { cookie },
+      payload: [{ partId: part.id, qty: 2 }],
+    })
+    expect(bom.statusCode).toBe(200)
+
+    const updated = await prisma.part.findUnique({ where: { id: part.id } })
+    expect(updated?.imageUrl).toBe('/uploads/ORG-P1/ORG-005-旧图零件/图片.png')
+    const { stat } = await import('node:fs/promises')
+    const moved = await stat(resolve(UPLOAD_DIR, 'ORG-P1', 'ORG-005-旧图零件', '图片.png')).then(() => true).catch(() => false)
+    expect(moved).toBe(true)
+    created.push(resolve(UPLOAD_DIR, 'ORG-P1', 'ORG-005-旧图零件', '图片.png'))
   })
 
   it('成品图片上传到 成品SKU/图片.ext', async () => {

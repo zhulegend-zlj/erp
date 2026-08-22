@@ -9,6 +9,7 @@ import {
   movePartFolder,
   moveProductFolder,
   partDirName,
+  placeRootFileIntoPartFolder,
   rehomePartFolder,
   removePartFolder,
   slugify,
@@ -281,8 +282,14 @@ export function mastersRoutes(app: FastifyInstance) {
       const part = await prisma.part.findUnique({ where: { id: partId } })
       if (!part) continue
       const productSkus = await productSkusForPart(partId)
-      const result = await rehomePartFolder(partDirName(part.sku, part.name), productSkus)
+      const partDir = partDirName(part.sku, part.name)
+      const result = await rehomePartFolder(partDir, productSkus)
       await syncPartUrlsFromFolder(partId, result.relDir, result.files)
+      // 旧版兜底：图片/图档若还是根目录 uuid 文件，一并归入零件文件夹
+      const imageUrl = await placeRootFileIntoPartFolder(part.imageUrl, result.relDir, 'image')
+      if (imageUrl) await prisma.part.update({ where: { id: partId }, data: { imageUrl } })
+      const drawingsUrl = await placeRootFileIntoPartFolder(part.drawingsUrl, result.relDir, 'drawing')
+      if (drawingsUrl) await prisma.part.update({ where: { id: partId }, data: { drawingsUrl } })
     }
     const boms = await prisma.bom.findMany({
       where: { productId },

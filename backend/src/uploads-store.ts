@@ -7,7 +7,8 @@
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 
-export const UPLOAD_DIR = resolve(process.cwd(), 'uploads')
+// 测试环境通过 UPLOAD_DIR 环境变量隔离到临时目录，避免测试清理误删真实上传文件
+export const UPLOAD_DIR = process.env.UPLOAD_DIR ? resolve(process.env.UPLOAD_DIR) : resolve(process.cwd(), 'uploads')
 export const UNCATEGORIZED = '_未分类'
 export const SHARED = '_共用'
 
@@ -119,6 +120,26 @@ export async function movePartFolder(
 export async function removePartFolder(partDir: string): Promise<void> {
   const current = await findPartFolder(partDir)
   if (current) await rm(current, { recursive: true, force: true }).catch(() => {})
+}
+
+/** 旧版兜底文件（根目录 uuid 命名）归位到零件文件夹；返回新 URL，不匹配/不存在返回 null */
+export async function placeRootFileIntoPartFolder(
+  url: string | null | undefined,
+  relDir: string,
+  kind: 'image' | 'drawing',
+): Promise<string | null> {
+  if (!url) return null
+  // 仅处理 uploads 根目录下的旧版兜底文件（无子目录、带扩展名）
+  const m = url.match(/^\/uploads\/([^/]+)$/)
+  const name = m?.[1] ?? ''
+  if (!name || !name.includes('.')) return null
+  const ext = '.' + (url.split('.').pop() ?? '')
+  const src = resolve(UPLOAD_DIR, name)
+  if (!(await stat(src).then(() => true).catch(() => false))) return null
+  const fileName = partFileName(kind, ext)
+  await mkdir(resolve(UPLOAD_DIR, relDir), { recursive: true })
+  await rename(src, resolve(UPLOAD_DIR, relDir, fileName))
+  return urlFor(relDir, fileName)
 }
 
 /** 成品 SKU 改名后移动成品目录（含其中零件文件夹） */
