@@ -1,4 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
+import { rename as renameFile, stat } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
@@ -13,6 +15,7 @@ import {
   rehomePartFolder,
   removePartFolder,
   slugify,
+  UPLOAD_DIR,
   urlFor,
 } from '../uploads-store'
 
@@ -206,8 +209,25 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
       await syncPartUrlsFromFolder(record.id, moved.relDir, moved.files)
     }
     // 成品改 SKU：移动成品目录并更新其中所有文件 URL 前缀
-    if (spec.resource === 'product' && before && before.sku !== record.sku) {
+    if (spec.resource === 'product' && before && (before.sku !== record.sku || before.name !== record.name)) {
       const { moved } = await moveProductFolder(before.sku, record.sku)
+      // 成品图片文件名跟随 SKU/名称：<SKU>-<名称>.ext
+      const relDir = slugify(record.sku)
+      const oldName = [slugify(before.sku), slugify(before.name)].filter(Boolean).join('-')
+      const newName = [slugify(record.sku), slugify(record.name)].filter(Boolean).join('-')
+      const prod = await prisma.product.findUnique({ where: { id: record.id } })
+      if (prod?.imageUrl && oldName !== newName) {
+        const ext = prod.imageUrl.slice(prod.imageUrl.lastIndexOf('.'))
+        const oldPath = resolve(UPLOAD_DIR, relDir, oldName + ext)
+        const newPath = resolve(UPLOAD_DIR, relDir, newName + ext)
+        if (await stat(oldPath).then(() => true).catch(() => false)) {
+          await renameFile(oldPath, newPath).catch(() => {})
+          await prisma.product.update({
+            where: { id: record.id },
+            data: { imageUrl: urlFor(relDir, newName + ext) },
+          })
+        }
+      }
       if (moved) {
         const oldPrefix = '/uploads/' + slugify(before.sku) + '/'
         const newPrefix = '/uploads/' + slugify(record.sku) + '/'

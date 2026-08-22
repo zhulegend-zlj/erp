@@ -112,7 +112,7 @@ function ImageUpload({
 }: {
   value?: string
   onChange?: (v: string | null) => void
-  getContext?: () => { kind?: 'image' | 'product-image'; partSku?: string; partName?: string; productSku?: string }
+  getContext?: () => { kind?: 'image' | 'product-image'; partSku?: string; partName?: string; productSku?: string; productName?: string }
 }) {
   async function customRequest(options: any) {
     const ctx = getContext?.() ?? {}
@@ -132,6 +132,7 @@ function ImageUpload({
     if (ctx.partSku) formData.append('partSku', ctx.partSku)
     if (ctx.partName) formData.append('partName', ctx.partName)
     if (ctx.productSku) formData.append('productSku', ctx.productSku)
+    if (ctx.productName) formData.append('productName', ctx.productName)
     try {
       const { data } = await api.post<{ url: string }>('/uploads', formData)
       onChange?.(data.url)
@@ -249,6 +250,7 @@ function CrudTab({
       partSku: isPart ? values.sku : undefined,
       partName: isPart ? values.name : undefined,
       productSku: isProduct ? values.sku : undefined,
+      productName: isProduct ? values.name : undefined,
     }
   }
 

@@ -212,14 +212,14 @@ describe('uploads', () => {
     created.push(resolve(UPLOAD_DIR, 'ORG-P1', 'ORG-005-旧图零件', 'ORG-005-旧图零件.png'))
   })
 
-  it('成品图片上传到 成品SKU/图片.ext', async () => {
+  it('成品图片按 成品SKU/成品SKU-成品名.ext 命名', async () => {
     const app = buildApp()
     const cookie = await loginCookie(app, 'engineer')
     const res = await upload(app, cookie, 'p.png', 'image/png', Buffer.from([0x89, 0x50, 0x4e, 0x47]), {
-      kind: 'product-image', productSku: 'ORG-P1',
+      kind: 'product-image', productSku: 'ORG-P1', productName: '成品P1',
     })
     expect(res.statusCode).toBe(200)
-    expect(res.json().url).toBe('/uploads/ORG-P1/图片.png')
+    expect(res.json().url).toBe('/uploads/ORG-P1/ORG-P1-成品P1.png')
     created.push(join(process.cwd(), res.json().url))
   })
 

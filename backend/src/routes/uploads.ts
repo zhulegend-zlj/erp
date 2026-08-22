@@ -70,7 +70,7 @@ export function uploadRoutes(app: FastifyInstance) {
     const kind = fields.kind
     try {
       if (kind === 'product-image' && fields.productSku) {
-        const url = await placeProductImage(tmpName, fields.productSku, ext)
+        const url = await placeProductImage(tmpName, fields.productSku, fields.productName ?? '', ext)
         return { url, name: originalName }
       }
       if ((kind === 'image' || kind === 'drawing') && fields.partSku && fields.partName) {

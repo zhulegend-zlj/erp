@@ -57,12 +57,13 @@ export async function placePartFile(
   return urlFor(relDir, fileName)
 }
 
-/** 成品图片：uploads/<成品SKU>/图片.ext */
-export async function placeProductImage(tmpName: string, productSku: string, ext: string): Promise<string> {
+/** 成品图片：uploads/<成品SKU>/<成品SKU>-<成品名>.ext */
+export async function placeProductImage(tmpName: string, productSku: string, productName: string, ext: string): Promise<string> {
   const relDir = slugify(productSku)
+  const fileName = [slugify(productSku), slugify(productName)].filter(Boolean).join('-') + ext
   await mkdir(resolve(UPLOAD_DIR, relDir), { recursive: true })
-  await rename(resolve(UPLOAD_DIR, tmpName), resolve(UPLOAD_DIR, relDir, '图片' + ext))
-  return urlFor(relDir, '图片' + ext)
+  await rename(resolve(UPLOAD_DIR, tmpName), resolve(UPLOAD_DIR, relDir, fileName))
+  return urlFor(relDir, fileName)
 }
 
 /** 在 uploads 下查找零件文件夹（未分类/共用/各成品目录） */
