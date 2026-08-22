@@ -187,11 +187,14 @@ function CrudTab({
   resource,
   canWrite,
   linkSupplierOnly,
+  omitFields,
 }: {
   resource: CrudResource
   canWrite: boolean
-  /** 采购在零件页的特殊模式：只能给零件挂供应商，不能增删改其他字段 */
+  /** 采购在零件页的特殊模式：只能维护供应商与价格，不能增删改其他字段 */
   linkSupplierOnly?: boolean
+  /** 表单中不显示的字段（如工程不填价格） */
+  omitFields?: string[]
 }) {
   const [rows, setRows] = useState<CrudRow[]>([])
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
@@ -204,6 +207,7 @@ function CrudTab({
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkingRow, setLinkingRow] = useState<CrudRow | null>(null)
   const [linkSupplierId, setLinkSupplierId] = useState<number | undefined>()
+  const [linkPrice, setLinkPrice] = useState<number | null>(null)
   const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [form] = Form.useForm<Record<string, any>>()
   const pageSize = 10
@@ -297,6 +301,8 @@ function CrudTab({
     setLinkingRow(row)
     const v = row.supplierId
     setLinkSupplierId(typeof v === 'number' ? v : undefined)
+    const p = row.price
+    setLinkPrice(p === null || p === undefined || p === '' ? null : Number(p))
     setLinkOpen(true)
   }
 
@@ -306,8 +312,9 @@ function CrudTab({
     try {
       await api.put(resource.path + '/' + linkingRow.id, {
         supplierId: linkSupplierId ?? null,
+        price: linkPrice ?? null,
       })
-      message.success('供应商已更新')
+      message.success('供应商/价格已更新')
       setLinkOpen(false)
       await load()
     } catch (err) {
@@ -348,7 +355,7 @@ function CrudTab({
             key: 'action',
             render: (_: unknown, row: CrudRow) => (
               <Button size="small" icon={<LinkOutlined />} onClick={() => openLink(row)}>
-                关联供应商
+                供应商/价格
               </Button>
             ),
           },
@@ -404,7 +411,7 @@ function CrudTab({
         destroyOnClose
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
-          {resource.fields.map((f) => (
+          {resource.fields.filter((f) => !omitFields?.includes(f.key)).map((f) => (
             <Form.Item
               key={f.key}
               name={f.key}
@@ -433,13 +440,14 @@ function CrudTab({
         </Form>
       </Modal>
       <Modal
-        title={'关联供应商：' + (linkingRow ? String(linkingRow.name ?? linkingRow.sku ?? '') : '')}
+        title={'供应商/价格：' + (linkingRow ? String(linkingRow.name ?? linkingRow.sku ?? '') : '')}
         open={linkOpen}
         onCancel={() => setLinkOpen(false)}
         onOk={() => void submitLink()}
         confirmLoading={linkSubmitting}
         destroyOnClose
       >
+        <div style={{ marginBottom: 8 }}>供应商</div>
         <Select
           allowClear
           showSearch
@@ -449,6 +457,15 @@ function CrudTab({
           onChange={(v) => setLinkSupplierId(v)}
           optionFilterProp="label"
           options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+        />
+        <div style={{ margin: '12px 0 8px' }}>价格（含税）</div>
+        <InputNumber
+          min={0}
+          precision={4}
+          style={{ width: '100%' }}
+          placeholder="价格"
+          value={linkPrice ?? undefined}
+          onChange={(v) => setLinkPrice(typeof v === 'number' ? v : null)}
         />
       </Modal>
     </>
@@ -716,6 +733,7 @@ export default function Masters() {
                 resource={RESOURCES[3]!}
                 canWrite={canWriteEngineering}
                 linkSupplierOnly={linkSupplierOnly}
+                omitFields={role === 'engineer' ? ['price'] : undefined}
               />
             ),
           },

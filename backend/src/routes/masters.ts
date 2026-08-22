@@ -43,9 +43,10 @@ const partSchema = z.object({
   supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
 })
 
-// 采购在零件上的唯一写权限：仅设置供应商（挂链接），其余字段一律拒绝
-const supplierLinkSchema = z.object({
-  supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable(),
+// 采购在零件上的写权限：供应商（挂链接）与价格；其余字段一律拒绝
+const purchasePartUpdateSchema = z.object({
+  supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
+  price: z.number({ error: '价格必须为数字' }).nonnegative({ error: '价格必须为非负数' }).nullable().optional(),
 })
 
 const bomSchema = z.array(
@@ -122,27 +123,43 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
   })
 
   app.post(base, { preHandler: write }, async (req, reply) => {
+    // 零件：价格归采购维护，工程创建时不可填写
+    if (spec.resource === 'part') {
+      const role = (req as { user?: { role?: string } }).user?.role
+      if (role === 'engineer' && 'price' in ((req.body as object) ?? {})) {
+        return reply.code(400).send({ error: '价格由采购维护，工程不可填写' })
+      }
+    }
     const data = parseBody(spec.schema, req.body, reply)
     if (data === null) return
     const record = await delegate.create({ data })
     return reply.code(200).send(record)
   })
 
-  // 零件特殊：采购只能挂供应商；boss/工程全量修改
+  // 零件特殊：采购只能维护供应商与价格；boss 全量修改；工程全量修改但不可动价格
   const putRoles = spec.resource === 'part' ? requireRole('boss', 'engineer', 'purchase') : write
   app.put(`${base}/:id`, { preHandler: putRoles }, async (req, reply) => {
     const id = parseId(req as { params: { id: string } }, reply)
     if (id === null) return
     const role = (req as { user?: { role?: string } }).user?.role
-    if (spec.resource === 'part' && role === 'purchase') {
-      const keys = Object.keys((req.body as object) ?? {})
-      if (keys.some((k) => k !== 'supplierId')) {
-        return reply.code(400).send({ error: '采购仅可修改零件的供应商，其他资料请联系工程维护' })
+    if (spec.resource === 'part') {
+      const body = (req.body as object) ?? {}
+      if (role === 'purchase') {
+        const keys = Object.keys(body)
+        if (keys.length === 0) {
+          return reply.code(400).send({ error: '请至少提供 supplierId 或 price' })
+        }
+        if (keys.some((k) => k !== 'supplierId' && k !== 'price')) {
+          return reply.code(400).send({ error: '采购仅可修改零件的供应商与价格，其他资料请联系工程维护' })
+        }
+        const data = parseBody(purchasePartUpdateSchema, req.body, reply)
+        if (data === null) return
+        const record = await delegate.update({ where: { id }, data })
+        return reply.code(200).send(record)
       }
-      const data = parseBody(supplierLinkSchema, req.body, reply)
-      if (data === null) return
-      const record = await delegate.update({ where: { id }, data })
-      return reply.code(200).send(record)
+      if (role === 'engineer' && 'price' in body) {
+        return reply.code(400).send({ error: '价格由采购维护，工程不可修改' })
+      }
     }
     const data = parseBody(spec.schema, req.body, reply)
     if (data === null) return

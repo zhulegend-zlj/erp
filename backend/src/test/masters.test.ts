@@ -105,6 +105,69 @@ describe('masters 权限（工程/采购分工）', () => {
     expect(noDelete.statusCode).toBe(403)
   })
 
+  it('价格由采购维护，工程不可填写/修改价格', async () => {
+    const app = buildApp()
+    const engineerCookie = await loginCookie(app, 'engineer')
+    const purchaseCookie = await loginCookie(app, 'purchase')
+
+    // 工程新建零件不带价格 → 200，price 为 null
+    const created = await app.inject({
+      method: 'POST', url: '/api/parts', headers: { cookie: engineerCookie },
+      payload: { sku: 'P-PRICE', name: '价格零件', unit: '个' }
+    })
+    expect(created.statusCode).toBe(200)
+    expect(created.json().price).toBeNull()
+    const partId = created.json().id
+
+    // 工程新建带价格 → 400
+    const withPrice = await app.inject({
+      method: 'POST', url: '/api/parts', headers: { cookie: engineerCookie },
+      payload: { sku: 'P-PRICE2', name: '价格零件2', unit: '个', price: 1.5 }
+    })
+    expect(withPrice.statusCode).toBe(400)
+    expect(withPrice.json().error).toMatch(/价格/)
+
+    // 采购设置供应商 + 价格 → 200
+    const supplier = await app.inject({
+      method: 'POST', url: '/api/suppliers', headers: { cookie: purchaseCookie },
+      payload: { name: '供应商价格' }
+    })
+    expect(supplier.statusCode).toBe(200)
+    const supplierId = supplier.json().id
+    const setPrice = await app.inject({
+      method: 'PUT', url: '/api/parts/' + partId, headers: { cookie: purchaseCookie },
+      payload: { supplierId, price: 4.97 }
+    })
+    expect(setPrice.statusCode).toBe(200)
+    expect(setPrice.json().supplierId).toBe(supplierId)
+    expect(setPrice.json().price).toBe('4.97')
+
+    // 采购只改价格 → 200
+    const onlyPrice = await app.inject({
+      method: 'PUT', url: '/api/parts/' + partId, headers: { cookie: purchaseCookie },
+      payload: { price: 5.5 }
+    })
+    expect(onlyPrice.statusCode).toBe(200)
+    expect(onlyPrice.json().price).toBe('5.5')
+
+    // 工程改价格 → 400
+    const engineerPrice = await app.inject({
+      method: 'PUT', url: '/api/parts/' + partId, headers: { cookie: engineerCookie },
+      payload: { price: 9.9 }
+    })
+    expect(engineerPrice.statusCode).toBe(400)
+    expect(engineerPrice.json().error).toMatch(/价格/)
+
+    // 工程改名称（表单完整提交）→ 200，价格保持采购所填
+    const engineerName = await app.inject({
+      method: 'PUT', url: '/api/parts/' + partId, headers: { cookie: engineerCookie },
+      payload: { sku: 'P-PRICE', name: '价格零件改名', unit: '个' }
+    })
+    expect(engineerName.statusCode).toBe(200)
+    expect(engineerName.json().name).toBe('价格零件改名')
+    expect(engineerName.json().price).toBe('5.5')
+  })
+
   it('供应商归 boss/purchase 维护，engineer 只读', async () => {
     const app = buildApp()
     const purchaseCookie = await loginCookie(app, 'purchase')

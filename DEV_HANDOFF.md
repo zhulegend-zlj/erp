@@ -21,7 +21,7 @@ MTO（按单组装/贸易）ERP：销售订单 → BOM 需求 → 采购 → 收
 - 局域网：http://192.168.1.114:5173（需防火墙放行 3000/5173）
 - 数据库：PostgreSQL 16，127.0.0.1:5432，库 `erp` / `erp_test`
 - PostgreSQL 便携版：`D:\AI\pg-dist\pgsql`，数据目录 `D:\AI\pg-data`
-- 登录账号（中文）：老板 / 采购 / 仓库 / 销售 / 财务 / 工程，密码 88888888（工程=engineer 角色：负责录入成品/零件/BOM；采购只负责供应商维护与零件挂供应商）
+- 登录账号（中文）：老板 / 采购 / 仓库 / 销售 / 财务 / 工程，密码 88888888（工程=engineer 角色：负责录入成品/零件/BOM，不填价格；采购负责供应商维护、零件挂供应商、填价格）
 - 工厂局域网访问需放行 3000/5173（脚本已入库：`scripts/allow-lan-firewall.ps1`，管理员 PowerShell 运行）
 
 ## 3. 当前数据状态
@@ -32,7 +32,8 @@ MTO（按单组装/贸易）ERP：销售订单 → BOM 需求 → 采购 → 收
   - 零件 557
   - 供应商 65
   - BOM 326
-- **待办数据**：P1927-DAPM 新机型的三张采购单（PO-DS-0217A/C/D，供应商晨鑫/铭亚/合丰磁铁）里的零件尚未录入——按分工由「工程」账号在基础资料录入零件（编号用采购单固有编号如 P1927-14872），「采购」负责挂供应商。
+- **待办数据**：P1927-DAPM 新机型的三张采购单（PO-DS-0217A/C/D，供应商晨鑫/铭亚/合丰磁铁）里的零件尚未录入——按分工由「工程」账号在基础资料录入零件（编号用采购单固有编号如 P1927-14872，不填价格），「采购」负责挂供应商、填价格。
+- **数据恢复记录**：2026-08-22 开发时曾误用测试清库脚本清空过开发库，已通过 `npx tsx --env-file=.env prisma/import-real-data.ts` 从微信目录 Excel 全量重导（成品 3 / 零件 557 / 供应商 65 / BOM 326，记录 id 已重新生成）；业务数据（订单/采购单/库存/出货/财务）为空，需重新走流程测试。
 - 图片/图档存储：`backend/uploads/`（已 gitignore），通过 `/uploads/...` 访问；零件图片与图档（pdf/dwg/dxf/step/stp/igs/zip/xlsx，≤20MB）均可上传。
 - 导入脚本：`backend/prisma/import-real-data.ts`，其中 Excel 路径写死为本机微信目录。
 - **家里数据库迁移**：家里库若缺 `engineer` 枚举值，跑 `cd backend && npx prisma migrate deploy`；6 个账号可用 `npx tsx --env-file=.env prisma/seed.ts` 重建（注意：会把所有账号密码重置回 88888888）。
@@ -95,6 +96,7 @@ npm run build
 
 - 后端代码变更后需要重启后端；前端 Vite 通常自动热更新，但**偶发服务端转换缓存过期**（页面权限/UI 与磁盘代码不一致）——现象是“改了没生效”，处理：重启前端 dev 服务 + 浏览器 Ctrl+F5 硬刷新。
 - 后端测试会向真实 `FEEDBACK.md` 追加“测试反馈”记录，跑完测试需要清理。
+- **测试清库防呆**：`src/test/helpers.ts` 的 `resetDb()` 已加保护——仅当 `DATABASE_URL` 含 `erp_test` 时才允许清库，误连开发库会直接抛错，不会再清空真实数据。
 - 列表接口分页约定：传 `page`/`pageSize` 返回 `{ items, total, page, pageSize, totalPages }`；不传则返回全量数组（下拉框依赖）。非法分页参数返回 400。
 - 上传接口 `/api/uploads`：按扩展名白名单校验（图片额外校验 MIME），最大 20MB（server.ts multipart limits）。
 - 零件排序在 PostgreSQL 层（masters.ts 零件分支）：SKU 前缀分组 + 数字段 bigint[] 升序；修改时注意 regexp_matches 是集合函数，必须用 `array_agg` 子查询，否则行会被复制。

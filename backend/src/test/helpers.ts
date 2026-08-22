@@ -14,6 +14,11 @@ export function createTestApp(): FastifyInstance {
  * 注意：user 表不动，loginCookie 依赖对测试账号的 upsert。
  */
 export async function resetDb(): Promise<void> {
+  // 防呆：仅允许在独立测试库上清库，防止误连开发库 erp 清空真实数据
+  const url = process.env.DATABASE_URL ?? ''
+  if (!url.includes('erp_test')) {
+    throw new Error('resetDb 仅允许在 erp_test 数据库上运行，当前 DATABASE_URL=' + url)
+  }
   await prisma.shipmentLeg.deleteMany()
   await prisma.shipment.deleteMany()
   await prisma.customerPayment.deleteMany()
