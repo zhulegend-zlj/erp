@@ -169,7 +169,7 @@ async function main() {
       finish: finish || null,
       artId: artId || null,
       tooling: tooling || null,
-      moq: moqRaw === '' ? null : Number(moqRaw),
+      moq: moqRaw === '' || moqRaw === null || moqRaw === undefined ? null : Number(moqRaw),
       supplierId,
     }
     let part = existingPart
