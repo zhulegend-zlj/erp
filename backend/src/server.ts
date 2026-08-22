@@ -16,24 +16,39 @@ import { dashboardRoutes } from './routes/dashboard'
 import { feedbackRoutes } from './routes/feedback'
 import { uploadRoutes } from './routes/uploads'
 import { returnReplenishRoutes } from './routes/returnReplenish'
+import { requireRole } from './auth/guard'
 import { prismaErrorInfo } from './errors'
 import { UPLOAD_DIR } from './uploads-store'
 
 export function buildApp() {
   const app = Fastify({ logger: true })
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     const info = prismaErrorInfo(error)
     if (info) {
       return reply.code(info.status).send({ error: info.message })
     }
-    const message = (error as { message?: string }).message ?? '未知错误'
-    return reply.code(500).send({ error: '服务器错误：' + message })
+    if ((error as { code?: string }).code === 'FST_REQ_FILE_TOO_LARGE') {
+      return reply.code(413).send({ error: '文件超过 20MB 限制' })
+    }
+    // 未映射错误只记录日志，不向客户端回显内部细节（路径/SQL/连接串等）
+    request.log.error({ err: error }, '未处理错误')
+    return reply.code(500).send({ error: '服务器错误，请稍后重试' })
   })
   app.register(cookie)
   app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024, files: 1 } })
 
   mkdirSync(UPLOAD_DIR, { recursive: true })
-  app.register(fastifyStatic, { root: UPLOAD_DIR, prefix: '/uploads/' })
+  // 上传文件仅对已登录用户开放（图纸/报价单等内部资料），并强制 nosniff 防 MIME 嗅探
+  app.register(async (scoped) => {
+    scoped.addHook('preHandler', requireRole('boss', 'purchase', 'warehouse', 'sales', 'finance', 'engineer'))
+    scoped.register(fastifyStatic, {
+      root: UPLOAD_DIR,
+      prefix: '/uploads/',
+      setHeaders(reply) {
+        reply.header('X-Content-Type-Options', 'nosniff')
+      },
+    })
+  })
 
   app.get('/api/health', async () => ({ status: 'ok' }))
   uploadRoutes(app)

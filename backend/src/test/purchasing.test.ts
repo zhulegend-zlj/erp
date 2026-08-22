@@ -69,7 +69,7 @@ describe('purchasing', () => {
 
   it('purchase 可创建采购单，自动生成 PO 单号', async () => {
     const supplier = await prisma.supplier.create({ data: { name: '供应商X' } })
-    const part = await prisma.part.create({ data: { sku: 'P100', name: '螺丝' } })
+    const part = await prisma.part.create({ data: { sku: 'P100', name: '螺丝', supplierId: supplier.id } })
     const app = buildApp()
     const cookie = await loginCookie(app, 'purchase')
     const res = await app.inject({

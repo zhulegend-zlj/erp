@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
-import { dueDate, computeOrderCost, computeOrderProfit } from '../domain/finance'
+import { dueDate, computeOrderCost, computeOrderProfit, round2 } from '../domain/finance'
 
 // 进度按状态映射为百分比
 const PROGRESS: Record<string, number> = {
@@ -47,17 +47,17 @@ export function dashboardRoutes(app: FastifyInstance) {
       const purchaseItems = order.purchaseOrders.flatMap((po) =>
         po.items.map((it) => ({ qty: it.qty, unitPrice: it.unitPrice }))
       )
-      const cost = computeOrderCost(purchaseItems, order.otherCost.toNumber())
-      const totalReceived = order.customerPayments.reduce((sum, p) => sum + p.amount.toNumber(), 0)
-      const profit = computeOrderProfit(totalReceived, cost)
+      const cost = round2(computeOrderCost(purchaseItems, order.otherCost.toNumber()))
+      const totalReceived = round2(order.customerPayments.reduce((sum, p) => sum + p.amount.toNumber(), 0))
+      const profit = round2(computeOrderProfit(totalReceived, cost))
 
-      const amount = orderAmount(order.items)
+      const amount = round2(orderAmount(order.items))
       const earliest = order.shipments[0]
       const due = earliest ? formatDate(dueDate(earliest.shippedAt)) : null
 
       // 应收余额：有出货的订单金额扣除已收款，只统计仍未收回的部分
       if (earliest) {
-        const outstanding = Math.max(0, amount - totalReceived)
+        const outstanding = Math.max(0, round2(amount - totalReceived))
         receivableTotal += outstanding
         if (dueDate(earliest.shippedAt) < now) {
           overdueReceivable += outstanding
@@ -76,13 +76,18 @@ export function dashboardRoutes(app: FastifyInstance) {
       }
     })
 
-    // 应付余额：采购单金额扣除已关联该采购单的付款，只统计仍未付清的部分
-    const purchaseOrders = await prisma.purchaseOrder.findMany({ include: { items: true, payments: true } })
-    const payableTotal = purchaseOrders.reduce((sum, po) => {
-      const amount = orderAmount(po.items)
-      const paid = po.payments.reduce((s, p) => s + p.amount.toNumber(), 0)
-      return sum + Math.max(0, amount - paid)
-    }, 0)
+    // 应付余额：全部采购单金额 - 全部供应商付款（含未挂采购单的付款），下限 0
+    const [purchaseOrders, supplierPaid] = await Promise.all([
+      prisma.purchaseOrder.findMany({ include: { items: true } }),
+      prisma.supplierPayment.aggregate({ _sum: { amount: true } }),
+    ])
+    const payableTotal = Math.max(
+      0,
+      round2(
+        purchaseOrders.reduce((sum, po) => sum + orderAmount(po.items), 0) -
+          (supplierPaid._sum.amount?.toNumber() ?? 0),
+      ),
+    )
 
     return { orders: rows, receivableTotal, payableTotal, overdueReceivable }
   })

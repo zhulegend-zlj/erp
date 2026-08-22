@@ -73,7 +73,12 @@ export function shippingRoutes(app: FastifyInstance) {
         for (const item of order.items) {
           await applyStockChange(tx, 'product', item.productId, -item.qty, 'shipment', created.id, order.id)
         }
-        await tx.salesOrder.update({ where: { id: order.id }, data: { status: 'shipped' } })
+        // 条件更新：仅当订单仍是 ready 时置为 shipped；并发下第二个请求命中 0 行则整体回滚
+        const flipped = await tx.salesOrder.updateMany({
+          where: { id: order.id, status: 'ready' },
+          data: { status: 'shipped' },
+        })
+        if (flipped.count === 0) throw new Error('订单状态已变化，请刷新后重试')
         return created
       })
       return reply.code(200).send(shipment)
@@ -85,7 +90,7 @@ export function shippingRoutes(app: FastifyInstance) {
       if (message.includes('订单不存在')) return reply.code(404).send({ error: message })
       const info = prismaErrorInfo(err)
       if (info) return reply.code(info.status).send({ error: info.message })
-      return reply.code(500).send({ error: '出货失败：' + message })
+      return reply.code(500).send({ error: '出货失败，请稍后重试' })
     }
   })
 

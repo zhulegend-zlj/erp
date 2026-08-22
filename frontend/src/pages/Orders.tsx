@@ -285,7 +285,7 @@ export default function Orders() {
                       rules={[{ required: true, message: '数量' }]}
                       style={{ marginBottom: 0 }}
                     >
-                      <InputNumber min={1} placeholder="数量" />
+                      <InputNumber min={1} precision={0} step={1} placeholder="数量" />
                     </Form.Item>
                     <Form.Item
                       name={[field.name, 'unitPrice']}

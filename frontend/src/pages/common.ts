@@ -71,11 +71,11 @@ export function statusColor(status: string): string {
 }
 
 // 订单状态机：draft → confirmed → in_production → ready → shipped → completed
+// ready → shipped 只能通过「出货」页完成（后端已禁止 PATCH 直达），订单页不再提供该按钮
 const STATUS_FLOW: Record<string, string> = {
   draft: 'confirmed',
   confirmed: 'in_production',
   in_production: 'ready',
-  ready: 'shipped',
   shipped: 'completed',
 }
 

@@ -86,11 +86,17 @@ describe('列表分页', () => {
   })
 
   it('物料流水分页按时间升序', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F-LED-P', name: '成品LEDP' } })
     const part = await prisma.part.create({ data: { sku: 'P-LED-P', name: '木板' } })
+    await prisma.bom.create({ data: { productId: product.id, partId: part.id, qty: 1 } })
     await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 100 } })
     const customer = await prisma.customer.create({ data: { name: '客户LEDP' } })
     const order = await prisma.salesOrder.create({
-      data: { orderNo: 'SO-LEDP', customerId: customer.id, deliveryDate: new Date('2026-09-30') }
+      data: {
+        orderNo: 'SO-LEDP', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
+        items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+      }
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'warehouse')
@@ -112,11 +118,17 @@ describe('列表分页', () => {
   })
 
   it('收发台账分页且按订单号过滤', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F-WL-P', name: '成品WLP' } })
     const part = await prisma.part.create({ data: { sku: 'P-WL-P', name: '木板' } })
+    await prisma.bom.create({ data: { productId: product.id, partId: part.id, qty: 1 } })
     await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 100 } })
     const customer = await prisma.customer.create({ data: { name: '客户WLP' } })
     const order = await prisma.salesOrder.create({
-      data: { orderNo: 'SO-WL-PAGE', customerId: customer.id, deliveryDate: new Date('2026-09-30') }
+      data: {
+        orderNo: 'SO-WL-PAGE', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
+        items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+      }
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'warehouse')

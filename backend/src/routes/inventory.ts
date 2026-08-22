@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
-import { prismaErrorInfo } from '../errors'
+import { parsePositiveInt, prismaErrorInfo } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
 
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
@@ -49,7 +49,28 @@ export function inventoryRoutes(app: FastifyInstance) {
     try {
       const issues = await prisma.$transaction(async (tx) => {
         const created: { id: number; partId: number; qty: number }[] = []
+        // 订单状态与物料归属校验：只能对已确认/生产中/待出货的订单领料，且零件必须在该订单 BOM 内
+        const order = await tx.salesOrder.findUnique({
+          where: { id: data.salesOrderId },
+          select: { id: true, status: true, items: { select: { productId: true } } },
+        })
+        if (!order) throw new Error('订单不存在')
+        if (order.status === 'draft' || order.status === 'shipped' || order.status === 'completed') {
+          throw new Error('订单当前状态不能领料（需已确认/生产中/待出货）')
+        }
+        const productIds = [...new Set(order.items.map((it) => it.productId))]
+        const boms = await tx.bom.findMany({
+          where: { productId: { in: productIds } },
+          select: { partId: true },
+        })
+        const allowedPartIds = new Set(boms.map((b) => b.partId))
+        const seen = new Set<number>()
         for (const item of data.items) {
+          if (seen.has(item.partId)) throw new Error('领料明细不能重复')
+          seen.add(item.partId)
+          if (!allowedPartIds.has(item.partId)) {
+            throw new Error('零件（ID ' + item.partId + '）不在该订单的 BOM 中，不能领料')
+          }
           const issue = await tx.issue.create({
             data: {
               salesOrderId: data.salesOrderId,
@@ -68,9 +89,13 @@ export function inventoryRoutes(app: FastifyInstance) {
     } catch (err) {
       const message = err instanceof Error ? err.message : '领料失败'
       if (message.includes('库存不足')) return reply.code(400).send({ error: message })
+      if (message.includes('订单不存在')) return reply.code(404).send({ error: message })
+      if (message.includes('不能领料') || message.includes('不能重复') || message.includes('不在该订单')) {
+        return reply.code(400).send({ error: message })
+      }
       const info = prismaErrorInfo(err)
       if (info) return reply.code(info.status).send({ error: info.message })
-      return reply.code(500).send({ error: '领料失败：' + message })
+      return reply.code(500).send({ error: '领料失败，请稍后重试' })
     }
   })
 
@@ -81,6 +106,18 @@ export function inventoryRoutes(app: FastifyInstance) {
 
     try {
       const entry = await prisma.$transaction(async (tx) => {
+        // 成品必须属于该订单明细，且订单处于生产相关状态（防凭空虚增库存）
+        const order = await tx.salesOrder.findUnique({
+          where: { id: data.salesOrderId },
+          select: { id: true, status: true, items: { select: { productId: true } } },
+        })
+        if (!order) throw new Error('订单不存在')
+        if (order.status === 'draft' || order.status === 'shipped' || order.status === 'completed') {
+          throw new Error('订单当前状态不能成品入库（需已确认/生产中/待出货）')
+        }
+        if (!order.items.some((it) => it.productId === data.productId)) {
+          throw new Error('该成品不在所选订单中，不能入库')
+        }
         const created = await tx.productionEntry.create({
           data: {
             salesOrderId: data.salesOrderId,
@@ -96,9 +133,13 @@ export function inventoryRoutes(app: FastifyInstance) {
     } catch (err) {
       const message = err instanceof Error ? err.message : '成品入库失败'
       if (message.includes('库存不足')) return reply.code(400).send({ error: message })
+      if (message.includes('订单不存在')) return reply.code(404).send({ error: message })
+      if (message.includes('不能成品入库') || message.includes('不在所选订单')) {
+        return reply.code(400).send({ error: message })
+      }
       const info = prismaErrorInfo(err)
       if (info) return reply.code(info.status).send({ error: info.message })
-      return reply.code(500).send({ error: '成品入库失败：' + message })
+      return reply.code(500).send({ error: '成品入库失败，请稍后重试' })
     }
   })
 
@@ -109,6 +150,9 @@ export function inventoryRoutes(app: FastifyInstance) {
     if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
     const page = pagination.kind === 'ok' ? pagination.page : null
 
+    if (query.itemType && query.itemType !== 'part' && query.itemType !== 'product') {
+      return reply.code(400).send({ error: 'itemType 必须为 part 或 product' })
+    }
     const and: Record<string, unknown>[] = []
     if (query.itemType) and.push({ itemType: query.itemType })
     const kw = query.keyword?.trim()
@@ -164,8 +208,11 @@ export function inventoryRoutes(app: FastifyInstance) {
   app.get('/api/stock/ledger', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
     const raw = req.query as { itemType?: string; itemId?: string }
     const itemType = raw.itemType
-    const itemId = Number(raw.itemId)
-    if (!itemType || !raw.itemId || !Number.isInteger(itemId) || itemId <= 0) {
+    const itemId = parsePositiveInt(raw.itemId)
+    if (itemType !== 'part' && itemType !== 'product') {
+      return reply.code(400).send({ error: 'itemType 必须为 part 或 product' })
+    }
+    if (itemId === null) {
       return reply.code(400).send({ error: 'itemType 与 itemId 必填且 itemId 为正整数' })
     }
     const pagination = parsePagination(req.query as Record<string, unknown>)

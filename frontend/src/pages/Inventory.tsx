@@ -162,7 +162,7 @@ function ReceiptForm({ parts, onDone }: { parts: Part[]; onDone?: () => void }) 
                   rules={[{ required: true, message: '数量' }]}
                   style={{ marginBottom: 0 }}
                 >
-                  <InputNumber min={1} placeholder="数量" />
+                  <InputNumber min={1} precision={0} step={1} placeholder="数量" />
                 </Form.Item>
                 <Form.Item name={[field.name, 'lotNo']} style={{ marginBottom: 0 }}>
                   <Input placeholder="来料单号（可选）" style={{ width: 160 }} />
@@ -180,7 +180,7 @@ function ReceiptForm({ parts, onDone }: { parts: Part[]; onDone?: () => void }) 
                   />
                 </Form.Item>
                 <Form.Item name={[field.name, 'defectiveQty']} style={{ marginBottom: 0 }}>
-                  <InputNumber min={0} placeholder="不良品" style={{ width: 100 }} />
+                  <InputNumber min={0} precision={0} step={1} placeholder="不良品" style={{ width: 100 }} />
                 </Form.Item>
                 <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />
               </Space>
@@ -282,7 +282,7 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
                   rules={[{ required: true, message: '数量' }]}
                   style={{ marginBottom: 0 }}
                 >
-                  <InputNumber min={1} placeholder="数量" />
+                  <InputNumber min={1} precision={0} step={1} placeholder="数量" />
                 </Form.Item>
                 <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />
               </Space>
@@ -359,7 +359,7 @@ function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; pr
           />
         </Form.Item>
         <Form.Item name="qty" label="数量" rules={[{ required: true, message: '数量' }]}>
-          <InputNumber min={1} placeholder="数量" />
+          <InputNumber min={1} precision={0} step={1} placeholder="数量" />
         </Form.Item>
         <Form.Item name="entryDate" label="入库日期">
           <Input type="date" />
@@ -830,6 +830,10 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
     lotNo?: string
     note?: string
   }) {
+    if ((values.returnQty ?? 0) + (values.replenishQty ?? 0) <= 0) {
+      message.warning('退货与补货数量至少填写一项')
+      return
+    }
     setSubmitting(true)
     try {
       await api.post('/return-replenishments', {
@@ -885,13 +889,13 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
             <Input type="date" />
           </Form.Item>
           <Form.Item name="returnQty" label="退货数量">
-            <InputNumber min={0} placeholder="0" />
+            <InputNumber min={0} precision={0} step={1} placeholder="0" />
           </Form.Item>
           <Form.Item name="replenishDate" label="补货日期">
             <Input type="date" />
           </Form.Item>
           <Form.Item name="replenishQty" label="补货数量">
-            <InputNumber min={0} placeholder="0" />
+            <InputNumber min={0} precision={0} step={1} placeholder="0" />
           </Form.Item>
           <Form.Item name="purchaseOrderNo" label="采购单号">
             <Input placeholder="PO-..." />

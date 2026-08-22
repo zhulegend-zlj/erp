@@ -10,8 +10,15 @@ import { parsePagination, pagedResult } from '../pagination'
 
 const purchaseItemSchema = z.object({
   partId: z.number({ error: '零件必填' }).int({ error: '零件必须为整数' }).positive({ error: '零件必须为正整数' }),
-  qty: z.number({ error: '数量必填' }).int({ error: '数量必须为整数' }).positive({ error: '数量必须为正整数' }),
-  unitPrice: z.number({ error: '单价必填' }).nonnegative({ error: '单价必须为非负数' }),
+  qty: z
+    .number({ error: '数量必填' })
+    .int({ error: '数量必须为整数' })
+    .positive({ error: '数量必须为正整数' })
+    .max(2147483647, { error: '数量超出允许范围' }),
+  unitPrice: z
+    .number({ error: '单价必填' })
+    .nonnegative({ error: '单价必须为非负数' })
+    .max(9999999999.99, { error: '单价超出允许范围' }),
 })
 
 const createPurchaseOrderSchema = z.object({
@@ -28,13 +35,21 @@ const batchPurchaseOrderSchema = z.object({
 const receiptSchema = z.object({
   purchaseOrderId: z.number({ error: '采购单必填' }).int({ error: '采购单必须为整数' }).positive({ error: '采购单必须为正整数' }),
   items: z.array(
-    z.object({
-      partId: z.number({ error: '零件必填' }).int({ error: '零件必须为整数' }).positive({ error: '零件必须为正整数' }),
-      qty: z.number({ error: '数量必填' }).int({ error: '数量必须为整数' }).positive({ error: '数量必须为正整数' }),
-      lotNo: z.string().nullable().optional(),
-      qcStatus: z.string().nullable().optional(),
-      defectiveQty: z.number({ error: '不良品数量必须为整数' }).int().nonnegative().nullable().optional(),
-    }),
+    z
+      .object({
+        partId: z.number({ error: '零件必填' }).int({ error: '零件必须为整数' }).positive({ error: '零件必须为正整数' }),
+        qty: z
+          .number({ error: '数量必填' })
+          .int({ error: '数量必须为整数' })
+          .positive({ error: '数量必须为正整数' })
+          .max(2147483647, { error: '数量超出允许范围' }),
+        lotNo: z.string().nullable().optional(),
+        qcStatus: z.string().nullable().optional(),
+        defectiveQty: z.number({ error: '不良品数量必须为整数' }).int().nonnegative().nullable().optional(),
+      })
+      .refine((v) => (v.defectiveQty ?? 0) <= v.qty, {
+        message: '不良品数量不能大于收货数量',
+      }),
     { error: '明细必填' }
   ).min(1, '收货至少包含一个明细'),
 })
@@ -201,6 +216,26 @@ export function purchasingRoutes(app: FastifyInstance) {
     const data = parseBody(createPurchaseOrderSchema, req.body, reply)
     if (data === null) return
 
+    // 明细去重 + 零件必须属于所选供应商（与批量按供应商分组的口径一致，防发错供应商）
+    const partIds = [...new Set(data.items.map((item) => item.partId))]
+    if (partIds.length !== data.items.length) {
+      return reply.code(400).send({ error: '采购单明细不能重复' })
+    }
+    const parts = await prisma.part.findMany({
+      where: { id: { in: partIds } },
+      select: { id: true, name: true, supplierId: true },
+    })
+    const partMap = new Map(parts.map((p) => [p.id, p]))
+    const missing = data.items.filter((item) => !partMap.has(item.partId))
+    if (missing.length > 0) {
+      return reply.code(400).send({ error: '采购单包含不存在的零件' })
+    }
+    const mismatched = data.items.filter((item) => partMap.get(item.partId)!.supplierId !== data.supplierId)
+    if (mismatched.length > 0) {
+      const names = mismatched.map((item) => partMap.get(item.partId)!.name || String(item.partId)).join('、')
+      return reply.code(400).send({ error: '零件「' + names + '」的供应商不是所选供应商，请先在零件资料中挂好供应商' })
+    }
+
     const orderNo = await generatePurchaseOrderNo()
     const order = await prisma.$transaction(async (tx) => {
       const created = await tx.purchaseOrder.create({
@@ -231,6 +266,9 @@ export function purchasingRoutes(app: FastifyInstance) {
     if (data === null) return
 
     const partIds = [...new Set(data.items.map((item) => item.partId))]
+    if (partIds.length !== data.items.length) {
+      return reply.code(400).send({ error: '采购明细不能重复' })
+    }
     const parts = await prisma.part.findMany({
       where: { id: { in: partIds } },
       include: { supplier: { select: { id: true, name: true } } },
@@ -293,9 +331,32 @@ export function purchasingRoutes(app: FastifyInstance) {
       await prisma.$transaction(async (tx) => {
         const purchaseOrder = await tx.purchaseOrder.findUnique({
           where: { id: data.purchaseOrderId },
-          select: { salesOrderId: true },
+          select: { id: true, salesOrderId: true, items: { select: { partId: true, qty: true } } },
         })
+        if (!purchaseOrder) throw new Error('采购单不存在')
+
+        // 已收货数量（事务内聚合，含本事务之前的历史收货）
+        const receivedGroups = await tx.receipt.groupBy({
+          by: ['partId'],
+          where: { purchaseOrderId: data.purchaseOrderId },
+          _sum: { qty: true },
+        })
+        const receivedMap = new Map(receivedGroups.map((g) => [g.partId, g._sum.qty ?? 0]))
+        const poItemMap = new Map(purchaseOrder.items.map((i) => [i.partId, i.qty]))
+        // 本批次内累计（同 partId 多次提交时叠加判断）
+        const pending = new Map<number, number>()
+
         for (const item of data.items) {
+          const orderedQty = poItemMap.get(item.partId)
+          if (!orderedQty) {
+            throw new Error('零件（ID ' + item.partId + '）不在该采购单中，不能收货')
+          }
+          const already = (receivedMap.get(item.partId) ?? 0) + (pending.get(item.partId) ?? 0)
+          if (already + item.qty > orderedQty) {
+            throw new Error('零件（ID ' + item.partId + '）收货数量超过订购数量，不能重复收货')
+          }
+          pending.set(item.partId, already + item.qty)
+
           const receipt = await tx.receipt.create({
             data: {
               purchaseOrderId: data.purchaseOrderId,
@@ -306,15 +367,32 @@ export function purchasingRoutes(app: FastifyInstance) {
               defectiveQty: item.defectiveQty ?? 0,
             },
           })
-          await applyStockChange(tx, 'part', item.partId, item.qty, 'receipt', receipt.id, purchaseOrder?.salesOrderId)
+          await applyStockChange(tx, 'part', item.partId, item.qty, 'receipt', receipt.id, purchaseOrder.salesOrderId)
+        }
+
+        // 按累计收货更新采购单状态：全部收齐 → received；部分 → partial
+        const allReceived = purchaseOrder.items.every(
+          (i) => (receivedMap.get(i.partId) ?? 0) + (pending.get(i.partId) ?? 0) >= i.qty,
+        )
+        const anyReceived = purchaseOrder.items.some(
+          (i) => (receivedMap.get(i.partId) ?? 0) + (pending.get(i.partId) ?? 0) > 0,
+        )
+        if (allReceived) {
+          await tx.purchaseOrder.update({ where: { id: purchaseOrder.id }, data: { status: 'received' } })
+        } else if (anyReceived) {
+          await tx.purchaseOrder.update({ where: { id: purchaseOrder.id }, data: { status: 'partial' } })
         }
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : '收货失败'
       if (message.includes('库存不足')) return reply.code(400).send({ error: message })
+      if (message.includes('采购单不存在')) return reply.code(404).send({ error: message })
+      if (message.includes('不在该采购单') || message.includes('超过订购数量')) {
+        return reply.code(400).send({ error: message })
+      }
       const info = prismaErrorInfo(err)
       if (info) return reply.code(info.status).send({ error: info.message })
-      return reply.code(500).send({ error: '收货失败：' + message })
+      return reply.code(500).send({ error: '收货失败，请稍后重试' })
     }
 
     return reply.code(200).send({ ok: true })

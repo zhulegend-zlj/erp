@@ -18,3 +18,8 @@ export function computeOrderCost(
 export function computeOrderProfit(totalReceived: number, cost: number): number {
   return totalReceived - cost
 }
+
+/** 金额展示汇总统一四舍五入到分，避免 Decimal.toNumber() 转 double 后的浮点尾差。 */
+export function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}

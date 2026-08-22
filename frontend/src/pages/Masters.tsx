@@ -465,7 +465,7 @@ function CrudTab({
               key={f.key}
               name={f.key}
               label={f.label}
-              rules={f.type === 'supplier' || f.type === 'image' || f.type === 'number' || f.key === 'spec' || f.key === 'drawingsUrl' || f.key === 'tooling'
+              rules={f.type === 'supplier' || f.type === 'image' || f.type === 'number' || f.key === 'spec' || f.key === 'drawingsUrl' || f.key === 'tooling' || f.key === 'country' || f.key === 'contact' || f.key === 'unit'
                 ? []
                 : [{ required: true, message: '请输入' + f.label }]}
             >
@@ -480,7 +480,11 @@ function CrudTab({
               ) : f.type === 'drawing' ? (
                 <FileUpload getContext={uploadContext} />
               ) : f.type === 'number' ? (
-                <InputNumber min={0} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
+                f.key === 'moq' ? (
+                  <InputNumber min={1} precision={0} step={1} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
+                ) : (
+                  <InputNumber min={0} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
+                )
               ) : (
                 <Input />
               )}
@@ -612,9 +616,18 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
       message.warning('请先选择成品')
       return
     }
-    const items = rows
-      .filter((r) => r.partId && r.qty && r.qty > 0)
-      .map((r) => ({ partId: Number(r.partId), qty: Number(r.qty) }))
+    // 不完整行不再静默丢弃：提示用户补全或删除
+    const incomplete = rows.filter((r) => !r.partId || !r.qty || r.qty <= 0)
+    if (incomplete.length > 0) {
+      message.warning('有未填完整的行（需选择零件且用量大于 0），请补全或删除后再保存')
+      return
+    }
+    const partIdSet = new Set(rows.map((r) => r.partId))
+    if (partIdSet.size !== rows.length) {
+      message.warning('BOM 明细中有重复零件，请合并后再保存')
+      return
+    }
+    const items = rows.map((r) => ({ partId: Number(r.partId), qty: Number(r.qty) }))
     setSaving(true)
     try {
       await api.put('/products/' + productId + '/bom', items)
@@ -787,7 +800,7 @@ export default function Masters() {
                 resource={RESOURCES[3]!}
                 canWrite={canWriteEngineering}
                 linkSupplierOnly={linkSupplierOnly}
-                omitFields={role === 'engineer' ? ['price'] : undefined}
+                omitFields={role === 'engineer' ? ['price', 'supplierId'] : undefined}
               />
             ),
           },

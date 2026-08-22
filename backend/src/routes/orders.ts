@@ -9,25 +9,39 @@ const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 
 // 状态机：draft → confirmed → in_production → ready → shipped → completed
 // 允许在未出货前回退一步（confirmed/in_production/ready 可退回上一状态）
+// 注意：ready → shipped 只能通过出货模块（POST /api/shipments）完成，
+// 不允许 PATCH 直接点成已出货（否则会绕过出货单与成品扣库）。
 const STATUS_FLOW: Record<string, string[]> = {
   draft: ['confirmed'],
   confirmed: ['in_production', 'draft'],
   in_production: ['ready', 'confirmed'],
-  ready: ['shipped', 'in_production'],
+  ready: ['in_production'],
   shipped: ['completed'],
   completed: [],
 }
 
 const orderItemSchema = z.object({
   productId: z.number({ error: '商品必填' }).int({ error: '商品必须为整数' }).positive({ error: '商品必须为正整数' }),
-  qty: z.number({ error: '数量必填' }).int({ error: '数量必须为整数' }).positive({ error: '数量必须为正整数' }),
-  unitPrice: z.number({ error: '单价必填' }).nonnegative({ error: '单价必须为非负数' }),
+  qty: z
+    .number({ error: '数量必填' })
+    .int({ error: '数量必须为整数' })
+    .positive({ error: '数量必须为正整数' })
+    .max(2147483647, { error: '数量超出允许范围' }),
+  unitPrice: z
+    .number({ error: '单价必填' })
+    .nonnegative({ error: '单价必须为非负数' })
+    .max(9999999999.99, { error: '单价超出允许范围' }),
 })
 
 const createOrderSchema = z.object({
   customerId: z.number({ error: '客户必填' }).int({ error: '客户必须为整数' }).positive({ error: '客户必须为正整数' }),
   deliveryDate: z.string({ error: '交货日期必填' }).refine((v) => !Number.isNaN(Date.parse(v)), '交货日期必须为合法日期'),
-  items: z.array(orderItemSchema, { error: '明细必填' }).min(1, '订单至少包含一个明细'),
+  items: z
+    .array(orderItemSchema, { error: '明细必填' })
+    .min(1, '订单至少包含一个明细')
+    .refine((items) => new Set(items.map((i) => i.productId)).size === items.length, {
+      message: '同一成品不能在订单明细中重复',
+    }),
 })
 
 const statusSchema = z.object({
@@ -139,7 +153,15 @@ export function ordersRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: `订单状态不能从 ${order.status} 变更为 ${data.status}` })
     }
 
-    const updated = await prisma.salesOrder.update({ where: { id }, data: { status: data.status }, include: ITEMS_INCLUDE })
-    return reply.code(200).send(updated)
+    // 条件更新（要求当前状态仍为 order.status），并发下只有一个请求能命中，防止重复推进/回退
+    const updated = await prisma.salesOrder.updateMany({
+      where: { id, status: order.status },
+      data: { status: data.status },
+    })
+    if (updated.count === 0) {
+      return reply.code(400).send({ error: '订单状态已变化，请刷新后重试' })
+    }
+    const refreshed = await prisma.salesOrder.findUnique({ where: { id }, include: ITEMS_INCLUDE })
+    return reply.code(200).send(refreshed)
   })
 }

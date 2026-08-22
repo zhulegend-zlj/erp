@@ -70,8 +70,11 @@ describe('uploads', () => {
     expect(body.url).toMatch(/^\/uploads\/.+\.pdf$/i)
     created.push(join(process.cwd(), body.url))
 
-    const served = await app.inject({ method: 'GET', url: body.url })
+    const served = await app.inject({ method: 'GET', url: body.url, headers: { cookie } })
     expect(served.statusCode).toBe(200)
+    // 未登录不可访问上传文件
+    const anon = await app.inject({ method: 'GET', url: body.url })
+    expect(anon.statusCode).toBe(401)
   })
 
   it('上传 dwg 图档（octet-stream）成功', async () => {
@@ -248,6 +251,29 @@ describe('uploads', () => {
     const { stat } = await import('node:fs/promises')
     const still = await stat(join(process.cwd(), 'uploads', '_未分类', 'ORG-004-新名')).then(() => true).catch(() => false)
     expect(still).toBe(false)
+  })
+
+  it('SVG 上传被拒绝（防存储型 XSS）', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'engineer')
+    const res = await upload(app, cookie, '恶意.svg', 'image/svg+xml', Buffer.from('<svg><script>alert(1)</script></svg>'))
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('伪装成 png 的非图片内容被拒绝', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'engineer')
+    const res = await upload(app, cookie, '假图.png', 'image/png', Buffer.from('<script>alert(1)</script>'))
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('不符')
+  })
+
+  it('kind 不合法返回 400', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'engineer')
+    const res = await upload(app, cookie, 'a.pdf', 'application/pdf', Buffer.from('%PDF-1.4'), { kind: 'bogus' })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('kind')
   })
 })
 

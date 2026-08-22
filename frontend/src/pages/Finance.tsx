@@ -100,10 +100,10 @@ function SupplierPaymentForm({ suppliers }: { suppliers: Supplier[] }) {
         />
       </Form.Item>
       <Form.Item name="purchaseOrderId" label="采购单 ID（可选）">
-        <InputNumber min={1} placeholder="关联采购单" style={{ width: '100%' }} />
+        <InputNumber min={1} precision={0} step={1} placeholder="关联采购单" style={{ width: '100%' }} />
       </Form.Item>
       <Form.Item name="amount" label="付款金额" rules={[{ required: true, message: '金额' }]}>
-        <InputNumber min={0.01} placeholder="金额" style={{ width: '100%' }} />
+        <InputNumber min={0.01} precision={2} placeholder="金额" style={{ width: '100%' }} />
       </Form.Item>
       <Form.Item name="paidAt" label="付款日期（可选）">
         <Input type="date" />
@@ -156,10 +156,10 @@ function CustomerPaymentForm({ customers }: { customers: Customer[] }) {
         />
       </Form.Item>
       <Form.Item name="salesOrderId" label="销售订单 ID（可选）">
-        <InputNumber min={1} placeholder="关联订单" style={{ width: '100%' }} />
+        <InputNumber min={1} precision={0} step={1} placeholder="关联订单" style={{ width: '100%' }} />
       </Form.Item>
       <Form.Item name="amount" label="收款金额" rules={[{ required: true, message: '金额' }]}>
-        <InputNumber min={0.01} placeholder="金额" style={{ width: '100%' }} />
+        <InputNumber min={0.01} precision={2} placeholder="金额" style={{ width: '100%' }} />
       </Form.Item>
       <Form.Item name="receivedAt" label="收款日期（可选）">
         <Input type="date" />

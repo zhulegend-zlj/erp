@@ -8,17 +8,21 @@ import { parsePagination, pagedResult } from '../pagination'
 
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 
-const returnReplenishSchema = z.object({
-  partId: z.number({ error: '物料必填' }).int().positive(),
-  supplierId: z.number({ error: '供应商必填' }).int().positive(),
-  returnDate: z.string().refine((v) => !Number.isNaN(Date.parse(v)), '退货日期不合法').optional(),
-  returnQty: z.number({ error: '退货数量必须为数字' }).int().nonnegative().default(0),
-  replenishDate: z.string().refine((v) => !Number.isNaN(Date.parse(v)), '补货日期不合法').optional(),
-  replenishQty: z.number({ error: '补货数量必须为数字' }).int().nonnegative().default(0),
-  purchaseOrderNo: z.string().nullable().optional(),
-  lotNo: z.string().nullable().optional(),
-  note: z.string().nullable().optional(),
-})
+const returnReplenishSchema = z
+  .object({
+    partId: z.number({ error: '物料必填' }).int().positive(),
+    supplierId: z.number({ error: '供应商必填' }).int().positive(),
+    returnDate: z.string().refine((v) => !Number.isNaN(Date.parse(v)), '退货日期不合法').optional(),
+    returnQty: z.number({ error: '退货数量必须为数字' }).int().nonnegative().default(0),
+    replenishDate: z.string().refine((v) => !Number.isNaN(Date.parse(v)), '补货日期不合法').optional(),
+    replenishQty: z.number({ error: '补货数量必须为数字' }).int().nonnegative().default(0),
+    purchaseOrderNo: z.string().nullable().optional(),
+    lotNo: z.string().nullable().optional(),
+    note: z.string().nullable().optional(),
+  })
+  .refine((v) => v.returnQty + v.replenishQty > 0, {
+    message: '退货与补货数量至少填写一项',
+  })
 
 function parseBody<T>(schema: z.ZodType<T>, body: unknown, reply: FastifyReply): T | null {
   const result = schema.safeParse(body)
@@ -61,6 +65,22 @@ export function returnReplenishRoutes(app: FastifyInstance) {
 
     try {
       const record = await prisma.$transaction(async (tx) => {
+        // 供应商归属校验：退补货对象必须是该零件当前挂的供应商（或采购单对应的供应商）
+        const part = await tx.part.findUnique({
+          where: { id: data.partId },
+          select: { supplierId: true },
+        })
+        let expectedSupplierId = part?.supplierId ?? null
+        if (data.purchaseOrderNo) {
+          const po = await tx.purchaseOrder.findUnique({
+            where: { orderNo: data.purchaseOrderNo },
+            select: { supplierId: true },
+          })
+          if (po) expectedSupplierId = po.supplierId
+        }
+        if (expectedSupplierId !== null && expectedSupplierId !== data.supplierId) {
+          throw new Error('退补货的供应商与零件/采购单不匹配')
+        }
         const created = await tx.returnReplenish.create({
           data: {
             partId: data.partId,
@@ -86,9 +106,10 @@ export function returnReplenishRoutes(app: FastifyInstance) {
     } catch (err) {
       const message = err instanceof Error ? err.message : '退补货失败'
       if (message.includes('库存不足')) return reply.code(400).send({ error: message })
+      if (message.includes('不匹配')) return reply.code(400).send({ error: message })
       const info = prismaErrorInfo(err)
       if (info) return reply.code(info.status).send({ error: info.message })
-      return reply.code(500).send({ error: '退补货失败：' + message })
+      return reply.code(500).send({ error: '退补货失败，请稍后重试' })
     }
   })
 }

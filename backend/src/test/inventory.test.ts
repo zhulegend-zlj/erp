@@ -9,11 +9,17 @@ describe('inventory', () => {
   })
 
   it('领料出库减少库存，记录领料人', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F8-1', name: '成品柜' } })
     const part = await prisma.part.create({ data: { sku: 'P8-A', name: '木板' } })
+    await prisma.bom.create({ data: { productId: product.id, partId: part.id, qty: 1 } })
     await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 50 } })
     const customer = await prisma.customer.create({ data: { name: '客户8' } })
     const order = await prisma.salesOrder.create({
-      data: { orderNo: 'SO-ISS-1', customerId: customer.id, deliveryDate: new Date('2026-09-30') }
+      data: {
+        orderNo: 'SO-ISS-1', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
+        items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+      }
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'warehouse')
@@ -35,11 +41,17 @@ describe('inventory', () => {
   })
 
   it('库存不足返回 400', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F8-2', name: '成品柜2' } })
     const part = await prisma.part.create({ data: { sku: 'P8-B', name: '螺丝' } })
+    await prisma.bom.create({ data: { productId: product.id, partId: part.id, qty: 1 } })
     await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 5 } })
     const customer = await prisma.customer.create({ data: { name: '客户8' } })
     const order = await prisma.salesOrder.create({
-      data: { orderNo: 'SO-ISS-2', customerId: customer.id, deliveryDate: new Date('2026-09-30') }
+      data: {
+        orderNo: 'SO-ISS-2', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
+        items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+      }
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'warehouse')
@@ -57,7 +69,11 @@ describe('inventory', () => {
     const product = await prisma.product.create({ data: { sku: 'F8-1', name: '成品柜' } })
     const customer = await prisma.customer.create({ data: { name: '客户8' } })
     const order = await prisma.salesOrder.create({
-      data: { orderNo: 'SO-PROD-1', customerId: customer.id, deliveryDate: new Date('2026-09-30') }
+      data: {
+        orderNo: 'SO-PROD-1', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
+        items: { create: { productId: product.id, qty: 20, unitPrice: 5 } },
+      }
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'warehouse')
@@ -93,11 +109,17 @@ describe('inventory', () => {
   })
 
   it('出入库流水按时间升序返回', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F8-LED', name: '成品LED' } })
     const part = await prisma.part.create({ data: { sku: 'P8-A', name: '木板' } })
+    await prisma.bom.create({ data: { productId: product.id, partId: part.id, qty: 1 } })
     await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 100 } })
     const customer = await prisma.customer.create({ data: { name: '客户8' } })
     const order = await prisma.salesOrder.create({
-      data: { orderNo: 'SO-ISS-1', customerId: customer.id, deliveryDate: new Date('2026-09-30') }
+      data: {
+        orderNo: 'SO-ISS-1', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
+        items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+      }
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'warehouse')
@@ -143,6 +165,7 @@ describe('inventory', () => {
         orderNo: 'SO-MAT',
         customerId: customer.id,
         deliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } }
       }
     })
@@ -175,11 +198,17 @@ describe('inventory', () => {
   })
 
   it('订单流水查询返回流水并汇总出库', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F-LED', name: '成品LED' } })
     const part = await prisma.part.create({ data: { sku: 'P-LED', name: '木板' } })
+    await prisma.bom.create({ data: { productId: product.id, partId: part.id, qty: 1 } })
     await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 100 } })
     const customer = await prisma.customer.create({ data: { name: '客户LED' } })
     const order = await prisma.salesOrder.create({
-      data: { orderNo: 'SO-LED', customerId: customer.id, deliveryDate: new Date('2026-09-30') }
+      data: {
+        orderNo: 'SO-LED', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
+        items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+      }
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'warehouse')
@@ -241,13 +270,19 @@ describe('inventory', () => {
     const partA = await prisma.part.create({ data: { sku: 'P-OLB-1', name: '螺丝', supplierId: supplier.id } })
     const partB = await prisma.part.create({ data: { sku: 'P-OLB-2', name: '木板' } })
     const product = await prisma.product.create({ data: { sku: 'F-OLB', name: '成品' } })
-    await prisma.bom.create({ data: { productId: product.id, partId: partA.id, qty: 2 } })
+    await prisma.bom.createMany({
+      data: [
+        { productId: product.id, partId: partA.id, qty: 2 },
+        { productId: product.id, partId: partB.id, qty: 1 },
+      ],
+    })
     const customer = await prisma.customer.create({ data: { name: '客户OLB' } })
     const order = await prisma.salesOrder.create({
       data: {
         orderNo: 'SO-OLB',
         customerId: customer.id,
         deliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } }
       }
     })

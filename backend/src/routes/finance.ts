@@ -2,14 +2,17 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
-import { dueDate, computeOrderCost, computeOrderProfit } from '../domain/finance'
+import { dueDate, computeOrderCost, computeOrderProfit, round2 } from '../domain/finance'
 
 const DAY_MS = 86_400_000
 
 const supplierPaymentSchema = z.object({
   supplierId: z.number({ error: '供应商必填' }).int({ error: '供应商必须为整数' }).positive({ error: '供应商必须为正整数' }),
   purchaseOrderId: z.number({ error: '采购单必须为整数' }).int({ error: '采购单必须为整数' }).positive({ error: '采购单必须为正整数' }).optional(),
-  amount: z.number({ error: '金额必填' }).positive({ error: '金额必须为正数' }),
+  amount: z
+    .number({ error: '金额必填' })
+    .positive({ error: '金额必须为正数' })
+    .max(9999999999.99, { error: '金额超出允许范围' }),
   paidAt: z
     .string({ error: '付款时间必须为字符串' })
     .refine((v) => !Number.isNaN(Date.parse(v)), '付款时间必须为合法日期')
@@ -19,7 +22,10 @@ const supplierPaymentSchema = z.object({
 const customerPaymentSchema = z.object({
   customerId: z.number({ error: '客户必填' }).int({ error: '客户必须为整数' }).positive({ error: '客户必须为正整数' }),
   salesOrderId: z.number({ error: '订单必须为整数' }).int({ error: '订单必须为整数' }).positive({ error: '订单必须为正整数' }).optional(),
-  amount: z.number({ error: '金额必填' }).positive({ error: '金额必须为正数' }),
+  amount: z
+    .number({ error: '金额必填' })
+    .positive({ error: '金额必须为正数' })
+    .max(9999999999.99, { error: '金额超出允许范围' }),
   receivedAt: z
     .string({ error: '收款时间必须为字符串' })
     .refine((v) => !Number.isNaN(Date.parse(v)), '收款时间必须为合法日期')
@@ -52,6 +58,18 @@ export function financeRoutes(app: FastifyInstance) {
     const data = parseBody(supplierPaymentSchema, req.body, reply)
     if (data === null) return
 
+    // 归属校验：付款可挂采购单，但采购单必须属于该供应商
+    if (data.purchaseOrderId !== undefined) {
+      const po = await prisma.purchaseOrder.findUnique({
+        where: { id: data.purchaseOrderId },
+        select: { supplierId: true },
+      })
+      if (!po) return reply.code(404).send({ error: '采购单不存在' })
+      if (po.supplierId !== data.supplierId) {
+        return reply.code(400).send({ error: '该采购单不属于所选供应商' })
+      }
+    }
+
     const payment = await prisma.supplierPayment.create({
       data: {
         supplierId: data.supplierId,
@@ -67,6 +85,18 @@ export function financeRoutes(app: FastifyInstance) {
   app.post('/api/customer-payments', { preHandler: requireRole('finance') }, async (req, reply) => {
     const data = parseBody(customerPaymentSchema, req.body, reply)
     if (data === null) return
+
+    // 归属校验：收款可挂销售订单，但订单必须属于该客户
+    if (data.salesOrderId !== undefined) {
+      const order = await prisma.salesOrder.findUnique({
+        where: { id: data.salesOrderId },
+        select: { customerId: true },
+      })
+      if (!order) return reply.code(404).send({ error: '销售订单不存在' })
+      if (order.customerId !== data.customerId) {
+        return reply.code(400).send({ error: '该销售订单不属于所选客户' })
+      }
+    }
 
     const payment = await prisma.customerPayment.create({
       data: {
@@ -99,9 +129,9 @@ export function financeRoutes(app: FastifyInstance) {
     const purchaseItems = order.purchaseOrders.flatMap((po) =>
       po.items.map((it) => ({ qty: it.qty, unitPrice: it.unitPrice }))
     )
-    const cost = computeOrderCost(purchaseItems, order.otherCost.toNumber())
-    const totalReceived = order.customerPayments.reduce((sum, p) => sum + p.amount.toNumber(), 0)
-    const profit = computeOrderProfit(totalReceived, cost)
+    const cost = round2(computeOrderCost(purchaseItems, order.otherCost.toNumber()))
+    const totalReceived = round2(order.customerPayments.reduce((sum, p) => sum + p.amount.toNumber(), 0))
+    const profit = round2(computeOrderProfit(totalReceived, cost))
 
     const earliest = order.shipments[0]
     const due = earliest ? formatDate(dueDate(earliest.shippedAt)) : null
@@ -123,7 +153,8 @@ export function financeRoutes(app: FastifyInstance) {
     const now = new Date()
     const end = new Date(now.getTime() + days * DAY_MS)
 
-    // 应收：有 shipment 且 shippedAt+60 天落在 [now, end] 的订单（按订单去重，取最早出货）
+    // 应收：有 shipment 且 shippedAt+60 天落在 [now, end] 的订单（按订单去重，取最早出货）；
+    // 金额为余额口径：整单金额 - 已收款，已收完的不再列出
     const shipments = await prisma.shipment.findMany({
       include: {
         salesOrder: {
@@ -132,37 +163,47 @@ export function financeRoutes(app: FastifyInstance) {
       },
       orderBy: { shippedAt: 'asc' as const },
     })
+    const customerPaidGroups = await prisma.customerPayment.groupBy({
+      by: ['salesOrderId'],
+      where: { salesOrderId: { not: null } },
+      _sum: { amount: true },
+    })
+    const customerPaidMap = new Map(customerPaidGroups.map((g) => [g.salesOrderId!, g._sum.amount?.toNumber() ?? 0]))
     const receivableMap = new Map<number, { customerName: string; orderNo: string; dueDate: string; amount: number }>()
     for (const shipment of shipments) {
       const due = dueDate(shipment.shippedAt)
       if (due < now || due > end) continue
       if (receivableMap.has(shipment.salesOrderId)) continue
       const order = shipment.salesOrder
-      const amount = order.items.reduce((sum, it) => sum + it.qty * it.unitPrice.toNumber(), 0)
+      const total = order.items.reduce((sum, it) => sum + it.qty * it.unitPrice.toNumber(), 0)
+      const outstanding = Math.max(0, round2(total - (customerPaidMap.get(order.id) ?? 0)))
+      if (outstanding <= 0) continue
       receivableMap.set(shipment.salesOrderId, {
         customerName: order.customer.name,
         orderNo: order.orderNo,
         dueDate: formatDate(due),
-        amount,
+        amount: outstanding,
       })
     }
 
-    // 应付：采购单创建后 30 天落在 [now, end] 的采购单
+    // 应付：采购单创建后 30 天落在 [now, end] 的采购单；金额为余额口径：采购金额 - 已付款
     const purchaseOrders = await prisma.purchaseOrder.findMany({
-      include: { supplier: true, items: true },
+      include: { supplier: true, items: true, payments: true },
       orderBy: { createdAt: 'asc' as const },
     })
     const payable = purchaseOrders
       .map((po) => {
         const due = addDays(po.createdAt, 30)
+        const total = po.items.reduce((sum, it) => sum + it.qty * it.unitPrice.toNumber(), 0)
+        const paid = po.payments.reduce((sum, p) => sum + p.amount.toNumber(), 0)
         return {
           due,
           supplierName: po.supplier.name,
           orderNo: po.orderNo,
-          amount: po.items.reduce((sum, it) => sum + it.qty * it.unitPrice.toNumber(), 0),
+          amount: Math.max(0, round2(total - paid)),
         }
       })
-      .filter((row) => row.due >= now && row.due <= end)
+      .filter((row) => row.due >= now && row.due <= end && row.amount > 0)
       .map(({ due, ...row }) => ({ ...row, dueDate: formatDate(due) }))
 
     return {

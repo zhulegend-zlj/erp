@@ -29,6 +29,9 @@ export function prismaErrorInfo(err: unknown): ErrorInfo | null {
   if (code === 'P2023') {
     return { status: 400, message: '输入数据格式不正确' }
   }
+  if (code === 'P2000' || code === 'P2020') {
+    return { status: 400, message: '数值超出允许范围' }
+  }
   return null
 }
 

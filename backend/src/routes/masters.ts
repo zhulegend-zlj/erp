@@ -51,8 +51,13 @@ const partSchema = z.object({
   imageUrl: z.string().nullable().optional(),
   drawingsUrl: z.string().nullable().optional(),
   tooling: z.string().nullable().optional(),
-  moq: z.number({ error: 'MOQ 必须为整数' }).int().positive().nullable().optional(),
-  price: z.number({ error: '价格必须为数字' }).nonnegative().nullable().optional(),
+  moq: z.number({ error: 'MOQ 必须为整数' }).int().positive().max(2147483647, { error: 'MOQ 超出允许范围' }).nullable().optional(),
+  price: z
+    .number({ error: '价格必须为数字' })
+    .nonnegative({ error: '价格必须为非负数' })
+    .max(9999999999.99, { error: '价格超出允许范围' })
+    .nullable()
+    .optional(),
   supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
 })
 
@@ -156,11 +161,13 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
   })
 
   app.post(base, { preHandler: write }, async (req, reply) => {
-    // 零件：价格归采购维护，工程创建时不可填写
+    // 零件：价格与供应商归采购维护，工程创建时不可填写
     if (spec.resource === 'part') {
       const role = (req as { user?: { role?: string } }).user?.role
-      if (role === 'engineer' && 'price' in ((req.body as object) ?? {})) {
-        return reply.code(400).send({ error: '价格由采购维护，工程不可填写' })
+      if (role === 'engineer') {
+        const body = (req.body as object) ?? {}
+        if ('price' in body) return reply.code(400).send({ error: '价格由采购维护，工程不可填写' })
+        if ('supplierId' in body) return reply.code(400).send({ error: '供应商由采购维护，工程不可填写' })
       }
     }
     const data = parseBody(spec.schema, req.body, reply)
@@ -190,8 +197,9 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
         const record = await delegate.update({ where: { id }, data })
         return reply.code(200).send(record)
       }
-      if (role === 'engineer' && 'price' in body) {
-        return reply.code(400).send({ error: '价格由采购维护，工程不可修改' })
+      if (role === 'engineer') {
+        if ('price' in body) return reply.code(400).send({ error: '价格由采购维护，工程不可修改' })
+        if ('supplierId' in body) return reply.code(400).send({ error: '供应商由采购维护，工程不可修改' })
       }
     }
     const before =
