@@ -243,7 +243,7 @@ function CrudTab({
   const [linkPrice, setLinkPrice] = useState<number | null>(null)
   const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [form] = Form.useForm<Record<string, any>>()
-  const pageSize = 10
+  const [pageSize, setPageSize] = useState(10)
   const isPart = resource.path === '/parts'
   const isProduct = resource.path === '/products'
   // 上传时实时读取表单中的 SKU/名称（避免 useWatch 时序问题导致上下文丢失）
@@ -453,7 +453,12 @@ function CrudTab({
           current: page,
           pageSize,
           total,
-          showSizeChanger: false,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          onShowSizeChange: (_c, s) => {
+            setPageSize(s)
+            void load(1)
+          },
           onChange: (p) => void load(p),
         }}
       />

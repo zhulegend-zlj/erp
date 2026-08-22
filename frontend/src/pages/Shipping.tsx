@@ -53,7 +53,7 @@ export default function Shipping() {
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
-  const pageSize = 10
+  const [pageSize, setPageSize] = useState(10)
   const [shipForm] = Form.useForm<{
     salesOrderId?: number
     shippedAt?: string
@@ -221,7 +221,12 @@ export default function Shipping() {
             current: page,
             pageSize,
             total,
-            showSizeChanger: false,
+            showSizeChanger: true,
+            pageSizeOptions: [10, 20, 50, 100],
+            onShowSizeChange: (_c, s) => {
+              setPageSize(s)
+              void load(1)
+            },
             onChange: (p) => void load(p),
           }}
           columns={columns}

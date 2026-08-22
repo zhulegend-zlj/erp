@@ -20,6 +20,26 @@ function clean(v: unknown): string {
   return String(v ?? '').replace(/\r/g, '').replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
+// 螺丝/标准件料号：规格+类型（跨机种同规格同料号，如 M3x13-杯头、M6-垫片）
+function screwSku(name: string, dims: string): string {
+  const fromName = name.match(/M\d+(?:\.\d+)?(?:\s*x\s*\d+(?:\.\d+)?)?/i)?.[0]
+  const raw = (fromName || dims).replace(/\s+/g, '').replace(/\*/g, 'x')
+  const m = raw.match(/M(\d+(?:\.\d+)?)(?:x(\d+(?:\.\d+)?))?/i)
+  const size = m ? 'M' + m[1] + (m[2] ? 'x' + m[2] : '') : raw
+  if (name.includes('直纹') && name.includes('杯头')) return size + '-杯头直纹'
+  if (name.includes('杯头')) return size + '-杯头'
+  if (name.includes('扁头')) return size + '-扁头'
+  if (name.includes('十字')) return size + '-十字'
+  if (name.includes('沉头')) return size + '-沉头'
+  if (name.includes('平头')) return size + '-平头'
+  if (name.includes('半圆头')) return size + '-半圆头'
+  if (name.includes('机米')) return size + '-机米'
+  if (name.includes('盖型螺母')) return size + '-盖型螺母'
+  if (name.includes('螺母')) return size + '-螺母'
+  if (name.includes('垫片')) return size + '-垫片'
+  return name
+}
+
 
 async function main() {
   const wb = XLSX.read(readFileSync(FILE), { type: 'buffer' })
@@ -31,8 +51,9 @@ async function main() {
   const assumptions: string[] = []
   const mapping: unknown[][] = [['表内序号', '原表料号', '新SKU', '零件名称', '用量']]
   let csp13Seq = 0
-  let sSeq = 0
   let mSeq = 0
+  let screwCount = 0
+  const bomQty = new Map<number, number>()
 
   // 成品
   const existingProduct = await prisma.product.findUnique({ where: { sku: PRODUCT_SKU } })
@@ -71,11 +92,12 @@ async function main() {
       // 官方 CSP 料号照抄（即使名称含螺丝/螺母，如 CSP-005）
       sku = id
     } else if (isFastener) {
-      sSeq++
-      sku = 'CSP-S' + String(sSeq).padStart(2, '0')
+      // 螺丝：规格+类型（跨机种同规格同料号）
+      sku = screwSku(name, dims)
+      screwCount++
     } else if (id === '' || id === '-') {
       mSeq++
-      sku = 'CSP-M' + String(mSeq).padStart(2, '0')
+      sku = 'CSP-' + (200 + mSeq)
     } else {
       // 官方料号照抄（CSP-xxx / F LOGO / Lithium Grease / 49-002769 等）
       sku = id
@@ -105,19 +127,26 @@ async function main() {
       }))
     if (!existingPart) partCount++
 
-    const existingBom = await prisma.bom.findUnique({
-      where: { productId_partId: { productId: product.id, partId: part.id } },
-    })
-    if (!existingBom) {
-      await prisma.bom.create({ data: { productId: product.id, partId: part.id, qty: amount } })
-      bomCount++
-    }
+    // 同一 SKU 出现多行时用量累加（如跨机种共用螺丝）
+    bomQty.set(part.id, (bomQty.get(part.id) ?? 0) + amount)
     mapping.push([clean(raw[0]), id || '-', sku, name, amount])
+  }
+
+  for (const [partId, qty] of bomQty.entries()) {
+    const existingBom = await prisma.bom.findUnique({
+      where: { productId_partId: { productId: product.id, partId } },
+    })
+    if (existingBom) {
+      await prisma.bom.update({ where: { id: existingBom.id }, data: { qty } })
+    } else {
+      await prisma.bom.create({ data: { productId: product.id, partId, qty } })
+    }
+    bomCount++
   }
 
   console.log('--- 导入完成 ---')
   console.log('新增零件：', partCount, '，BOM 行：', bomCount)
-  console.log('CSP-013 变体：', csp13Seq, '个；标准件 CSP-S：', sSeq, '个；杂项 CSP-M：', mSeq, '个')
+  console.log('CSP-013 变体：', csp13Seq, '个；螺丝（规格+类型命名）：', screwCount, '个；自命名 CSP-2xx：', mSeq, '个')
   const [parts, boms] = await Promise.all([prisma.part.count(), prisma.bom.count({ where: { productId: product.id } })])
   console.log('当前库内零件总数：', parts, '，该成品 BOM 行数：', boms)
   console.log('--- 需老板/工程复核的假设 ---')

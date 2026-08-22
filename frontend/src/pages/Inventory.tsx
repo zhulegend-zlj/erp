@@ -349,7 +349,7 @@ function QcPanel({ refreshToken }: { refreshToken: number }) {
   const [editing, setEditing] = useState<ReceiptRecord | null>(null)
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm<{ qcStatus?: string; defectiveQty?: number; lotNo?: string }>()
-  const pageSize = 10
+  const [pageSize, setPageSize] = useState(10)
 
   async function load(targetPage = 1) {
     setLoading(true)
@@ -419,7 +419,12 @@ function QcPanel({ refreshToken }: { refreshToken: number }) {
           current: page,
           pageSize,
           total,
-          showSizeChanger: false,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          onShowSizeChange: (_c, s) => {
+            setPageSize(s)
+            void load(1)
+          },
           onChange: (p) => void load(p),
         }}
         columns={[
@@ -804,7 +809,7 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
   const [keyword, setKeyword] = useState('')
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
-  const pageSize = 10
+  const [pageSize, setPageSize] = useState(10)
 
   async function load(targetPage = 1, type?: string, kw?: string) {
     setLoading(true)
@@ -863,7 +868,12 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
           current: page,
           pageSize,
           total,
-          showSizeChanger: false,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          onShowSizeChange: (_c, s) => {
+            setPageSize(s)
+            void load(1, itemType, keyword)
+          },
           onChange: (p) => void load(p, itemType, keyword),
         }}
         columns={[
@@ -926,7 +936,7 @@ function LedgerTab({ parts, orders }: { parts: Part[]; orders: SalesOrder[] }) {
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
-  const pageSize = 10
+  const [pageSize, setPageSize] = useState(10)
 
   useEffect(() => {
     api
@@ -1022,7 +1032,12 @@ function LedgerTab({ parts, orders }: { parts: Part[]; orders: SalesOrder[] }) {
           current: page,
           pageSize,
           total,
-          showSizeChanger: false,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          onShowSizeChange: (_c, s) => {
+            setPageSize(s)
+            void query(1)
+          },
           onChange: (p) => void query(p),
         }}
         columns={[
@@ -1223,7 +1238,7 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
   const [submitting, setSubmitting] = useState(false)
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
-  const pageSize = 10
+  const [pageSize, setPageSize] = useState(10)
   const [form] = Form.useForm<{
     partId?: number
     supplierId?: number
@@ -1434,7 +1449,12 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
           current: page,
           pageSize,
           total,
-          showSizeChanger: false,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          onShowSizeChange: (_c, s) => {
+            setPageSize(s)
+            void load(1)
+          },
           onChange: (p) => void load(p),
         }}
         columns={[
@@ -1485,7 +1505,7 @@ function WarehouseLedgerTab() {
   const [orderNo, setOrderNo] = useState('')
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
-  const pageSize = 10
+  const [pageSize, setPageSize] = useState(10)
 
   async function load(targetPage = 1) {
     setLoading(true)
@@ -1554,7 +1574,12 @@ function WarehouseLedgerTab() {
           current: page,
           pageSize,
           total,
-          showSizeChanger: false,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          onShowSizeChange: (_c, s) => {
+            setPageSize(s)
+            void load(1)
+          },
           onChange: (p) => void load(p),
         }}
         columns={[

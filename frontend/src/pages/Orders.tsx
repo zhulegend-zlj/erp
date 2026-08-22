@@ -62,7 +62,7 @@ export default function Orders() {
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [form] = Form.useForm<OrderFormValues>()
-  const pageSize = 10
+  const [pageSize, setPageSize] = useState(10)
 
   const canCreate = user?.role === 'sales'
   const canAdvance = user?.role === 'sales' || user?.role === 'boss'
@@ -239,7 +239,12 @@ export default function Orders() {
           current: page,
           pageSize,
           total,
-          showSizeChanger: false,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          onShowSizeChange: (_c, s) => {
+            setPageSize(s)
+            void load(1)
+          },
           onChange: (p) => void load(p),
         }}
       />

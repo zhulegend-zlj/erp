@@ -111,7 +111,7 @@ export default function Purchasing() {
   const [poPage, setPoPage] = useState(1)
   const [poTotal, setPoTotal] = useState(0)
   const [form] = Form.useForm<PoFormValues>()
-  const poPageSize = 10
+  const [poPageSize, setPoPageSize] = useState(10)
 
   // 恢复上次离开时的弹窗草稿（切换页面回来继续编辑）
   useEffect(() => {
@@ -393,7 +393,12 @@ export default function Purchasing() {
             current: poPage,
             pageSize: poPageSize,
             total: poTotal,
-            showSizeChanger: false,
+            showSizeChanger: true,
+            pageSizeOptions: [10, 20, 50, 100],
+            onShowSizeChange: (_c, s) => {
+              setPoPageSize(s)
+              void loadPos(1)
+            },
             onChange: (p) => void loadPos(p),
           }}
           columns={[
