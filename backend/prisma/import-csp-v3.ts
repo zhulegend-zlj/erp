@@ -1,8 +1,10 @@
 // 从工程提供的 CSP_V3 清单 Excel 批量导入：成品 + 零件 + BOM。
-// 命名规则（老板确认）：
-// - 结构件：沿用表内料号（CSP-xxx）；CSP-013 七个长度变体拆为 CSP-013-<长度>；
-// - 标准螺丝：ISO 标准号 + 规格（如表内 ISO 4762 M3 x 13 先例）；
-// - 其余无料号杂项：中文名称[-规格]（工程后续可改，改名自动同步目录）。
+// 命名规则（方案 1，老板确认）：
+// - 官方料号照抄（CSP-xxx / F LOGO / Lithium Grease / 49-002769 等）；
+// - CSP-013 七个长度变体 → CSP-013-1 ~ CSP-013-7（按表顺序，长度写在名称里）；
+// - 螺丝/螺母/垫片/机米等标准件 → CSP-S01、CSP-S02…（按表顺序）；
+// - 其余无料号杂项 → CSP-M01、CSP-M02…（按表顺序）。
+// 每次导入生成对照表：D:/AI/erp-backups/CSP-V3-SKU对照表.xlsx
 // 用法：cd backend && npx tsx --env-file=.env prisma/import-csp-v3.ts
 import { PrismaClient } from '@prisma/client'
 import { readFileSync } from 'node:fs'
@@ -18,23 +20,6 @@ function clean(v: unknown): string {
   return String(v ?? '').replace(/\r/g, '').replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-function screwIso(name: string, spec: string): string | null {
-  // 尺寸优先取名称里的规格（如「M8 x 16 平头内六角螺丝」），名称没有才用规格列
-  const fromName = name.match(/M\d+(?:\s*x\s*\d+(?:\.\d+)?)?/i)?.[0]
-  const size = fromName || spec
-  const s = size.replace(/\s+/g, ' ').replace(/x/g, ' x ').replace(/\s+/g, ' ').trim()
-  if (name.includes('直纹') && name.includes('杯头')) return 'ISO 4762 ' + s + ' 直纹'
-  if (name.includes('杯头')) return 'ISO 4762 ' + s
-  if (name.includes('平头') && name.includes('内六角')) return 'ISO 10642 ' + s
-  if (name.includes('扁头') && name.includes('内六角')) return 'ISO 10642 ' + s + ' 扁头'
-  if (name.includes('沉头') && name.includes('内六角')) return 'ISO 10642 ' + s
-  if (name.includes('半圆头')) return 'ISO 7380 ' + s
-  if (name.includes('十字')) return 'ISO 7046 ' + s
-  if (name.includes('机米')) return 'ISO 4026 ' + s
-  if (name.includes('螺母')) return 'ISO 4032 ' + s
-  if (name.includes('垫片')) return 'ISO 7093 ' + s
-  return null
-}
 
 async function main() {
   const wb = XLSX.read(readFileSync(FILE), { type: 'buffer' })
@@ -44,7 +29,10 @@ async function main() {
 
   const skuUsed = new Map<string, number>()
   const assumptions: string[] = []
-  let isoCount = 0
+  const mapping: unknown[][] = [['表内序号', '原表料号', '新SKU', '零件名称', '用量']]
+  let csp13Seq = 0
+  let sSeq = 0
+  let mSeq = 0
 
   // 成品
   const existingProduct = await prisma.product.findUnique({ where: { sku: PRODUCT_SKU } })
@@ -73,27 +61,27 @@ async function main() {
       assumptions.push('序号' + clean(raw[0]) + '「' + name + '」用量为空，按 1 处理')
     }
 
-    // 料号处理
-    let sku = id
-    if (id === '' || id === '-') {
-      const isoSku = screwIso(name, dims)
-      if (isoSku) {
-        sku = isoSku
-        isoCount++
-      } else {
-        const shortSpec = dims ? '-' + dims.replace(/[\/\\:?"<>|]/g, '').slice(0, 30) : ''
-        sku = name + shortSpec
-      }
-    } else if (id === 'CSP-013') {
-      const m = name.match(/\*(\d+(?:\.\d+)?)\s*$/)
-      if (m) {
-        sku = 'CSP-013-' + m[1]
-      } else {
-        assumptions.push('CSP-013 行无法提取长度：' + name)
-      }
+    // 料号处理（方案 1：官方料号照抄优先；CSP-013 变体 -1~-7；无官方号的螺丝 CSP-Sxx；杂项 CSP-Mxx）
+    const isFastener = /螺丝|螺母|垫片|机米/.test(name)
+    let sku = ''
+    if (/^CSP-013$/i.test(id)) {
+      csp13Seq++
+      sku = 'CSP-013-' + csp13Seq
+    } else if (/^CSP-/.test(id)) {
+      // 官方 CSP 料号照抄（即使名称含螺丝/螺母，如 CSP-005）
+      sku = id
+    } else if (isFastener) {
+      sSeq++
+      sku = 'CSP-S' + String(sSeq).padStart(2, '0')
+    } else if (id === '' || id === '-') {
+      mSeq++
+      sku = 'CSP-M' + String(mSeq).padStart(2, '0')
+    } else {
+      // 官方料号照抄（CSP-xxx / F LOGO / Lithium Grease / 49-002769 等）
+      sku = id
     }
     sku = sku.trim()
-    // 去重兜底
+    // 去重兜底（理论上不会触发）
     const base = sku
     const n = skuUsed.get(base) ?? 0
     skuUsed.set(base, n + 1)
@@ -124,15 +112,24 @@ async function main() {
       await prisma.bom.create({ data: { productId: product.id, partId: part.id, qty: amount } })
       bomCount++
     }
+    mapping.push([clean(raw[0]), id || '-', sku, name, amount])
   }
 
   console.log('--- 导入完成 ---')
   console.log('新增零件：', partCount, '，BOM 行：', bomCount)
-  console.log('ISO 标准件命名：', isoCount, '个')
+  console.log('CSP-013 变体：', csp13Seq, '个；标准件 CSP-S：', sSeq, '个；杂项 CSP-M：', mSeq, '个')
   const [parts, boms] = await Promise.all([prisma.part.count(), prisma.bom.count({ where: { productId: product.id } })])
   console.log('当前库内零件总数：', parts, '，该成品 BOM 行数：', boms)
   console.log('--- 需老板/工程复核的假设 ---')
   for (const a of assumptions) console.log(' *', a)
+  // 导出对照表供工程核对
+  const outFile = 'D:/AI/erp-backups/CSP-V3-SKU对照表.xlsx'
+  const outWs = XLSX.utils.aoa_to_sheet(mapping)
+  outWs['!cols'] = [{ wch: 8 }, { wch: 22 }, { wch: 14 }, { wch: 40 }, { wch: 6 }]
+  const wbOut = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wbOut, outWs, '对照表')
+  XLSX.writeFile(wbOut, outFile)
+  console.log('对照表已导出：', outFile)
 }
 
 main()
