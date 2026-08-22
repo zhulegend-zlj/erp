@@ -75,6 +75,7 @@ const READ_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as cons
 
 const PURCHASE_ORDER_INCLUDE = {
   supplier: { select: { id: true, name: true } },
+  salesOrder: { select: { id: true, orderNo: true } },
   items: {
     include: { part: { select: { id: true, sku: true, name: true, unit: true } } },
     orderBy: { id: 'asc' as const },
@@ -186,6 +187,7 @@ export function purchasingRoutes(app: FastifyInstance) {
         supplierId: po.supplierId,
         supplierName: po.supplier.name,
         salesOrderId: po.salesOrderId,
+        salesOrderNo: po.salesOrder?.orderNo ?? '',
         createdAt: po.createdAt,
         totalAmount,
         paidAmount,

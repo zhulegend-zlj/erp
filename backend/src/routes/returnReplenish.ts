@@ -65,18 +65,24 @@ export function returnReplenishRoutes(app: FastifyInstance) {
 
     try {
       const record = await prisma.$transaction(async (tx) => {
-        // 供应商归属校验：退补货对象必须是该零件当前挂的供应商（或采购单对应的供应商）
+        // 供应商归属校验：退补货对象必须是该零件当前挂的供应商（或绑定采购单对应的供应商）
         const part = await tx.part.findUnique({
           where: { id: data.partId },
           select: { supplierId: true },
         })
-        let expectedSupplierId = part?.supplierId ?? null
+        if (!part) throw new Error('物料不存在')
+        let expectedSupplierId = part.supplierId ?? null
         if (data.purchaseOrderNo) {
+          // 绑定采购单：必须真实存在，且该物料必须属于该采购单
           const po = await tx.purchaseOrder.findUnique({
             where: { orderNo: data.purchaseOrderNo },
-            select: { supplierId: true },
+            select: { id: true, supplierId: true, items: { select: { partId: true } } },
           })
-          if (po) expectedSupplierId = po.supplierId
+          if (!po) throw new Error('采购单不存在')
+          expectedSupplierId = po.supplierId
+          if (!po.items.some((i) => i.partId === data.partId)) {
+            throw new Error('该物料不属于所选采购单')
+          }
         }
         if (expectedSupplierId !== null && expectedSupplierId !== data.supplierId) {
           throw new Error('退补货的供应商与零件/采购单不匹配')
@@ -106,7 +112,10 @@ export function returnReplenishRoutes(app: FastifyInstance) {
     } catch (err) {
       const message = err instanceof Error ? err.message : '退补货失败'
       if (message.includes('库存不足')) return reply.code(400).send({ error: message })
-      if (message.includes('不匹配')) return reply.code(400).send({ error: message })
+      if (message.includes('不匹配') || message.includes('不属于所选采购单') || message.includes('不存在')) {
+        if (message.includes('采购单不存在')) return reply.code(404).send({ error: message })
+        return reply.code(400).send({ error: message })
+      }
       const info = prismaErrorInfo(err)
       if (info) return reply.code(info.status).send({ error: info.message })
       return reply.code(500).send({ error: '退补货失败，请稍后重试' })

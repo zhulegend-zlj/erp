@@ -84,6 +84,7 @@ interface PurchaseOrderRow {
   supplierId: number
   supplierName: string
   salesOrderId: number | null
+  salesOrderNo?: string
   totalAmount: number
   paidAmount: number
   outstanding: number
@@ -200,6 +201,25 @@ export default function Purchasing() {
     setModalOpen(true)
   }
 
+  // 已生成过采购单的订单仍可继续生成（增补/补损），先确认再继续；新单会自动关联同一销售订单
+  function openCreatePoWithCheck() {
+    const orderPos = purchaseOrders.filter((po) => po.salesOrderId === orderId)
+    if (orderPos.length === 0) {
+      openCreatePo()
+      return
+    }
+    Modal.confirm({
+      title: '该订单已生成过采购单',
+      content:
+        '已存在：' +
+        orderPos.map((p) => p.orderNo).join('、') +
+        '。确认继续生成新的采购单吗？新采购单会关联到同一销售订单，收货后一起计算采购进度。',
+      okText: '继续生成',
+      cancelText: '取消',
+      onOk: () => openCreatePo(),
+    })
+  }
+
   async function handleCreate(values: PoFormValues) {
     const rows = (values.items ?? []).map((it) => ({
       partId: Number(it.partId ?? 0),
@@ -300,7 +320,7 @@ export default function Purchasing() {
             }))}
           />
           {canCreate && orderId ? (
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePo} disabled={gaps.length === 0}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePoWithCheck}>
               生成采购单
             </Button>
           ) : null}
@@ -378,6 +398,12 @@ export default function Purchasing() {
           }}
           columns={[
             { title: '采购单号', dataIndex: 'orderNo', key: 'orderNo' },
+            {
+              title: '销售订单',
+              dataIndex: 'salesOrderNo',
+              key: 'salesOrderNo',
+              render: (v: string | undefined) => v || '-',
+            },
             { title: '供应商', dataIndex: 'supplierName', key: 'supplierName' },
             {
               title: '状态',
@@ -456,7 +482,7 @@ export default function Purchasing() {
             description={
               supplierGroups.length > 0
                 ? supplierGroups.map(([name, count]) => name + '：' + count + ' 项').join('；')
-                : '请添加采购明细，系统将按零件供应商自动分组。'
+                : '当前订单无采购缺口（或为空），可点下方「添加明细」手动增补采购，系统将按零件供应商自动分组。'
             }
           />
           <Form.List name="items">

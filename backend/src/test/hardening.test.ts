@@ -356,6 +356,44 @@ describe('hardening（加固回归）', () => {
   })
 
   describe('B8 退补货校验', () => {
+    it('绑定采购单：物料必须属于该采购单，采购单不存在返回 404，正常绑定成功', async () => {
+      const s1 = await prisma.supplier.create({ data: { name: '供应商-RR-A' } })
+      const partA = await prisma.part.create({ data: { sku: 'P-RR-A', name: '绑定零件A', supplierId: s1.id } })
+      const partB = await prisma.part.create({ data: { sku: 'P-RR-B', name: '绑定零件B', supplierId: s1.id } })
+      await prisma.stock.createMany({
+        data: [
+          { itemType: 'part', itemId: partA.id, qtyOnHand: 100 },
+          { itemType: 'part', itemId: partB.id, qtyOnHand: 100 },
+        ],
+      })
+      const po = await prisma.purchaseOrder.create({
+        data: { orderNo: 'PO-RR-BIND', supplierId: s1.id, items: { create: { partId: partA.id, qty: 10, unitPrice: 1 } } },
+      })
+      const app = buildApp()
+      const cookie = await loginCookie(app, 'warehouse')
+
+      const notInPo = await app.inject({
+        method: 'POST', url: '/api/return-replenishments', headers: { cookie },
+        payload: { partId: partB.id, supplierId: s1.id, returnQty: 1, purchaseOrderNo: po.orderNo },
+      })
+      expect(notInPo.statusCode).toBe(400)
+      expect(notInPo.json().error).toContain('不属于所选采购单')
+
+      const missingPo = await app.inject({
+        method: 'POST', url: '/api/return-replenishments', headers: { cookie },
+        payload: { partId: partA.id, supplierId: s1.id, returnQty: 1, purchaseOrderNo: 'PO-NOT-EXIST' },
+      })
+      expect(missingPo.statusCode).toBe(404)
+
+      const ok = await app.inject({
+        method: 'POST', url: '/api/return-replenishments', headers: { cookie },
+        payload: { partId: partA.id, supplierId: s1.id, returnQty: 2, purchaseOrderNo: po.orderNo, lotNo: 'LOT-1' },
+      })
+      expect(ok.statusCode).toBe(200)
+      const record = await prisma.returnReplenish.findFirst({ where: { purchaseOrderNo: po.orderNo } })
+      expect(record).toMatchObject({ partId: partA.id, returnQty: 2, lotNo: 'LOT-1' })
+    })
+
     it('退货与补货数量均为 0 或供应商不匹配返回 400', async () => {
       const s1 = await prisma.supplier.create({ data: { name: '供应商-H9A' } })
       const s2 = await prisma.supplier.create({ data: { name: '供应商-H9B' } })
@@ -427,6 +465,11 @@ describe('hardening（加固回归）', () => {
       const afterPo = await prisma.salesOrder.findUnique({ where: { id: order.id } })
       expect(afterPo?.purchasing).toBe(true)
       expect(afterPo?.status).toBe('in_production')
+
+      // 采购单列表带关联销售订单号（继续生成采购单时可见与旧单的关联）
+      const poList = await app.inject({ method: 'GET', url: '/api/purchase-orders', headers: { cookie: purchaseCookie } })
+      const poRow = (poList.json() as { orderNo: string; salesOrderNo?: string }[]).find((p) => p.orderNo === po.json().orderNo)
+      expect(poRow?.salesOrderNo).toBe('SO-PH')
 
       const warehouseCookie = await loginCookie(app, 'warehouse')
       const receipt = await app.inject({

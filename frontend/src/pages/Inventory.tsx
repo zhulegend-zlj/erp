@@ -6,8 +6,11 @@ import {
   Form,
   Image,
   Input,
+  AutoComplete,
+  Col,
   InputNumber,
   Modal,
+  Row,
   Select,
   Space,
   Table,
@@ -1116,9 +1119,21 @@ interface ReturnReplenishRow {
   supplier: { name: string }
 }
 
+interface PoForRR {
+  id: number
+  orderNo: string
+  supplierId: number
+  supplierName: string
+  items: { partId: number }[]
+}
+
 function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => void }) {
   const [rows, setRows] = useState<ReturnReplenishRow[]>([])
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
+  const [pos, setPos] = useState<PoForRR[]>([])
+  const [boundPo, setBoundPo] = useState<PoForRR | null>(null)
+  const [poPartIds, setPoPartIds] = useState<Set<number> | null>(null)
+  const [lotNoOptions, setLotNoOptions] = useState<{ value: string }[]>([])
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [page, setPage] = useState(1)
@@ -1139,16 +1154,18 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
   async function load(targetPage = 1) {
     setLoading(true)
     try {
-      const [r, s] = await Promise.all([
+      const [r, s, po] = await Promise.all([
         api.get<Paged<ReturnReplenishRow>>('/return-replenishments', {
           params: { page: targetPage, pageSize },
         }),
         api.get<SupplierOption[]>('/suppliers'),
+        api.get<PoForRR[]>('/purchase-orders'),
       ])
       setRows(r.data.items)
       setTotal(r.data.total)
       setPage(r.data.page)
       setSuppliers(s.data)
+      setPos(po.data)
     } catch (err) {
       notifyError(err)
     } finally {
@@ -1159,6 +1176,29 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
   useEffect(() => {
     void load()
   }, [])
+
+  // 绑定采购单：物料限定为该单零件、供应商自动带出、来料单号可从上该单收货记录选择
+  async function onPoSelect(orderNo?: string) {
+    setBoundPo(null)
+    setPoPartIds(null)
+    setLotNoOptions([])
+    if (!orderNo) return
+    const po = pos.find((p) => p.orderNo === orderNo)
+    if (!po) return
+    setBoundPo(po)
+    setPoPartIds(new Set(po.items.map((i) => i.partId)))
+    form.setFieldValue('supplierId', po.supplierId)
+    if (po.items.length === 1) form.setFieldValue('partId', po.items[0]!.partId)
+    try {
+      const { data } = await api.get<Paged<ReceiptRecord>>('/receipts', {
+        params: { purchaseOrderId: po.id },
+      })
+      const lotNos = [...new Set(data.items.map((r) => r.lotNo).filter((v): v is string => !!v))]
+      setLotNoOptions(lotNos.map((v) => ({ value: v })))
+    } catch (err) {
+      notifyError(err)
+    }
+  }
 
   async function submit(values: {
     partId?: number
@@ -1201,53 +1241,101 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
 
   return (
     <div>
-      <Form form={form} layout="vertical" onFinish={submit} style={{ maxWidth: 900, marginBottom: 24 }}>
-        <Space style={{ display: 'flex' }} align="start" wrap>
-          <Form.Item name="partId" label="物料" rules={[{ required: true, message: '选择物料' }]}>
-            <Select
-              showSearch
-              placeholder="选择物料"
-              style={{ width: 260 }}
-              optionFilterProp="label"
-              onChange={(v) => {
-                const part = parts.find((p) => p.id === v)
-                if (part?.supplierId) form.setFieldValue('supplierId', part.supplierId)
-              }}
-              options={parts.map((p) => ({
-                value: p.id,
-                label: p.name + '（' + p.sku + '）',
-              }))}
-            />
-          </Form.Item>
-          <Form.Item name="supplierId" label="供应商" rules={[{ required: true, message: '选择供应商' }]}>
-            <Select
-              placeholder="选择供应商"
-              style={{ width: 200 }}
-              options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
-            />
-          </Form.Item>
-          <Form.Item name="returnDate" label="退货日期">
-            <Input type="date" />
-          </Form.Item>
-          <Form.Item name="returnQty" label="退货数量">
-            <InputNumber min={0} precision={0} step={1} placeholder="0" />
-          </Form.Item>
-          <Form.Item name="replenishDate" label="补货日期">
-            <Input type="date" />
-          </Form.Item>
-          <Form.Item name="replenishQty" label="补货数量">
-            <InputNumber min={0} precision={0} step={1} placeholder="0" />
-          </Form.Item>
-          <Form.Item name="purchaseOrderNo" label="采购单号">
-            <Input placeholder="PO-..." />
-          </Form.Item>
-          <Form.Item name="lotNo" label="来料单号">
-            <Input placeholder="来料单号" />
-          </Form.Item>
-          <Form.Item name="note" label="备注">
-            <Input placeholder="备注" />
-          </Form.Item>
-        </Space>
+      <Form form={form} layout="vertical" onFinish={submit} style={{ maxWidth: 1000, marginBottom: 24 }}>
+        <Row gutter={16}>
+          <Col span={8}>
+            <Form.Item name="purchaseOrderNo" label="采购单（可选，绑定后自动带出物料/供应商）">
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder="选择采购单（可空）"
+                onChange={onPoSelect}
+                options={pos.map((po) => ({
+                  value: po.orderNo,
+                  label: po.orderNo + '（' + po.supplierName + '）',
+                }))}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item name="partId" label="物料" rules={[{ required: true, message: '选择物料' }]}>
+              <Select
+                showSearch
+                placeholder="选择物料"
+                optionFilterProp="label"
+                onChange={(v) => {
+                  const part = parts.find((p) => p.id === v)
+                  if (part?.supplierId) form.setFieldValue('supplierId', part.supplierId)
+                }}
+                options={(poPartIds ? parts.filter((p) => poPartIds.has(p.id)) : parts).map((p) => ({
+                  value: p.id,
+                  label: p.name + '（' + p.sku + '）',
+                }))}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item name="supplierId" label="供应商" rules={[{ required: true, message: '选择供应商' }]}>
+              <Select
+                placeholder="选择供应商"
+                options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col span={6}>
+            <Form.Item name="returnDate" label="退货日期">
+              <Input type="date" />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item name="returnQty" label="退货数量">
+              <InputNumber min={0} precision={0} step={1} placeholder="0" style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item name="replenishDate" label="补货日期">
+              <Input type="date" />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item name="replenishQty" label="补货数量">
+              <InputNumber min={0} precision={0} step={1} placeholder="0" style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col span={8}>
+            <Form.Item name="lotNo" label="来料单号">
+              <AutoComplete
+                placeholder="来料单号（可选，可下拉选择该采购单已收货的来料单号）"
+                options={lotNoOptions}
+                filterOption={(input, option) =>
+                  ((option?.value ?? '') as string).toLowerCase().includes(input.toLowerCase())
+                }
+              />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item name="note" label="备注">
+              <Input placeholder="备注" />
+            </Form.Item>
+          </Col>
+        </Row>
+        {boundPo ? (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={
+              '已绑定采购单 ' +
+              boundPo.orderNo +
+              '：物料限定为该采购单的零件，供应商已自动带出，来料单号可从该单收货记录选择。'
+            }
+          />
+        ) : null}
         <Button type="primary" htmlType="submit" loading={submitting}>
           登记退补货
         </Button>
