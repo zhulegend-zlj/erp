@@ -59,7 +59,19 @@ interface DueList {
   payable: DuePayable[]
 }
 
-function SupplierPaymentForm({ suppliers }: { suppliers: Supplier[] }) {
+interface PurchaseOrder {
+  id: number
+  orderNo: string
+  supplier?: { name: string } | null
+}
+
+function SupplierPaymentForm({
+  suppliers,
+  purchaseOrders,
+}: {
+  suppliers: Supplier[]
+  purchaseOrders: PurchaseOrder[]
+}) {
   const [submitting, setSubmitting] = useState(false)
   const [form] = Form.useForm<{
     supplierId?: number
@@ -99,8 +111,17 @@ function SupplierPaymentForm({ suppliers }: { suppliers: Supplier[] }) {
           options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
         />
       </Form.Item>
-      <Form.Item name="purchaseOrderId" label="采购单 ID（可选）">
-        <InputNumber min={1} precision={0} step={1} placeholder="关联采购单" style={{ width: '100%' }} />
+      <Form.Item name="purchaseOrderId" label="关联采购单（可选）">
+        <Select
+          allowClear
+          showSearch
+          placeholder="按采购单号选择"
+          optionFilterProp="label"
+          options={purchaseOrders.map((po) => ({
+            value: po.id,
+            label: po.orderNo + (po.supplier?.name ? `（${po.supplier.name}）` : ''),
+          }))}
+        />
       </Form.Item>
       <Form.Item name="amount" label="付款金额" rules={[{ required: true, message: '金额' }]}>
         <InputNumber min={0.01} precision={2} placeholder="金额" style={{ width: '100%' }} />
@@ -115,7 +136,13 @@ function SupplierPaymentForm({ suppliers }: { suppliers: Supplier[] }) {
   )
 }
 
-function CustomerPaymentForm({ customers }: { customers: Customer[] }) {
+function CustomerPaymentForm({
+  customers,
+  orders,
+}: {
+  customers: Customer[]
+  orders: SalesOrder[]
+}) {
   const [submitting, setSubmitting] = useState(false)
   const [form] = Form.useForm<{
     customerId?: number
@@ -155,8 +182,14 @@ function CustomerPaymentForm({ customers }: { customers: Customer[] }) {
           options={customers.map((c) => ({ value: c.id, label: c.name }))}
         />
       </Form.Item>
-      <Form.Item name="salesOrderId" label="销售订单 ID（可选）">
-        <InputNumber min={1} precision={0} step={1} placeholder="关联订单" style={{ width: '100%' }} />
+      <Form.Item name="salesOrderId" label="关联订单（可选）">
+        <Select
+          allowClear
+          showSearch
+          placeholder="按订单号选择"
+          optionFilterProp="label"
+          options={orders.map((o) => ({ value: o.id, label: o.orderNo }))}
+        />
       </Form.Item>
       <Form.Item name="amount" label="收款金额" rules={[{ required: true, message: '金额' }]}>
         <InputNumber min={0.01} precision={2} placeholder="金额" style={{ width: '100%' }} />
@@ -291,17 +324,20 @@ export default function Finance() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [orders, setOrders] = useState<SalesOrder[]>([])
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
 
   useEffect(() => {
     void Promise.all([
       api.get<Supplier[]>('/suppliers'),
       api.get<Customer[]>('/customers'),
       api.get<SalesOrder[]>('/orders'),
+      api.get<PurchaseOrder[]>('/purchase-orders'),
     ])
-      .then(([s, c, o]) => {
+      .then(([s, c, o, po]) => {
         setSuppliers(s.data)
         setCustomers(c.data)
         setOrders(o.data)
+        setPurchaseOrders(po.data)
       })
       .catch(notifyError)
   }, [])
@@ -314,12 +350,12 @@ export default function Finance() {
           {
             key: 'pay-supplier',
             label: '供应商付款',
-            children: <SupplierPaymentForm suppliers={suppliers} />,
+            children: <SupplierPaymentForm suppliers={suppliers} purchaseOrders={purchaseOrders} />,
           },
           {
             key: 'receive-customer',
             label: '客户收款',
-            children: <CustomerPaymentForm customers={customers} />,
+            children: <CustomerPaymentForm customers={customers} orders={orders} />,
           },
         ]
       : [

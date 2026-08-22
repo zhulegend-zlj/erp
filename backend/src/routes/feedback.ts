@@ -6,7 +6,10 @@ import { z } from 'zod'
 import { requireRole } from '../auth/guard'
 
 // 项目根 FEEDBACK.md：backend/src/routes -> backend -> 项目根
-export const FEEDBACK_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../FEEDBACK.md')
+// 测试环境可通过 FEEDBACK_PATH 环境变量隔离到临时文件（见 src/test/setup-env.ts）
+export const FEEDBACK_PATH = process.env.FEEDBACK_PATH
+  ? resolve(process.env.FEEDBACK_PATH)
+  : resolve(dirname(fileURLToPath(import.meta.url)), '../../../FEEDBACK.md')
 
 const feedbackSchema = z.object({
   content: z.string({ error: '反馈内容必填' }).trim().min(1, '反馈内容必填'),

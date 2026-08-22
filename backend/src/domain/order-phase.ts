@@ -39,8 +39,14 @@ export async function refreshPurchasingPhase(
     select: { status: true },
   })
   const purchasing = pos.length > 0 && pos.some((p) => p.status !== 'received')
+  // 生产尚未开始（无任何成品入库记录）时，仅采购收齐不得推进 ready——
+  // 否则会跳过生产环节直接出货（此前可对"从未生产"的订单出货并产生负成品库存）。
+  const hasProduction =
+    (await tx.productionEntry.count({ where: { salesOrderId } })) > 0
   const data: { purchasing: boolean; status?: string } = { purchasing }
-  if (order.status === 'in_production' && !purchasing && !order.producing) data.status = 'ready'
+  if (order.status === 'in_production' && !purchasing && !order.producing && hasProduction) {
+    data.status = 'ready'
+  }
   await tx.salesOrder.update({ where: { id: salesOrderId }, data })
 }
 

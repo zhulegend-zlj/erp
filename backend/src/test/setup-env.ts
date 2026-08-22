@@ -7,3 +7,5 @@ process.env.DATABASE_URL = 'postgresql://postgres@localhost:5432/erp_test'
 process.env.JWT_SECRET = 'test-secret'
 // 上传文件隔离到系统临时目录，测试清理不会误删真实 backend/uploads
 process.env.UPLOAD_DIR = resolve(join(tmpdir(), 'dsh-erp-test-uploads'))
+// 反馈文件隔离：feedback 测试会写 FEEDBACK.md，避免污染项目根的真实反馈文件
+process.env.FEEDBACK_PATH = resolve(join(tmpdir(), 'dsh-erp-test-feedback.md'))

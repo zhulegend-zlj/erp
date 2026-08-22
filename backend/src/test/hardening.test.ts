@@ -442,7 +442,7 @@ describe('hardening（加固回归）', () => {
   })
 
   describe('阶段机（采购中/生产中）', () => {
-    it('生成采购单点亮采购中；全部收货后熄灭并自动推进待出货', async () => {
+    it('生成采购单点亮采购中；全部收货后熄灭；生产开始前不自动待出货，生产收满后自动待出货', async () => {
       const customer = await prisma.customer.create({ data: { name: '客户-PH' } })
       const product = await prisma.product.create({ data: { sku: 'F-PH', name: '成品PH' } })
       const part = await prisma.part.create({ data: { sku: 'P-PH', name: '零件PH' } })
@@ -479,7 +479,28 @@ describe('hardening（加固回归）', () => {
       expect(receipt.statusCode).toBe(200)
       const afterReceipt = await prisma.salesOrder.findUnique({ where: { id: order.id } })
       expect(afterReceipt?.purchasing).toBe(false)
-      expect(afterReceipt?.status).toBe('ready') // 采购完成且生产未开始 → 待出货
+      // 生产尚未开始：仅采购完成不得推进待出货（修复"未生产即 ready 可跳过生产出货"缺陷）
+      expect(afterReceipt?.status).toBe('in_production')
+
+      // 开始生产：第一次入库点亮生产中
+      const prod1 = await app.inject({
+        method: 'POST', url: '/api/production-entries', headers: { cookie: warehouseCookie },
+        payload: { salesOrderId: order.id, productId: product.id, qty: 4 },
+      })
+      expect(prod1.statusCode).toBe(200)
+      let afterProd = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+      expect(afterProd?.producing).toBe(true)
+      expect(afterProd?.status).toBe('in_production')
+
+      // 生产收满：采购+生产两阶段都完成 → 自动待出货
+      const prod2 = await app.inject({
+        method: 'POST', url: '/api/production-entries', headers: { cookie: warehouseCookie },
+        payload: { salesOrderId: order.id, productId: product.id, qty: 6 },
+      })
+      expect(prod2.statusCode).toBe(200)
+      afterProd = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+      expect(afterProd?.producing).toBe(false)
+      expect(afterProd?.status).toBe('ready')
     })
 
     it('成品入库点亮生产中，收满后熄灭；采购+生产都完成自动待出货', async () => {

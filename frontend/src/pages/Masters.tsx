@@ -319,6 +319,9 @@ function CrudTab({
     // 被 omitFields 隐藏的字段即使留在表单 store 里也不提交（如工程的价格/供应商）
     for (const key of omitFields ?? []) delete payload[key]
     for (const f of resource.fields) {
+      // 被 omitFields 隐藏的字段（如工程的价格/供应商）不要再注入 payload，
+      // 否则会把 price/supplierId 以 null 加回，被后端 'price' in body 校验拒绝
+      if (omitFields?.includes(f.key)) continue
       if (f.type === 'supplier' || f.type === 'number') {
         const v = payload[f.key]
         payload[f.key] = v === '' || v === null || v === undefined ? null : Number(v)

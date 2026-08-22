@@ -37,6 +37,14 @@
 > 待办：①采购给零件补价格（表内 price 列全空）；②CSP-063 表内无此零件（图纸已跳过，如需补建零件再挂图）；③补图：CSP-027/CSP-058/CSP-060/49-002769/F LOGO/Lithium Grease 与大部分螺丝螺母暂无图档（找工程要）；④P1927-DAPM 等其他机型数据待工程提供后按同口径导入（import-csp-v3.ts 改路径/成品名复用）。
 >
 > **在别处继续开发**：直接 `git pull origin main` 后按第 6 节启动；首次记得 `npx prisma migrate deploy` 与重建账号（见第 3 节）。
+>
+> **系统测试与修复（2026-08-23，本轮，dsh 全流程）**：自动化回归 126/126 通过（14 文件）+ 浏览器端到端走通完整业务闭环（工程录基础资料 → 采购建客户/供应商/价格 → 销售建单确认 → 采购生成采购单 → 仓库收货/QC/领料/成品入库 → 销售出货/运输节点 → 财务收付款 → 老板看板）。**本轮修复 4 个 bug**：
+> 1. **未收货零件可直接领料产生负库存**（`domain/inventory.ts` applyStockChange INSERT 分支缺非负护栏，实测 TEST-103=-2）→ 改为无库存行且负变动时不插入（返回「库存不足」）；
+> 2. **采购收齐后订单直接变「待出货」，跳过生产**（`domain/order-phase.ts` refreshPurchasingPhase 在无任何生产记录时推进 ready；旧 hardening 测试固化了该错误行为）→ 增加「已存在生产记录才允许推进 ready」+ 回归测试同步修正；
+> 3. **工程无法新建/编辑零件**（`frontend/src/pages/Masters.tsx` 隐藏字段 price/supplierId 被转换循环以 null 写回 payload，后端 `'price' in body` 拒绝）→ 循环跳过 omitFields 键；
+> 4. **财务收付款「关联单据」手输数字 ID 不友好**（`Finance.tsx`）→ 改为按单号可搜索下拉（历史未关联的演示收付款需补录关联后看板口径才准确）。
+> 另修复：**测试污染 FEEDBACK.md**（feedback.test.ts 经真实路由向项目根追加「测试反馈-时间戳」条目）→ `FEEDBACK_PATH` 支持环境变量隔离，测试环境指向临时文件。
+> **数据状态（本轮测试后）**：开发库仍为空库基础上创建了全套 TEST 演示数据——成品 TEST-100/200、零件 TEST-101~105/201/202/204、TEST测试客户/供应商、订单 SO-20260822-001/002、采购单 PO-20260822-001/002、收货/领料/成品入库/出货/收款 ¥300/付款 ¥42.6（其中收付款未关联单据），**均在数据库/上传目录，不在 git 内**；工厂电脑同步拉代码即可，数据按需保留或 `npx tsx --env-file=.env prisma/clear-all-data.ts` 清空。**遗留提醒**：①库内还有 5 个早期英文测试账号（boss/purchase/warehouse/sales/finance），上线前删除；②CSP_V3 精准数据尚未录入（空库 ± TEST 演示数据），老板反馈【待处理】"工程从零录入"仍待办。
 
 ## 1. 项目是什么
 
@@ -127,7 +135,8 @@ npm run build
 ## 8. 注意事项
 
 - 后端代码变更后需要重启后端；前端 Vite 通常自动热更新，但**偶发服务端转换缓存过期**（页面权限/UI 与磁盘代码不一致）——现象是“改了没生效”，处理：重启前端 dev 服务 + 浏览器 Ctrl+F5 硬刷新。
-- 后端测试会向真实 `FEEDBACK.md` 追加“测试反馈”记录，跑完测试需要清理。
+- ~~后端测试会向真实 `FEEDBACK.md` 追加“测试反馈”记录，跑完测试需要清理~~ → **已修复（2026-08-23）**：`FEEDBACK_PATH` 环境变量隔离，正常 `npm test` 不再污染 FEEDBACK.md。
+- 数据库有 TEST 前缀演示数据时，看板/订单/采购等页面会看到测试单；正式录入前可用 `npx tsx --env-file=.env prisma/clear-all-data.ts` 清空（保留账号）。
 - **测试清库防呆**：`src/test/helpers.ts` 的 `resetDb()` 已加保护——仅当 `DATABASE_URL` 含 `erp_test` 时才允许清库，误连开发库会直接抛错，不会再清空真实数据。
 - 列表接口分页约定：传 `page`/`pageSize` 返回 `{ items, total, page, pageSize, totalPages }`；不传则返回全量数组（下拉框依赖）。非法分页参数返回 400。
 - 上传接口 `/api/uploads`：按扩展名白名单校验（图片额外校验 MIME），最大 20MB（server.ts multipart limits）。
