@@ -207,13 +207,15 @@ export default function Purchasing() {
       unitPrice: Number(it.unitPrice ?? 0),
       supplierId: it.supplierId ?? null,
     }))
-    // 本次给原本没挂（或换了）供应商的零件选了供应商 → 询问是否同步回零件资料
+    // 本次给原本没挂（或换了）供应商的零件选了供应商 → 询问是否同步回零件资料；
+    // 「仅本次生效」也会继续生成采购单，只是不写回零件资料
+    let syncAssignments = false
     const assignments = rows.filter((r) => {
       const req = requirements.find((x) => x.partId === r.partId)
       return r.partId > 0 && r.supplierId != null && r.supplierId !== (req?.supplierId ?? null)
     })
     if (assignments.length > 0) {
-      const ok = await new Promise<boolean>((resolve) => {
+      const shouldSync = await new Promise<boolean>((resolve) => {
         Modal.confirm({
           title: '同步供应商到零件资料？',
           content:
@@ -226,11 +228,11 @@ export default function Purchasing() {
           onCancel: () => resolve(false),
         })
       })
-      if (!ok) return
+      syncAssignments = shouldSync
     }
     setSubmitting(true)
     try {
-      if (assignments.length > 0) {
+      if (syncAssignments && assignments.length > 0) {
         await Promise.all(
           assignments.map((a) => api.put('/parts/' + a.partId, { supplierId: a.supplierId })),
         )

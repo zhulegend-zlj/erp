@@ -44,6 +44,7 @@ model Supplier {
   supplierPayments SupplierPayment[]
   parts     Part[]
   returnReplenishments ReturnReplenish[]
+  receipts  Receipt[]
 }
 
 model Product {
@@ -146,10 +147,13 @@ model PurchaseOrderItem {
 
 model Receipt {
   id              Int      @id @default(autoincrement())
-  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
-  purchaseOrderId Int
+  // 自购买（无采购单）收货时 purchaseOrderId 为空，supplierId 可选挂供应商便于追溯
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId Int?
   part            Part     @relation(fields: [partId], references: [id])
   partId          Int
+  supplier        Supplier? @relation(fields: [supplierId], references: [id])
+  supplierId      Int?
   qty             Int
   lotNo           String?
   qcStatus        String?

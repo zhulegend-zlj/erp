@@ -7,6 +7,7 @@ import {
   Image,
   Input,
   InputNumber,
+  Modal,
   Select,
   Space,
   Table,
@@ -81,10 +82,50 @@ interface SupplierOption {
   name: string
 }
 
-function ReceiptForm({ parts, onDone }: { parts: Part[]; onDone?: () => void }) {
+interface PoLedgerRow {
+  partId: number
+  sku: string
+  name: string
+  requiredQty: number
+  receivedQty: number
+  defectiveQty: number
+  outstanding: number
+  balance: number
+}
+
+interface ReceiptRow {
+  partId?: number
+  sku?: string
+  name?: string
+  supplierName?: string
+  outstanding?: number
+  qty?: number | null
+  lotNo?: string
+  supplierId?: number | null
+}
+
+interface ReceiptRecord {
+  id: number
+  purchaseOrderId: number | null
+  purchaseOrderNo: string
+  partId: number
+  sku: string
+  partName: string
+  supplierId: number | null
+  supplierName: string
+  qty: number
+  lotNo: string | null
+  qcStatus: string | null
+  defectiveQty: number
+  receivedAt: string
+}
+
+function ReceiptForm({ parts, suppliers, onDone }: { parts: Part[]; suppliers: SupplierOption[]; onDone?: () => void }) {
   const [submitting, setSubmitting] = useState(false)
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderOption[]>([])
-  const [form] = Form.useForm<{ purchaseOrderId?: number; items?: PartItemField[] }>()
+  const [poLedger, setPoLedger] = useState<{ purchaseOrderNo: string; supplierName: string; items: PoLedgerRow[] } | null>(null)
+  const [poLoading, setPoLoading] = useState(false)
+  const [form] = Form.useForm<{ purchaseOrderId?: number | 'self'; items?: ReceiptRow[] }>()
 
   useEffect(() => {
     api
@@ -93,21 +134,67 @@ function ReceiptForm({ parts, onDone }: { parts: Part[]; onDone?: () => void }) 
       .catch(notifyError)
   }, [])
 
-  async function submit(values: { purchaseOrderId?: number; items?: PartItemField[] }) {
+  const watchedPo = Form.useWatch('purchaseOrderId', form)
+  const watchedItems = Form.useWatch('items', form) as ReceiptRow[] | undefined
+  const isSelfBuy = watchedPo === 'self'
+
+  async function onPoChange(v: number | 'self' | undefined) {
+    form.setFieldsValue({ items: undefined })
+    setPoLedger(null)
+    if (typeof v === 'number') {
+      const po = purchaseOrders.find((p) => p.id === v)
+      if (!po) return
+      setPoLoading(true)
+      try {
+        const { data } = await api.get<{ purchaseOrderNo: string; supplierName: string; items: PoLedgerRow[] }>(
+          '/inventory/po-ledger',
+          { params: { purchaseOrderNo: po.orderNo } },
+        )
+        setPoLedger(data)
+        // 自动带出零件行：零件/供应商只读，数量默认填未收数量（可改，填 0 跳过提交）
+        form.setFieldsValue({
+          items: data.items.map((it) => ({
+            partId: it.partId,
+            sku: it.sku,
+            name: it.name,
+            supplierName: data.supplierName,
+            outstanding: it.outstanding,
+            qty: it.outstanding > 0 ? it.outstanding : undefined,
+            lotNo: undefined,
+          })),
+        })
+      } catch (err) {
+        notifyError(err)
+      } finally {
+        setPoLoading(false)
+      }
+    } else if (v === 'self') {
+      // 自购买：手工选零件，供应商选填
+      form.setFieldsValue({ items: [{ qty: undefined, lotNo: undefined, supplierId: undefined }] })
+    }
+  }
+
+  async function submit(values: { purchaseOrderId?: number | 'self'; items?: ReceiptRow[] }) {
+    const rows = values.items ?? []
+    const valid = rows.filter((r) => r.partId && r.qty && r.qty > 0)
+    if (valid.length === 0) {
+      message.warning('请至少填写一行数量大于 0 的收货明细（本批没到货的零件数量填 0 即可跳过）')
+      return
+    }
     setSubmitting(true)
     try {
       await api.post('/receipts', {
-        purchaseOrderId: values.purchaseOrderId,
-        items: (values.items ?? []).map((it) => ({
-          partId: Number(it.partId ?? 0),
-          qty: Number(it.qty ?? 0),
-          lotNo: it.lotNo || null,
-          qcStatus: it.qcStatus || null,
-          defectiveQty: it.defectiveQty === undefined || it.defectiveQty === null ? 0 : Number(it.defectiveQty),
+        ...(isSelfBuy ? {} : { purchaseOrderId: values.purchaseOrderId }),
+        items: valid.map((r) => ({
+          partId: Number(r.partId),
+          qty: Number(r.qty),
+          lotNo: r.lotNo || null,
+          ...(isSelfBuy ? { supplierId: r.supplierId ?? null } : {}),
         })),
       })
       message.success('收货入库成功')
       form.resetFields()
+      setPoLedger(null)
       onDone?.()
     } catch (err) {
       notifyError(err)
@@ -117,88 +204,321 @@ function ReceiptForm({ parts, onDone }: { parts: Part[]; onDone?: () => void }) 
   }
 
   return (
-    <>
-      {purchaseOrders.length === 0 ? (
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message="暂无采购单"
-          description="请先由采购在「采购」页选择销售订单并生成采购单，再进行收货入库。"
-        />
-      ) : null}
-      <Form form={form} layout="vertical" onFinish={submit} initialValues={{ items: [{}] }}>
+    <div>
+      <Form form={form} layout="vertical" onFinish={submit}>
         <Form.Item
           name="purchaseOrderId"
           label="采购单"
           rules={[{ required: true, message: '请选择采购单' }]}
         >
-        <Select
-          showSearch
-          placeholder="选择采购单"
-          style={{ width: 360 }}
-          optionFilterProp="label"
-          options={purchaseOrders.map((po) => ({
-            value: po.id,
-            label: po.orderNo + '（' + po.supplierName + '）',
-          }))}
-        />
-      </Form.Item>
-      <Form.List name="items">
-        {(fields, { add, remove }) => (
-          <>
-            {fields.map((field) => (
-              <Space key={field.key} align="start" style={{ display: 'flex', marginBottom: 8 }} wrap>
-                <Form.Item
-                  name={[field.name, 'partId']}
-                  rules={[{ required: true, message: '选择零件' }]}
-                  style={{ marginBottom: 0 }}
-                >
-                  <Select
-                    style={{ width: 260 }}
-                    placeholder="选择零件"
-                    options={parts.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
-                  />
-                </Form.Item>
-                <Form.Item
-                  name={[field.name, 'qty']}
-                  rules={[{ required: true, message: '数量' }]}
-                  style={{ marginBottom: 0 }}
-                >
-                  <InputNumber min={1} precision={0} step={1} placeholder="数量" />
-                </Form.Item>
-                <Form.Item name={[field.name, 'lotNo']} style={{ marginBottom: 0 }}>
-                  <Input placeholder="来料单号（可选）" style={{ width: 160 }} />
-                </Form.Item>
-                <Form.Item name={[field.name, 'qcStatus']} style={{ marginBottom: 0 }}>
-                  <Select
-                    allowClear
-                    placeholder="QC"
-                    style={{ width: 110 }}
-                    options={[
-                      { value: 'ok', label: 'OK' },
-                      { value: 'pending', label: '待检' },
-                      { value: 'reject', label: '不良' },
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item name={[field.name, 'defectiveQty']} style={{ marginBottom: 0 }}>
-                  <InputNumber min={0} precision={0} step={1} placeholder="不良品" style={{ width: 100 }} />
-                </Form.Item>
-                <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />
-              </Space>
-            ))}
-            <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-              添加明细
-            </Button>
-          </>
-        )}
-      </Form.List>
-      <Button type="primary" htmlType="submit" loading={submitting} style={{ marginTop: 16 }}>
-        提交收货
-      </Button>
+          <Select
+            showSearch
+            placeholder="选择采购单（或自购买）"
+            style={{ width: 400 }}
+            optionFilterProp="label"
+            onChange={onPoChange}
+            options={[
+              ...purchaseOrders.map((po) => ({
+                value: po.id,
+                label: po.orderNo + '（' + po.supplierName + '）',
+              })),
+              { value: 'self', label: '自购买（无采购单）' },
+            ]}
+          />
+        </Form.Item>
+
+        {typeof watchedPo === 'number' && poLedger ? (
+          <Card
+            size="small"
+            title={'采购单明细：' + poLedger.purchaseOrderNo + '（' + poLedger.supplierName + '）'}
+            loading={poLoading}
+            style={{ marginBottom: 16 }}
+          >
+            <Table<PoLedgerRow>
+              rowKey="partId"
+              size="small"
+              pagination={false}
+              dataSource={poLedger.items}
+              columns={[
+                { title: '零件', key: 'part', render: (_: unknown, r: PoLedgerRow) => r.sku + '　' + r.name },
+                { title: '供应商', key: 'supplier', render: () => poLedger.supplierName },
+                { title: '订购数量', dataIndex: 'requiredQty', key: 'requiredQty' },
+                { title: '已收数量', dataIndex: 'receivedQty', key: 'receivedQty' },
+                {
+                  title: '未收数量',
+                  dataIndex: 'outstanding',
+                  key: 'outstanding',
+                  render: (v: number) =>
+                    v > 0 ? <Tag color="orange">{v}</Tag> : <Tag color="green">已收齐</Tag>,
+                },
+              ]}
+            />
+          </Card>
+        ) : null}
+
+        {isSelfBuy ? (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="自购买：手工选择零件与数量，供应商选填（便于追溯）"
+          />
+        ) : typeof watchedPo === 'number' ? (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="零件与供应商已按采购单自动带出，仓库只需填写本批实收数量；没到货的零件数量填 0 即可跳过。"
+          />
+        ) : null}
+
+        <Form.List name="items">
+          {(fields, { add, remove }) => (
+            <>
+              {fields.map((field, index) => {
+                const it = watchedItems?.[index]
+                if (isSelfBuy) {
+                  return (
+                    <div key={field.key} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 8 }}>
+                      <Form.Item
+                        name={[field.name, 'partId']}
+                        rules={[{ required: true, message: '选择零件' }]}
+                        style={{ marginBottom: 0 }}
+                      >
+                        <Select
+                          style={{ width: 260 }}
+                          placeholder="选择零件"
+                          options={parts.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
+                        />
+                      </Form.Item>
+                      <Form.Item name={[field.name, 'supplierId']} style={{ marginBottom: 0 }}>
+                        <Select
+                          allowClear
+                          showSearch
+                          optionFilterProp="label"
+                          placeholder="供应商（选填）"
+                          style={{ width: 180 }}
+                          options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        name={[field.name, 'qty']}
+                        rules={[{ required: true, message: '数量' }]}
+                        style={{ marginBottom: 0 }}
+                      >
+                        <InputNumber min={1} precision={0} step={1} placeholder="数量" />
+                      </Form.Item>
+                      <Form.Item name={[field.name, 'lotNo']} style={{ marginBottom: 0 }}>
+                        <Input placeholder="来料单号（可选）" style={{ width: 160 }} />
+                      </Form.Item>
+                      <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />
+                    </div>
+                  )
+                }
+                return (
+                  <div key={field.key} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 8 }}>
+                    <Form.Item name={[field.name, 'partId']} hidden>
+                      <Input />
+                    </Form.Item>
+                    <div style={{ width: 240, lineHeight: '32px' }}>{it?.sku}　{it?.name}</div>
+                    <div style={{ width: 160, lineHeight: '32px', color: '#8c8c8c' }}>{it?.supplierName ?? '-'}</div>
+                    <div style={{ width: 100, lineHeight: '32px', color: '#8c8c8c' }}>未收 {it?.outstanding ?? 0}</div>
+                    <Form.Item
+                      name={[field.name, 'qty']}
+                      rules={[{ required: true, message: '数量' }]}
+                      style={{ marginBottom: 0 }}
+                    >
+                      <InputNumber min={0} precision={0} step={1} placeholder="本批实收" style={{ width: 120 }} />
+                    </Form.Item>
+                    <Form.Item name={[field.name, 'lotNo']} style={{ marginBottom: 0 }}>
+                      <Input placeholder="来料单号（可选）" style={{ width: 160 }} />
+                    </Form.Item>
+                    <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />
+                  </div>
+                )
+              })}
+              {isSelfBuy ? (
+                <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                  添加零件
+                </Button>
+              ) : null}
+            </>
+          )}
+        </Form.List>
+        <Button type="primary" htmlType="submit" loading={submitting} style={{ marginTop: 16 }}>
+          提交收货
+        </Button>
       </Form>
-    </>
+    </div>
+  )
+}
+
+
+// 收货记录 QC 补录：收货入库后补充 QC 状态/不良品数量/来料单号（不良品仅作记录，不改库存）
+function QcPanel({ refreshToken }: { refreshToken: number }) {
+  const [rows, setRows] = useState<ReceiptRecord[]>([])
+  const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [editing, setEditing] = useState<ReceiptRecord | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [form] = Form.useForm<{ qcStatus?: string; defectiveQty?: number; lotNo?: string }>()
+  const pageSize = 10
+
+  async function load(targetPage = 1) {
+    setLoading(true)
+    try {
+      const { data } = await api.get<Paged<ReceiptRecord>>('/receipts', {
+        params: { page: targetPage, pageSize },
+      })
+      setRows(data.items)
+      setTotal(data.total)
+      setPage(data.page)
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken])
+
+  function openEdit(r: ReceiptRecord) {
+    setEditing(r)
+    form.setFieldsValue({
+      qcStatus: r.qcStatus ?? undefined,
+      defectiveQty: r.defectiveQty ?? 0,
+      lotNo: r.lotNo ?? undefined,
+    })
+  }
+
+  async function save() {
+    if (!editing) return
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
+    setSaving(true)
+    try {
+      await api.patch('/receipts/' + editing.id, {
+        qcStatus: values.qcStatus ?? null,
+        defectiveQty: values.defectiveQty ?? 0,
+        lotNo: values.lotNo ?? null,
+      })
+      message.success('QC 信息已更新')
+      setEditing(null)
+      await load(page)
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card title="收货记录（QC 补录）" style={{ marginTop: 16 }}>
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 12 }}
+        message="收货入库后，可在这里补充 QC 状态与不良品数量（不良品仅作记录，不扣库存）。"
+      />
+      <Table<ReceiptRecord>
+        rowKey="id"
+        size="small"
+        loading={loading}
+        dataSource={rows}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: false,
+          onChange: (p) => void load(p),
+        }}
+        columns={[
+          { title: '时间', dataIndex: 'receivedAt', key: 'receivedAt', render: dateTimeStr, width: 150 },
+          {
+            title: '采购单',
+            dataIndex: 'purchaseOrderNo',
+            key: 'purchaseOrderNo',
+            render: (v: string) => v || <Tag color="purple">自购买</Tag>,
+          },
+          {
+            title: '零件',
+            key: 'part',
+            render: (_: unknown, r: ReceiptRecord) => r.sku + '　' + r.partName,
+          },
+          { title: '供应商', dataIndex: 'supplierName', key: 'supplierName', render: (v: string) => v || '-' },
+          { title: '数量', dataIndex: 'qty', key: 'qty' },
+          { title: '来料单号', dataIndex: 'lotNo', key: 'lotNo', render: (v: string | null) => v ?? '-' },
+          {
+            title: 'QC',
+            dataIndex: 'qcStatus',
+            key: 'qcStatus',
+            render: (v: string | null) => {
+              if (!v) return <Tag>待检</Tag>
+              const map: Record<string, { label: string; color: string }> = {
+                ok: { label: 'OK', color: 'green' },
+                pending: { label: '待检', color: 'default' },
+                reject: { label: '不良', color: 'red' },
+              }
+              const item = map[v] ?? { label: v, color: 'default' }
+              return <Tag color={item.color}>{item.label}</Tag>
+            },
+          },
+          { title: '不良品', dataIndex: 'defectiveQty', key: 'defectiveQty' },
+          {
+            title: '操作',
+            key: 'action',
+            width: 100,
+            render: (_: unknown, r: ReceiptRecord) => (
+              <Button size="small" onClick={() => openEdit(r)}>
+                QC 补录
+              </Button>
+            ),
+          },
+        ]}
+      />
+      <Modal
+        title="QC 补录"
+        open={!!editing}
+        onCancel={() => setEditing(null)}
+        onOk={() => void save()}
+        confirmLoading={saving}
+        destroyOnClose
+      >
+        {editing ? (
+          <div>
+            <div style={{ marginBottom: 8 }}>
+              {editing.sku}　{editing.partName}（收货 {editing.qty}）
+            </div>
+            <Form form={form} layout="vertical">
+              <Form.Item name="qcStatus" label="QC 状态">
+                <Select
+                  allowClear
+                  placeholder="选择 QC 状态"
+                  options={[
+                    { value: 'ok', label: 'OK（合格）' },
+                    { value: 'pending', label: '待检' },
+                    { value: 'reject', label: '不良' },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item
+                name="defectiveQty"
+                label={'不良品数量（不能大于收货数量 ' + editing.qty + '）'}
+              >
+                <InputNumber min={0} max={editing.qty} precision={0} step={1} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item name="lotNo" label="来料单号">
+                <Input placeholder="可选" />
+              </Form.Item>
+            </Form>
+          </div>
+        ) : null}
+      </Modal>
+    </Card>
   )
 }
 
@@ -1102,6 +1422,7 @@ export default function Inventory() {
   const [orders, setOrders] = useState<SalesOrder[]>([])
   const [parts, setParts] = useState<Part[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
   const [refreshToken, setRefreshToken] = useState(0)
 
   useEffect(() => {
@@ -1109,11 +1430,13 @@ export default function Inventory() {
       api.get<SalesOrder[]>('/orders'),
       api.get<Part[]>('/parts'),
       api.get<Product[]>('/products'),
+      api.get<SupplierOption[]>('/suppliers'),
     ])
-      .then(([o, pt, pd]) => {
+      .then(([o, pt, pd, sp]) => {
         setOrders(o.data)
         setParts(pt.data)
         setProducts(pd.data)
+        setSuppliers(sp.data)
       })
       .catch(notifyError)
   }, [])
@@ -1126,7 +1449,16 @@ export default function Inventory() {
           {
             key: 'receipt',
             label: '收货入库',
-            children: <ReceiptForm parts={parts} onDone={() => setRefreshToken((t) => t + 1)} />,
+            children: (
+              <>
+                <ReceiptForm
+                  parts={parts}
+                  suppliers={suppliers}
+                  onDone={() => setRefreshToken((t) => t + 1)}
+                />
+                <QcPanel refreshToken={refreshToken} />
+              </>
+            ),
           },
           {
             key: 'issue',

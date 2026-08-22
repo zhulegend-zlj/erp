@@ -18,6 +18,7 @@ import {
 import { PlusOutlined, EditOutlined, DeleteOutlined, LinkOutlined, UploadOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
+import { useKeepAliveState } from './keepAlive'
 import { notifyError } from './common'
 import type { Paged } from './common'
 
@@ -771,11 +772,14 @@ export default function Masters() {
   const canWriteEngineering = role === 'boss' || role === 'engineer'
   // 采购在零件页只挂供应商
   const linkSupplierOnly = role === 'purchase'
+  // 保持当前页签：切走再回来仍停在刚才浏览的页签（如零件页）
+  const [activeTab, setActiveTab] = useKeepAliveState<string>('masters.activeTab', 'customers')
 
   return (
     <Card title="基础资料">
       <Tabs
-        defaultActiveKey="customers"
+        activeKey={activeTab}
+        onChange={(k) => setActiveTab(k)}
         items={[
           {
             key: 'customers',

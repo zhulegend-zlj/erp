@@ -6,7 +6,7 @@ import { requireRole } from '../auth/guard'
 import { bomExplode, computePurchaseGap } from '../domain/bom'
 import { applyStockChange } from '../domain/inventory'
 import { markPurchasingStarted, refreshPurchasingPhase } from '../domain/order-phase'
-import { prismaErrorInfo } from '../errors'
+import { parsePositiveInt, prismaErrorInfo } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
 
 const purchaseItemSchema = z.object({
@@ -37,26 +37,28 @@ const batchPurchaseOrderSchema = z.object({
   items: z.array(batchItemSchema, { error: '明细必填' }).min(1, '采购单至少包含一个明细'),
 })
 
+const receiptItemSchema = z
+  .object({
+    partId: z.number({ error: '零件必填' }).int({ error: '零件必须为整数' }).positive({ error: '零件必须为正整数' }),
+    qty: z
+      .number({ error: '数量必填' })
+      .int({ error: '数量必须为整数' })
+      .positive({ error: '数量必须为正整数' })
+      .max(2147483647, { error: '数量超出允许范围' }),
+    lotNo: z.string().nullable().optional(),
+    qcStatus: z.string().nullable().optional(),
+    defectiveQty: z.number({ error: '不良品数量必须为整数' }).int().nonnegative().nullable().optional(),
+    // 自购买（无采购单）时可选挂供应商便于追溯
+    supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
+  })
+  .refine((v) => (v.defectiveQty ?? 0) <= v.qty, {
+    message: '不良品数量不能大于收货数量',
+  })
+
+// 收货两种模式：有采购单（校验归属/不超量/推进状态）或自购买（purchaseOrderId 不传）
 const receiptSchema = z.object({
-  purchaseOrderId: z.number({ error: '采购单必填' }).int({ error: '采购单必须为整数' }).positive({ error: '采购单必须为正整数' }),
-  items: z.array(
-    z
-      .object({
-        partId: z.number({ error: '零件必填' }).int({ error: '零件必须为整数' }).positive({ error: '零件必须为正整数' }),
-        qty: z
-          .number({ error: '数量必填' })
-          .int({ error: '数量必须为整数' })
-          .positive({ error: '数量必须为正整数' })
-          .max(2147483647, { error: '数量超出允许范围' }),
-        lotNo: z.string().nullable().optional(),
-        qcStatus: z.string().nullable().optional(),
-        defectiveQty: z.number({ error: '不良品数量必须为整数' }).int().nonnegative().nullable().optional(),
-      })
-      .refine((v) => (v.defectiveQty ?? 0) <= v.qty, {
-        message: '不良品数量不能大于收货数量',
-      }),
-    { error: '明细必填' }
-  ).min(1, '收货至少包含一个明细'),
+  purchaseOrderId: z.number({ error: '采购单必须为整数' }).int().positive().nullable().optional(),
+  items: z.array(receiptItemSchema, { error: '明细必填' }).min(1, '收货至少包含一个明细'),
 })
 
 function parseBody<T>(schema: z.ZodType<T>, body: unknown, reply: FastifyReply): T | null {
@@ -338,44 +340,61 @@ export function purchasingRoutes(app: FastifyInstance) {
     return reply.code(200).send(orders)
   })
 
-  // 收货：仅 warehouse 可操作，事务内写 Receipt 并入库
+  // 收货：仅 warehouse 可操作。两种模式：
+  // 1) 有采购单：校验零件归属/不超订购量，更新采购单状态并刷新订单「采购中」；
+  // 2) 自购买（purchaseOrderId 不传）：直接按零件入库，可挂供应商追溯。
   app.post('/api/receipts', { preHandler: requireRole('warehouse') }, async (req, reply) => {
     const data = parseBody(receiptSchema, req.body, reply)
     if (data === null) return
 
     try {
       await prisma.$transaction(async (tx) => {
-        const purchaseOrder = await tx.purchaseOrder.findUnique({
-          where: { id: data.purchaseOrderId },
-          select: { id: true, salesOrderId: true, items: { select: { partId: true, qty: true } } },
-        })
-        if (!purchaseOrder) throw new Error('采购单不存在')
+        const purchaseOrder = data.purchaseOrderId != null
+          ? await tx.purchaseOrder.findUnique({
+              where: { id: data.purchaseOrderId },
+              select: { id: true, salesOrderId: true, items: { select: { partId: true, qty: true } } },
+            })
+          : null
+        if (data.purchaseOrderId != null && !purchaseOrder) throw new Error('采购单不存在')
 
-        // 已收货数量（事务内聚合，含本事务之前的历史收货）
-        const receivedGroups = await tx.receipt.groupBy({
-          by: ['partId'],
-          where: { purchaseOrderId: data.purchaseOrderId },
-          _sum: { qty: true },
-        })
-        const receivedMap = new Map(receivedGroups.map((g) => [g.partId, g._sum.qty ?? 0]))
-        const poItemMap = new Map(purchaseOrder.items.map((i) => [i.partId, i.qty]))
+        const receivedMap = new Map<number, number>()
+        const poItemMap = new Map<number, number>()
+        if (purchaseOrder) {
+          // 已收货数量（事务内聚合，含本事务之前的历史收货）
+          const receivedGroups = await tx.receipt.groupBy({
+            by: ['partId'],
+            where: { purchaseOrderId: purchaseOrder.id },
+            _sum: { qty: true },
+          })
+          receivedGroups.forEach((g) => receivedMap.set(g.partId, g._sum.qty ?? 0))
+          purchaseOrder.items.forEach((i) => poItemMap.set(i.partId, i.qty))
+        }
         // 本批次内累计（同 partId 多次提交时叠加判断）
         const pending = new Map<number, number>()
+        const seen = new Set<number>()
 
         for (const item of data.items) {
-          const orderedQty = poItemMap.get(item.partId)
-          if (!orderedQty) {
-            throw new Error('零件（ID ' + item.partId + '）不在该采购单中，不能收货')
+          if (purchaseOrder) {
+            const orderedQty = poItemMap.get(item.partId)
+            if (!orderedQty) {
+              throw new Error('零件（ID ' + item.partId + '）不在该采购单中，不能收货')
+            }
+            const already = (receivedMap.get(item.partId) ?? 0) + (pending.get(item.partId) ?? 0)
+            if (already + item.qty > orderedQty) {
+              throw new Error('零件（ID ' + item.partId + '）收货数量超过订购数量，不能重复收货')
+            }
+          } else {
+            if (seen.has(item.partId)) throw new Error('收货明细不能重复')
+            seen.add(item.partId)
+            const part = await tx.part.findUnique({ where: { id: item.partId }, select: { id: true } })
+            if (!part) throw new Error('零件（ID ' + item.partId + '）不存在')
           }
-          const already = (receivedMap.get(item.partId) ?? 0) + (pending.get(item.partId) ?? 0)
-          if (already + item.qty > orderedQty) {
-            throw new Error('零件（ID ' + item.partId + '）收货数量超过订购数量，不能重复收货')
-          }
-          pending.set(item.partId, already + item.qty)
+          pending.set(item.partId, (pending.get(item.partId) ?? 0) + item.qty)
 
           const receipt = await tx.receipt.create({
             data: {
-              purchaseOrderId: data.purchaseOrderId,
+              purchaseOrderId: purchaseOrder?.id ?? null,
+              supplierId: item.supplierId ?? null,
               partId: item.partId,
               qty: item.qty,
               lotNo: item.lotNo || null,
@@ -383,29 +402,36 @@ export function purchasingRoutes(app: FastifyInstance) {
               defectiveQty: item.defectiveQty ?? 0,
             },
           })
-          await applyStockChange(tx, 'part', item.partId, item.qty, 'receipt', receipt.id, purchaseOrder.salesOrderId)
+          await applyStockChange(tx, 'part', item.partId, item.qty, 'receipt', receipt.id, purchaseOrder?.salesOrderId ?? null)
         }
 
-        // 按累计收货更新采购单状态：全部收齐 → received；部分 → partial
-        const allReceived = purchaseOrder.items.every(
-          (i) => (receivedMap.get(i.partId) ?? 0) + (pending.get(i.partId) ?? 0) >= i.qty,
-        )
-        const anyReceived = purchaseOrder.items.some(
-          (i) => (receivedMap.get(i.partId) ?? 0) + (pending.get(i.partId) ?? 0) > 0,
-        )
-        if (allReceived) {
-          await tx.purchaseOrder.update({ where: { id: purchaseOrder.id }, data: { status: 'received' } })
-        } else if (anyReceived) {
-          await tx.purchaseOrder.update({ where: { id: purchaseOrder.id }, data: { status: 'partial' } })
+        if (purchaseOrder) {
+          // 按累计收货更新采购单状态：全部收齐 → received；部分 → partial
+          const allReceived = purchaseOrder.items.every(
+            (i) => (receivedMap.get(i.partId) ?? 0) + (pending.get(i.partId) ?? 0) >= i.qty,
+          )
+          const anyReceived = purchaseOrder.items.some(
+            (i) => (receivedMap.get(i.partId) ?? 0) + (pending.get(i.partId) ?? 0) > 0,
+          )
+          if (allReceived) {
+            await tx.purchaseOrder.update({ where: { id: purchaseOrder.id }, data: { status: 'received' } })
+          } else if (anyReceived) {
+            await tx.purchaseOrder.update({ where: { id: purchaseOrder.id }, data: { status: 'partial' } })
+          }
+          // 刷新订单「采购中」：全部采购单收齐自动熄灭，两阶段都完成自动推进待出货
+          await refreshPurchasingPhase(tx, purchaseOrder.salesOrderId)
         }
-        // 刷新订单「采购中」：全部采购单收齐自动熄灭，两阶段都完成自动推进待出货
-        await refreshPurchasingPhase(tx, purchaseOrder.salesOrderId)
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : '收货失败'
       if (message.includes('库存不足')) return reply.code(400).send({ error: message })
       if (message.includes('采购单不存在')) return reply.code(404).send({ error: message })
-      if (message.includes('不在该采购单') || message.includes('超过订购数量')) {
+      if (
+        message.includes('不在该采购单') ||
+        message.includes('超过订购数量') ||
+        message.includes('不能重复') ||
+        message.includes('不存在')
+      ) {
         return reply.code(400).send({ error: message })
       }
       const info = prismaErrorInfo(err)
@@ -414,5 +440,79 @@ export function purchasingRoutes(app: FastifyInstance) {
     }
 
     return reply.code(200).send({ ok: true })
+  })
+
+  // 收货记录列表：仓库 QC 补录用（可按时收倒序、按采购单过滤、分页）
+  app.get('/api/receipts', { preHandler: requireRole('warehouse', 'boss') }, async (req, reply) => {
+    const query = req.query as { purchaseOrderId?: string }
+    const where: { purchaseOrderId?: number } = {}
+    if (query.purchaseOrderId !== undefined && query.purchaseOrderId !== '') {
+      const poId = parsePositiveInt(query.purchaseOrderId)
+      if (poId === null) return reply.code(400).send({ error: 'purchaseOrderId 必须为正整数' })
+      where.purchaseOrderId = poId
+    }
+    const pagination = parsePagination(req.query as Record<string, unknown>)
+    if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
+    const include = {
+      part: { select: { id: true, sku: true, name: true } },
+      purchaseOrder: { select: { id: true, orderNo: true } },
+      supplier: { select: { id: true, name: true } },
+    } as const
+    const orderBy = [{ receivedAt: 'desc' as const }, { id: 'desc' as const }]
+    const toRow = (r: Prisma.ReceiptGetPayload<{ include: typeof include }>) => ({
+      id: r.id,
+      purchaseOrderId: r.purchaseOrderId,
+      purchaseOrderNo: r.purchaseOrder?.orderNo ?? '',
+      partId: r.partId,
+      sku: r.part.sku,
+      partName: r.part.name,
+      supplierId: r.supplierId,
+      supplierName: r.supplier?.name ?? '',
+      qty: r.qty,
+      lotNo: r.lotNo,
+      qcStatus: r.qcStatus,
+      defectiveQty: r.defectiveQty,
+      receivedAt: r.receivedAt,
+    })
+    if (pagination.kind === 'none') {
+      const rows = await prisma.receipt.findMany({ where, include, orderBy })
+      return rows.map(toRow)
+    }
+    const page = pagination.page
+    const [rows, total] = await Promise.all([
+      prisma.receipt.findMany({
+        where,
+        include,
+        orderBy,
+        skip: (page.page - 1) * page.pageSize,
+        take: page.pageSize,
+      }),
+      prisma.receipt.count({ where }),
+    ])
+    return pagedResult(rows.map(toRow), total, page)
+  })
+
+  // QC 补录：收货入库后，仓库再对收货记录补充 QC 状态 / 不良品数量 / 来料单号
+  app.patch('/api/receipts/:id', { preHandler: requireRole('warehouse', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '收货记录 ID 必须为正整数' })
+    const body = (req.body ?? {}) as { lotNo?: unknown; qcStatus?: unknown; defectiveQty?: unknown }
+    const data: { lotNo?: string | null; qcStatus?: string | null; defectiveQty?: number } = {}
+    if ('lotNo' in body) data.lotNo = typeof body.lotNo === 'string' && body.lotNo !== '' ? body.lotNo : null
+    if ('qcStatus' in body) data.qcStatus = typeof body.qcStatus === 'string' && body.qcStatus !== '' ? body.qcStatus : null
+    if ('defectiveQty' in body) {
+      const dq = body.defectiveQty
+      if (typeof dq !== 'number' || !Number.isInteger(dq) || dq < 0) {
+        return reply.code(400).send({ error: '不良品数量必须为非负整数' })
+      }
+      data.defectiveQty = dq
+    }
+    const receipt = await prisma.receipt.findUnique({ where: { id } })
+    if (!receipt) return reply.code(404).send({ error: '收货记录不存在' })
+    if (data.defectiveQty !== undefined && data.defectiveQty > receipt.qty) {
+      return reply.code(400).send({ error: '不良品数量不能大于收货数量' })
+    }
+    const updated = await prisma.receipt.update({ where: { id }, data })
+    return reply.code(200).send(updated)
   })
 }

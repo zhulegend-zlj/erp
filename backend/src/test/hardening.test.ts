@@ -507,6 +507,85 @@ describe('hardening（加固回归）', () => {
     })
   })
 
+  describe('收货：自购买与 QC 补录', () => {
+    it('无采购单自购收货入库，可挂供应商', async () => {
+      const supplier = await prisma.supplier.create({ data: { name: '供应商-SB' } })
+      const part = await prisma.part.create({ data: { sku: 'P-SB', name: '自购零件', supplierId: supplier.id } })
+      const app = buildApp()
+      const cookie = await loginCookie(app, 'warehouse')
+      const res = await app.inject({
+        method: 'POST', url: '/api/receipts', headers: { cookie },
+        payload: { items: [{ partId: part.id, qty: 50, supplierId: supplier.id, lotNo: 'SB-001' }] },
+      })
+      expect(res.statusCode).toBe(200)
+      const stock = await prisma.stock.findUnique({ where: { itemType_itemId: { itemType: 'part', itemId: part.id } } })
+      expect(stock?.qtyOnHand).toBe(50)
+      const receipt = await prisma.receipt.findFirst({ where: { partId: part.id } })
+      expect(receipt).toMatchObject({ purchaseOrderId: null, supplierId: supplier.id, lotNo: 'SB-001' })
+    })
+
+    it('自购收货零件不存在返回 400，明细重复返回 400', async () => {
+      const part = await prisma.part.create({ data: { sku: 'P-SB2', name: '自购零件2' } })
+      const app = buildApp()
+      const cookie = await loginCookie(app, 'warehouse')
+      const missing = await app.inject({
+        method: 'POST', url: '/api/receipts', headers: { cookie },
+        payload: { items: [{ partId: 99999, qty: 1 }] },
+      })
+      expect(missing.statusCode).toBe(400)
+      const dup = await app.inject({
+        method: 'POST', url: '/api/receipts', headers: { cookie },
+        payload: {
+          items: [
+            { partId: part.id, qty: 1 },
+            { partId: part.id, qty: 2 },
+          ],
+        },
+      })
+      expect(dup.statusCode).toBe(400)
+      expect(dup.json().error).toContain('不能重复')
+    })
+
+    it('QC 补录：可更新 QC/不良品/来料单号，不良品超过收货数量被拒绝', async () => {
+      const supplier = await prisma.supplier.create({ data: { name: '供应商-QC' } })
+      const part = await prisma.part.create({ data: { sku: 'P-QC', name: '质检零件', supplierId: supplier.id } })
+      const po = await prisma.purchaseOrder.create({
+        data: { orderNo: 'PO-QC', supplierId: supplier.id, items: { create: { partId: part.id, qty: 100, unitPrice: 1 } } },
+      })
+      const app = buildApp()
+      const cookie = await loginCookie(app, 'warehouse')
+      const recv = await app.inject({
+        method: 'POST', url: '/api/receipts', headers: { cookie },
+        payload: { purchaseOrderId: po.id, items: [{ partId: part.id, qty: 30 }] },
+      })
+      expect(recv.statusCode).toBe(200)
+      const receipt = await prisma.receipt.findFirst({ where: { purchaseOrderId: po.id } })
+      expect(receipt).not.toBeNull()
+
+      const ok = await app.inject({
+        method: 'PATCH', url: '/api/receipts/' + receipt!.id, headers: { cookie },
+        payload: { qcStatus: '不合格返修', defectiveQty: 5, lotNo: 'QC-001' },
+      })
+      expect(ok.statusCode).toBe(200)
+      expect(ok.json()).toMatchObject({ qcStatus: '不合格返修', defectiveQty: 5, lotNo: 'QC-001' })
+
+      const tooMany = await app.inject({
+        method: 'PATCH', url: '/api/receipts/' + receipt!.id, headers: { cookie },
+        payload: { defectiveQty: 31 },
+      })
+      expect(tooMany.statusCode).toBe(400)
+      expect(tooMany.json().error).toContain('不能大于收货数量')
+
+      const list = await app.inject({
+        method: 'GET', url: '/api/receipts?purchaseOrderId=' + po.id, headers: { cookie },
+      })
+      expect(list.statusCode).toBe(200)
+      const rows = list.json() as { partId: number; purchaseOrderNo: string }[]
+      expect(rows.length).toBe(1)
+      expect(rows[0]).toMatchObject({ partId: part.id, purchaseOrderNo: 'PO-QC' })
+    })
+  })
+
   describe('B10 账期余额口径', () => {
     it('应收/应付扣除已收/已付', async () => {
       const customer = await prisma.customer.create({ data: { name: '客户-H11' } })
