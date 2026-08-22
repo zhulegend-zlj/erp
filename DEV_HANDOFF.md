@@ -1,10 +1,12 @@
 # ERP 开发交接摘要（工厂 → 家里，最新）
 
-> 生成时间：2026-08-21（工厂电脑会话结束前更新，已全部提交并推送到 GitHub main）
+> 生成时间：2026-08-22（工厂电脑，会话压缩前更新，已全部提交并推送到 GitHub main，最新提交 `fce0d70`）
 >
-> **本会话（工厂电脑）完成的工作**：工程角色与权限分工、大列表分页、流水联合查询、采购页白屏修复、BOM 图片/新行置顶/列序、图档文件上传（pdf/dwg 等）、零件按 SKU 前缀+数值排序、测试 60→84。
+> **已完成的工作**：工程角色与权限分工（价格归采购）、大列表分页、流水联合查询、白屏修复、BOM 图片/新行置顶/列序、图档上传、零件排序、上传文件按 成品/零件 目录组织存放（文件名带零件名）、图片缩略图同比例显示、上传上下文修复、测试上传目录隔离、工程操作手册、备份脚本含 uploads。
 >
-> **在家里继续开发**：直接 `git pull origin main` 后按第 6 节启动；首次记得 `npx prisma migrate deploy`（engineer 枚举迁移）与重建账号（见第 3 节）。
+> **当前阶段**：老板正在用测试数据（TEST-P1 / T001-T004）按全流程逐阶段测试；工程稍后从零录精准数据（P1927-DAPM 等）。
+>
+> **在别处继续开发**：直接 `git pull origin main` 后按第 6 节启动；首次记得 `npx prisma migrate deploy` 与重建账号（见第 3 节）。
 
 ## 1. 项目是什么
 
@@ -30,7 +32,7 @@ MTO（按单组装/贸易）ERP：销售订单 → BOM 需求 → 采购 → 收
 - 基础资料已清空（2026-08-22 老板指示）：原脚本导入的粗略数据（成品 3 / 零件 557 / 供应商 65 / BOM 326）已删除，删除前导出备份 Excel：`D:\AI\erp-backups\导入数据备份-20260822015812.xlsx`（含 成品/零件/BOM/供应商 四个 sheet）。**由「工程」账号从零录入精准数据**（先建成品 → 录零件/传图传档 → 配 BOM）。
 - **待办数据**：P1927-DAPM 新机型的三张采购单（PO-DS-0217A/C/D，供应商晨鑫/铭亚/合丰磁铁）里的零件尚未录入——按分工由「工程」账号在基础资料录入零件（编号用采购单固有编号如 P1927-14872，不填价格），「采购」负责挂供应商、填价格。
 - **数据恢复记录**：2026-08-22 开发时曾误用测试清库脚本清空过开发库，已通过 `npx tsx --env-file=.env prisma/import-real-data.ts` 从微信目录 Excel 全量重导（成品 3 / 零件 557 / 供应商 65 / BOM 326，记录 id 已重新生成）；业务数据（订单/采购单/库存/出货/财务）为空，需重新走流程测试。
-- 图片/图档存储：`backend/uploads/`（已 gitignore），经 `/uploads/...` 访问。**目录组织策略（2026-08-22 起）**：`<成品SKU>/<零件SKU>-<零件名>/图片.ext|图档.ext`；挂多个成品的进 `_共用/`，未挂 BOM 的进 `_未分类/`（保存 BOM 自动归位并更新 URL）；成品图片 `uploads/<成品SKU>/图片.ext`。旧 uuid 文件已按老板指示全部删除、数据库图片/图档路径已置空，由工程重新上传精准数据。
+- 图片/图档存储：`backend/uploads/`（已 gitignore），经 `/uploads/...` 访问。**目录组织策略（2026-08-22 起，文件名带名字）**：零件图片 `uploads/<成品SKU>/<零件SKU>-<零件名>/<零件SKU>-<零件名>.png`，图档 `.../<零件SKU>-<零件名>-图档.pdf`；挂多个成品的进 `_共用/`，未挂 BOM 的进 `_未分类/`（保存 BOM 自动归位并更新 URL）；成品图片 `uploads/<成品SKU>/<成品SKU>-<成品名>.png`。改名/删除零件、改成品 SKU/名称都会同步移动/重命名文件夹和文件并更新数据库路径。旧 uuid 文件已按老板指示全部删除，由工程重新上传精准数据。
 - 导入脚本：`backend/prisma/import-real-data.ts`，其中 Excel 路径写死为本机微信目录。
 - **家里数据库迁移**：家里库若缺 `engineer` 枚举值，跑 `cd backend && npx prisma migrate deploy`；6 个账号可用 `npx tsx --env-file=.env prisma/seed.ts` 重建（注意：会把所有账号密码重置回 88888888）。
 
@@ -45,7 +47,8 @@ MTO（按单组装/贸易）ERP：销售订单 → BOM 需求 → 采购 → 收
 - 仓库：收货（来料单号/QC/不良品）、领料、成品入库、退补货、库存、流水（物料 + 销售订单号联合查询，汇总需求/已出库/未出）、收发台账、订单物料计算
 - 大列表分页：订单/库存/流水/收发台账/采购单/出货单/退补货/基础资料，后端 page/pageSize + 前端服务端分页
 - 零件列表排序：按 SKU 字母前缀分组（同产品族）+ 组内数字升序，全站零件下拉统一
-- 上传：图片（jpg/png/webp/gif/svg）+ 图档（pdf/dwg/dxf/step/stp/igs/zip/xlsx），单个 ≤20MB
+- 上传：图片（jpg/png/webp/gif/svg）+ 图档（pdf/dwg/dxf/step/stp/igs/zip/xlsx），单个 ≤20MB；按 成品/零件 目录自动归位，文件名带零件/成品名
+- 图片缩略图同比例显示全貌（contain，非裁切），点击放大原图
 - 财务：收付款、订单成本利润、账期
 - 看板：应收/应付余额、订单进度
 - 图片上传与静态服务
@@ -86,7 +89,7 @@ cd D:\AI\erp\frontend
 npm run build
 ```
 
-当前测试：84 个通过（新增分页/订单流水绑定/工程角色权限/图档上传/零件排序测试）。
+当前测试：92 个通过（分页/订单流水绑定/工程角色权限/图档上传/零件排序/上传目录组织与归位/测试隔离）。
 
 ## 8. 注意事项
 
@@ -98,4 +101,8 @@ npm run build
 - 零件排序在 PostgreSQL 层（masters.ts 零件分支）：SKU 前缀分组 + 数字段 bigint[] 升序；修改时注意 regexp_matches 是集合函数，必须用 `array_agg` 子查询，否则行会被复制。
 - Git 是便携版：`C:\Users\zhulianghong\Programs\Git\cmd\git.exe`，已加入用户 PATH；本机直连 GitHub 无需代理（家里的机器如失败，检查 `git config --global http.proxy`）。
 - 上传文件目录 `backend/uploads/` 已 gitignore（根 .gitignore 同时忽略 `*.log`、`node_modules/`、`dist/`）。
+- **测试上传目录隔离**：`setup-env.ts` 把 `UPLOAD_DIR` 指向系统临时目录（`uploads-store.ts` 读该环境变量），测试清理不会碰真实 uploads；不要在临时脚本里直接调用 `src/test/helpers.ts` 的 `resetDb()`（它连的是当前 DATABASE_URL，误连开发库会清空真实数据——虽有 erp_test 校验防呆，仍要小心）。
+- **上传上下文**：前端上传时实时读取表单 SKU（未填先提示）；后端 `/api/uploads` 用 `req.parts()` 解析（`req.file()` 拿不到文本字段）；axios 实例不要设置全局 Content-Type（否则 multipart 会报「request is not multipart」）。
+- `scripts/*.ps1` 已统一 UTF-8 BOM（PowerShell 5.1 中文乱码坑）。
+- 工程操作手册：`docs/工程操作手册.html`（发工程）与 `.md`（仓库留档），里面已含表格批量导入格式约定。
 
