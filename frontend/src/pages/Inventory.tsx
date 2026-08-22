@@ -51,26 +51,9 @@ interface StockRow {
   itemType: string
   itemId: number
   name: string
+  sku: string
+  imageUrl: string
   qtyOnHand: number
-}
-
-interface LedgerRow {
-  id: number
-  itemType: string
-  itemId: number
-  delta: number
-  balance: number
-  refType: string
-  refId: number
-  at: string
-}
-
-interface PartItemField {
-  partId?: number
-  qty?: number | null
-  lotNo?: string
-  qcStatus?: string
-  defectiveQty?: number | null
 }
 
 interface PurchaseOrderOption {
@@ -525,34 +508,85 @@ function QcPanel({ refreshToken }: { refreshToken: number }) {
   )
 }
 
+interface IssueContext {
+  orderNo: string
+  status: string
+  purchaseOrders: { id: number; orderNo: string; items: { partId: number; sku: string; name: string }[] }[]
+  bomParts: { partId: number; sku: string; name: string }[]
+}
+
+interface IssueRow {
+  partId?: number
+  sku?: string
+  name?: string
+  qty?: number | null
+}
+
 function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Part[]; onDone?: () => void }) {
   const [submitting, setSubmitting] = useState(false)
+  const [context, setContext] = useState<IssueContext | null>(null)
+  const [boundPo, setBoundPo] = useState<{ orderNo: string; items: { partId: number; sku: string; name: string }[] } | null>(null)
   const [form] = Form.useForm<{
     salesOrderId?: number
     issuedBy?: string
     note?: string
-    items?: PartItemField[]
+    items?: IssueRow[]
   }>()
+  const watchedItems = Form.useWatch('items', form) as IssueRow[] | undefined
+
+  async function onOrderChange(v?: number) {
+    form.setFieldsValue({ items: undefined })
+    setContext(null)
+    setBoundPo(null)
+    if (!v) return
+    try {
+      const { data } = await api.get<IssueContext>('/inventory/issue-context', { params: { orderId: v } })
+      setContext(data)
+      if (data.purchaseOrders.length === 0) form.setFieldsValue({ items: [{}] })
+    } catch (err) {
+      notifyError(err)
+    }
+  }
+
+  async function onPoChange(orderNo?: string) {
+    form.setFieldsValue({ items: undefined })
+    setBoundPo(null)
+    if (!orderNo || !context) return
+    const po = context.purchaseOrders.find((p) => p.orderNo === orderNo)
+    if (!po) return
+    setBoundPo(po)
+    // 自动带出该采购单的零件行，仓库只需填数量（可删行）
+    form.setFieldsValue({
+      items: po.items.map((it) => ({ partId: it.partId, sku: it.sku, name: it.name, qty: undefined })),
+    })
+  }
 
   async function submit(values: {
     salesOrderId?: number
     issuedBy?: string
     note?: string
-    items?: PartItemField[]
+    items?: IssueRow[]
   }) {
+    const rows = (values.items ?? []).filter((r) => r.partId && r.qty && r.qty > 0)
+    if (rows.length === 0) {
+      message.warning('请至少填写一行数量大于 0 的领料明细')
+      return
+    }
     setSubmitting(true)
     try {
       await api.post('/issues', {
         salesOrderId: values.salesOrderId,
         issuedBy: values.issuedBy,
         note: values.note,
-        items: (values.items ?? []).map((it) => ({
+        items: rows.map((it) => ({
           partId: Number(it.partId ?? 0),
           qty: Number(it.qty ?? 0),
         })),
       })
       message.success('领料出库成功')
       form.resetFields()
+      setContext(null)
+      setBoundPo(null)
       onDone?.()
     } catch (err) {
       notifyError(err)
@@ -561,18 +595,37 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
     }
   }
 
+  const bomPartOptions = (context ? context.bomParts : parts.map((p) => ({ partId: p.id, sku: p.sku, name: p.name }))).map(
+    (p) => ({ value: p.partId, label: p.sku + '　' + p.name }),
+  )
+
   return (
-    <Form form={form} layout="vertical" onFinish={submit} initialValues={{ items: [{}] }}>
-      <Space style={{ display: 'flex' }} align="start">
+    <Form form={form} layout="vertical" onFinish={submit}>
+      <Space style={{ display: 'flex' }} align="start" wrap>
         <Form.Item
           name="salesOrderId"
           label="销售订单"
           rules={[{ required: true, message: '选择订单' }]}
-          style={{ width: 320, marginBottom: 16 }}
+          style={{ width: 280, marginBottom: 16 }}
         >
           <Select
             placeholder="选择订单"
+            onChange={onOrderChange}
             options={orders.map((o) => ({ value: o.id, label: o.orderNo + '（' + orderPhaseLabel(o) + '）' }))}
+          />
+        </Form.Item>
+        <Form.Item name="poOrderNo" label="采购订单（自动带出零件）" style={{ width: 280, marginBottom: 16 }}>
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder="选择采购订单"
+            disabled={!context || context.purchaseOrders.length === 0}
+            onChange={onPoChange}
+            options={(context?.purchaseOrders ?? []).map((po) => ({
+              value: po.orderNo,
+              label: po.orderNo,
+            }))}
           />
         </Form.Item>
         <Form.Item
@@ -587,32 +640,60 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
           <Input placeholder="可选" />
         </Form.Item>
       </Space>
+      {context && context.purchaseOrders.length === 0 ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="该订单还没有采购单，可直接按 BOM 零件选择领料。"
+        />
+      ) : boundPo ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={'已绑定采购单 ' + boundPo.orderNo + '：零件已自动带出，只需填写数量，不需要的零件可删除。'}
+        />
+      ) : null}
       <Form.List name="items">
         {(fields, { add, remove }) => (
           <>
-            {fields.map((field) => (
-              <Space key={field.key} align="start" style={{ display: 'flex', marginBottom: 8 }}>
-                <Form.Item
-                  name={[field.name, 'partId']}
-                  rules={[{ required: true, message: '选择零件' }]}
-                  style={{ marginBottom: 0 }}
-                >
-                  <Select
-                    style={{ width: 260 }}
-                    placeholder="选择零件"
-                    options={parts.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
-                  />
-                </Form.Item>
-                <Form.Item
-                  name={[field.name, 'qty']}
-                  rules={[{ required: true, message: '数量' }]}
-                  style={{ marginBottom: 0 }}
-                >
-                  <InputNumber min={1} precision={0} step={1} placeholder="数量" />
-                </Form.Item>
-                <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />
-              </Space>
-            ))}
+            {fields.map((field, index) => {
+              const it = watchedItems?.[index]
+              const fromPo = !!boundPo && index < boundPo.items.length
+              return (
+                <div key={field.key} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 8 }}>
+                  {fromPo ? (
+                    <>
+                      <Form.Item name={[field.name, 'partId']} hidden>
+                        <Input />
+                      </Form.Item>
+                      <div style={{ width: 260, lineHeight: '32px' }}>{it?.sku}　{it?.name}</div>
+                    </>
+                  ) : (
+                    <Form.Item
+                      name={[field.name, 'partId']}
+                      rules={[{ required: true, message: '选择零件' }]}
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Select
+                        style={{ width: 260 }}
+                        placeholder="选择零件"
+                        options={bomPartOptions}
+                      />
+                    </Form.Item>
+                  )}
+                  <Form.Item
+                    name={[field.name, 'qty']}
+                    rules={[{ required: true, message: '数量' }]}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <InputNumber min={1} precision={0} step={1} placeholder="数量" />
+                  </Form.Item>
+                  <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />
+                </div>
+              )
+            })}
             <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
               添加明细
             </Button>
@@ -766,7 +847,7 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
           ]}
         />
         <Input.Search
-          placeholder="按名称搜索"
+          placeholder="按名称/SKU搜索"
           allowClear
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
@@ -790,8 +871,27 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
             title: '类型',
             dataIndex: 'itemType',
             key: 'itemType',
+            width: 70,
             render: (v: string) => (v === 'part' ? '零件' : '成品'),
           },
+          {
+            title: '图片',
+            dataIndex: 'imageUrl',
+            key: 'imageUrl',
+            width: 90,
+            render: (v: string) =>
+              v ? (
+                <Image
+                  src={v}
+                  width={48}
+                  height={48}
+                  style={{ objectFit: 'contain', background: '#fafafa', border: '1px solid #eee' }}
+                />
+              ) : (
+                '-'
+              ),
+          },
+          { title: 'SKU', dataIndex: 'sku', key: 'sku' },
           { title: '名称', dataIndex: 'name', key: 'name' },
           { title: 'ID', dataIndex: 'itemId', key: 'itemId', width: 80 },
           { title: '当前数量', dataIndex: 'qtyOnHand', key: 'qtyOnHand' },
@@ -801,74 +901,55 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
   )
 }
 
-interface OrderLedgerRow {
+interface LedgerSearchRow {
   id: number
-  itemType: string
-  itemId: number
-  itemName: string
-  delta: number
-  balance: number
   at: string
-}
-
-interface OrderLedgerResult {
+  itemType: string
+  sku: string
+  name: string
+  imageUrl: string
+  supplierName: string
+  spec: string
   orderNo: string
-  itemType?: string
-  itemId?: number
-  itemName?: string
-  requiredQty?: number
-  issuedQty?: number
-  outstanding?: number
-  totalOutboundQty: number
-  rows: OrderLedgerRow[]
+  lotNo: string
+  inQty: number
+  outQty: number
+  balance: number
 }
 
-function signedDelta(v: number): string {
-  return v > 0 ? '+' + v : String(v)
-}
-
-function LedgerTab({
-  parts,
-  products,
-  orders,
-  refreshToken,
-}: {
-  parts: Part[]
-  products: Product[]
-  orders: SalesOrder[]
-  refreshToken?: number
-}) {
-  const [itemType, setItemType] = useState<'part' | 'product'>('part')
-  const [itemId, setItemId] = useState<number | undefined>()
-  const [orderNo, setOrderNo] = useState<string | undefined>()
-  const [itemRows, setItemRows] = useState<LedgerRow[]>([])
-  const [orderResult, setOrderResult] = useState<OrderLedgerResult | null>(null)
+function LedgerTab({ parts, orders }: { parts: Part[]; orders: SalesOrder[] }) {
+  const [salesOrderNo, setSalesOrderNo] = useState<string | undefined>()
+  const [purchaseOrderNo, setPurchaseOrderNo] = useState<string | undefined>()
+  const [partId, setPartId] = useState<number | undefined>()
+  const [pos, setPos] = useState<PoForRR[]>([])
+  const [rows, setRows] = useState<LedgerSearchRow[]>([])
   const [loading, setLoading] = useState(false)
-  const [lastMode, setLastMode] = useState<'item' | 'order'>('item')
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const pageSize = 10
 
-  const options = itemType === 'part' ? parts : products
-  const selectedItem = options.find((p) => p.id === itemId)
+  useEffect(() => {
+    api
+      .get<PoForRR[]>('/purchase-orders')
+      .then(({ data }) => setPos(data))
+      .catch(notifyError)
+  }, [])
 
-  async function query() {
-    if (!itemId && !orderNo) {
-      message.warning('请先选择物料或销售订单号')
-      return
-    }
+  async function query(targetPage = 1) {
     setLoading(true)
     try {
-      if (orderNo) {
-        setLastMode('order')
-        const { data } = await api.get<OrderLedgerResult>('/inventory/order-ledger', {
-          params: { orderNo, itemType: itemId ? itemType : undefined, itemId },
-        })
-        setOrderResult(data)
-      } else {
-        setLastMode('item')
-        const { data } = await api.get<LedgerRow[]>('/stock/ledger', {
-          params: { itemType, itemId },
-        })
-        setItemRows(data)
-      }
+      const { data } = await api.get<Paged<LedgerSearchRow>>('/inventory/ledger-search', {
+        params: {
+          salesOrderNo: salesOrderNo || undefined,
+          purchaseOrderNo: purchaseOrderNo || undefined,
+          partId: partId || undefined,
+          page: targetPage,
+          pageSize,
+        },
+      })
+      setRows(data.items)
+      setTotal(data.total)
+      setPage(data.page)
     } catch (err) {
       notifyError(err)
     } finally {
@@ -876,113 +957,116 @@ function LedgerTab({
     }
   }
 
+  // 全不选 = 查所有流水；选择条件变化自动重查
   useEffect(() => {
-    if (refreshToken === undefined) return
-    if (orderNo || itemId) void query()
+    void query(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshToken])
+  }, [salesOrderNo, purchaseOrderNo, partId])
+
+  const selectedOrderId = salesOrderNo ? orders.find((o) => o.orderNo === salesOrderNo)?.id : undefined
+  const poOptions = (selectedOrderId ? pos.filter((p) => p.salesOrderId === selectedOrderId) : pos).map((p) => ({
+    value: p.orderNo,
+    label: p.orderNo,
+  }))
+  const boundPoItems = purchaseOrderNo ? pos.find((p) => p.orderNo === purchaseOrderNo)?.items : undefined
+  const partOptions = (boundPoItems ?? []).length > 0
+    ? boundPoItems!.map((i) => ({ value: i.partId, label: i.sku + '　' + i.name }))
+    : parts.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))
 
   return (
     <div>
       <Space style={{ marginBottom: 16 }} wrap>
         <Select
-          value={itemType}
-          style={{ width: 110 }}
-          onChange={(v) => {
-            setItemType(v)
-            setItemId(undefined)
-            setItemRows([])
-            setOrderResult(null)
-          }}
-          options={[
-            { value: 'part', label: '零件' },
-            { value: 'product', label: '成品' },
-          ]}
-        />
-        <Select
-          placeholder="选择物料（可不选）"
-          style={{ width: 240 }}
-          value={itemId}
-          onChange={(v) => {
-            setItemId(v)
-            setOrderResult(null)
-          }}
-          options={options.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
-        />
-        <Select
           showSearch
           allowClear
-          placeholder="选择销售订单号（可不选）"
-          style={{ width: 240 }}
-          value={orderNo}
+          placeholder="① 销售订单（不选=全部）"
+          style={{ width: 220 }}
+          value={salesOrderNo}
           onChange={(v) => {
-            setOrderNo(v)
-            setOrderResult(null)
+            setSalesOrderNo(v)
+            setPurchaseOrderNo(undefined)
+            setPartId(undefined)
           }}
           optionFilterProp="label"
           options={orders.map((o) => ({ value: o.orderNo, label: o.orderNo }))}
         />
-        <Button type="primary" onClick={() => void query()}>
-          查询流水
-        </Button>
-      </Space>
-
-      {lastMode === 'order' && orderResult ? (
-        <>
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 12 }}
-            message={
-              '订单 ' +
-              orderResult.orderNo +
-              (orderResult.itemName ? '　物料 ' + orderResult.itemName : '（全部物料）') +
-              (orderResult.requiredQty !== undefined
-                ? '　需求 ' + orderResult.requiredQty + '　已出库 ' + orderResult.issuedQty + '　未出 ' + orderResult.outstanding
-                : '　累计出库 ' + orderResult.totalOutboundQty)
-            }
-          />
-          <Table<OrderLedgerRow>
-            rowKey="id"
-            loading={loading}
-            dataSource={orderResult.rows}
-            pagination={{ pageSize: 10 }}
-            columns={[
-              { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr },
-              { title: '物料', dataIndex: 'itemName', key: 'itemName', render: (v: string) => v || '-' },
-              {
-                title: '变动',
-                dataIndex: 'delta',
-                key: 'delta',
-                render: (v: number) => signedDelta(v),
-              },
-              { title: '结存', dataIndex: 'balance', key: 'balance' },
-            ]}
-          />
-        </>
-      ) : lastMode === 'item' ? (
-        <Table<LedgerRow>
-          rowKey="id"
-          loading={loading}
-          dataSource={itemRows}
-          pagination={{ pageSize: 10 }}
-          columns={[
-            { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr },
-            {
-              title: '物料',
-              key: 'material',
-              render: () => (selectedItem ? selectedItem.name + '（' + selectedItem.sku + '）' : '-'),
-            },
-            {
-              title: '变动',
-              dataIndex: 'delta',
-              key: 'delta',
-              render: (v: number) => signedDelta(v),
-            },
-            { title: '结存', dataIndex: 'balance', key: 'balance' },
-          ]}
+        <Select
+          showSearch
+          allowClear
+          placeholder="② 采购订单（不选=全部）"
+          style={{ width: 220 }}
+          value={purchaseOrderNo}
+          onChange={(v) => {
+            setPurchaseOrderNo(v)
+            setPartId(undefined)
+          }}
+          optionFilterProp="label"
+          options={poOptions}
         />
-      ) : null}
+        <Select
+          showSearch
+          allowClear
+          placeholder="③ 零件（不选=全部）"
+          style={{ width: 260 }}
+          value={partId}
+          onChange={(v) => setPartId(v)}
+          optionFilterProp="label"
+          options={partOptions}
+        />
+      </Space>
+      <Table<LedgerSearchRow>
+        rowKey="id"
+        loading={loading}
+        dataSource={rows}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: false,
+          onChange: (p) => void query(p),
+        }}
+        columns={[
+          { title: '时间', dataIndex: 'at', key: 'at', render: dateTimeStr, width: 150 },
+          {
+            title: '图片',
+            dataIndex: 'imageUrl',
+            key: 'imageUrl',
+            width: 80,
+            render: (v: string) =>
+              v ? (
+                <Image
+                  src={v}
+                  width={48}
+                  height={48}
+                  style={{ objectFit: 'contain', background: '#fafafa', border: '1px solid #eee' }}
+                />
+              ) : (
+                '-'
+              ),
+          },
+          {
+            title: '物料',
+            key: 'material',
+            render: (_: unknown, r: LedgerSearchRow) => r.sku + '　' + r.name,
+          },
+          { title: '供应商', dataIndex: 'supplierName', key: 'supplierName', render: (v: string) => v || '-' },
+          { title: '单据号', dataIndex: 'orderNo', key: 'orderNo', render: (v: string) => v || '-' },
+          { title: '来料单号', dataIndex: 'lotNo', key: 'lotNo', render: (v: string) => v || '-' },
+          {
+            title: '入库',
+            dataIndex: 'inQty',
+            key: 'inQty',
+            render: (v: number) => (v > 0 ? <span style={{ color: '#3f8600' }}>+{v}</span> : '-'),
+          },
+          {
+            title: '出库',
+            dataIndex: 'outQty',
+            key: 'outQty',
+            render: (v: number) => (v > 0 ? <span style={{ color: '#cf1322' }}>-{v}</span> : '-'),
+          },
+          { title: '结存', dataIndex: 'balance', key: 'balance' },
+        ]}
+      />
     </div>
   )
 }
@@ -1124,7 +1208,8 @@ interface PoForRR {
   orderNo: string
   supplierId: number
   supplierName: string
-  items: { partId: number }[]
+  salesOrderId?: number | null
+  items: { partId: number; sku: string; name: string }[]
 }
 
 function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => void }) {
@@ -1577,12 +1662,7 @@ export default function Inventory() {
       key: 'ledger',
       label: '流水',
       children: (
-        <LedgerTab
-          parts={parts}
-          products={products}
-          orders={orders}
-          refreshToken={refreshToken}
-        />
+        <LedgerTab parts={parts} orders={orders} />
       ),
     },
     { key: 'warehouse-ledger', label: '收发台账', children: <WarehouseLedgerTab /> },

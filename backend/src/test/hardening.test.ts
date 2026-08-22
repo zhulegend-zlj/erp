@@ -629,6 +629,126 @@ describe('hardening（加固回归）', () => {
     })
   })
 
+  describe('库存查询/流水级联/领料上下文', () => {
+    it('库存列表带 sku 与图片，keyword 不区分大小写', async () => {
+      const part = await prisma.part.create({ data: { sku: 'CSP-010', name: '弹簧', imageUrl: '/uploads/x/弹簧.png' } })
+      await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 7 } })
+      const app = buildApp()
+      const cookie = await loginCookie(app, 'warehouse')
+      const lower = await app.inject({
+        method: 'GET', url: '/api/stock?keyword=csp-010&page=1&pageSize=10', headers: { cookie },
+      })
+      expect(lower.statusCode).toBe(200)
+      const row = (lower.json().items as { sku: string; imageUrl: string; qtyOnHand: number }[]).find(
+        (r) => r.sku === 'CSP-010',
+      )
+      expect(row).toMatchObject({ sku: 'CSP-010', imageUrl: '/uploads/x/弹簧.png', qtyOnHand: 7 })
+    })
+
+    it('流水级联查询：全不选返回所有、按采购单/订单/零件过滤', async () => {
+      const supplier = await prisma.supplier.create({ data: { name: '供应商-LS' } })
+      const partA = await prisma.part.create({ data: { sku: 'P-LS-A', name: '零件LSA', supplierId: supplier.id } })
+      const partB = await prisma.part.create({ data: { sku: 'P-LS-B', name: '零件LSB', supplierId: supplier.id } })
+      const product = await prisma.product.create({ data: { sku: 'F-LS', name: '成品LS' } })
+      await prisma.bom.createMany({
+        data: [
+          { productId: product.id, partId: partA.id, qty: 1 },
+          { productId: product.id, partId: partB.id, qty: 1 },
+        ],
+      })
+      await prisma.stock.createMany({
+        data: [
+          { itemType: 'part', itemId: partA.id, qtyOnHand: 100 },
+          { itemType: 'part', itemId: partB.id, qtyOnHand: 100 },
+        ],
+      })
+      const customer = await prisma.customer.create({ data: { name: '客户-LS' } })
+      const order = await prisma.salesOrder.create({
+        data: {
+          orderNo: 'SO-LS', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          status: 'in_production',
+          items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+        },
+      })
+      const po = await prisma.purchaseOrder.create({
+        data: {
+          orderNo: 'PO-LS', supplierId: supplier.id, salesOrderId: order.id,
+          items: { create: { partId: partA.id, qty: 10, unitPrice: 1 } },
+        },
+      })
+      const app = buildApp()
+      const cookie = await loginCookie(app, 'warehouse')
+      const recv = await app.inject({
+        method: 'POST', url: '/api/receipts', headers: { cookie },
+        payload: { purchaseOrderId: po.id, items: [{ partId: partA.id, qty: 5, lotNo: 'LS-LOT' }] },
+      })
+      expect(recv.statusCode).toBe(200)
+      const issue = await app.inject({
+        method: 'POST', url: '/api/issues', headers: { cookie },
+        payload: { salesOrderId: order.id, issuedBy: '组长', items: [{ partId: partB.id, qty: 3 }] },
+      })
+      expect(issue.statusCode).toBe(200)
+
+      const all = await app.inject({ method: 'GET', url: '/api/inventory/ledger-search?page=1&pageSize=20', headers: { cookie } })
+      expect(all.statusCode).toBe(200)
+      expect(all.json().total).toBe(2)
+
+      const byPo = await app.inject({
+        method: 'GET', url: '/api/inventory/ledger-search?purchaseOrderNo=PO-LS', headers: { cookie },
+      })
+      expect(byPo.statusCode).toBe(200)
+      const poRows = byPo.json() as { sku: string; lotNo: string; inQty: number }[]
+      expect(poRows).toHaveLength(1)
+      expect(poRows[0]).toMatchObject({ sku: 'P-LS-A', lotNo: 'LS-LOT', inQty: 5 })
+
+      const byOrder = await app.inject({
+        method: 'GET', url: '/api/inventory/ledger-search?salesOrderNo=SO-LS&page=1&pageSize=20', headers: { cookie },
+      })
+      expect(byOrder.statusCode).toBe(200)
+      expect((byOrder.json() as { total: number }).total).toBe(2)
+
+      const byPart = await app.inject({
+        method: 'GET', url: '/api/inventory/ledger-search?partId=' + partB.id, headers: { cookie },
+      })
+      expect(byPart.statusCode).toBe(200)
+      const partRows = byPart.json() as { sku: string; outQty: number }[]
+      expect(partRows).toHaveLength(1)
+      expect(partRows[0]).toMatchObject({ sku: 'P-LS-B', outQty: 3 })
+    })
+
+    it('领料上下文返回订单采购单与 BOM 零件', async () => {
+      const supplier = await prisma.supplier.create({ data: { name: '供应商-IC' } })
+      const part = await prisma.part.create({ data: { sku: 'P-IC', name: '零件IC', supplierId: supplier.id } })
+      const product = await prisma.product.create({ data: { sku: 'F-IC', name: '成品IC' } })
+      await prisma.bom.create({ data: { productId: product.id, partId: part.id, qty: 1 } })
+      const customer = await prisma.customer.create({ data: { name: '客户-IC' } })
+      const order = await prisma.salesOrder.create({
+        data: {
+          orderNo: 'SO-IC', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          status: 'in_production',
+          items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+        },
+      })
+      await prisma.purchaseOrder.create({
+        data: {
+          orderNo: 'PO-IC', supplierId: supplier.id, salesOrderId: order.id,
+          items: { create: { partId: part.id, qty: 10, unitPrice: 1 } },
+        },
+      })
+      const app = buildApp()
+      const cookie = await loginCookie(app, 'warehouse')
+      const res = await app.inject({
+        method: 'GET', url: '/api/inventory/issue-context?orderId=' + order.id, headers: { cookie },
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json() as { orderNo: string; purchaseOrders: { orderNo: string; items: { partId: number; sku: string }[] }[]; bomParts: { partId: number; sku: string }[] }
+      expect(body.orderNo).toBe('SO-IC')
+      expect(body.purchaseOrders).toHaveLength(1)
+      expect(body.purchaseOrders[0]).toMatchObject({ orderNo: 'PO-IC', items: [{ partId: part.id, sku: 'P-IC' }] })
+      expect(body.bomParts).toEqual([{ partId: part.id, sku: 'P-IC', name: '零件IC' }])
+    })
+  })
+
   describe('B10 账期余额口径', () => {
     it('应收/应付扣除已收/已付', async () => {
       const customer = await prisma.customer.create({ data: { name: '客户-H11' } })
