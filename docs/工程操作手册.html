@@ -2,35 +2,46 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>工程账号操作手册（ERP 基础资料录入）</title>
 <style>
-  body { font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif; max-width: 860px; margin: 24px auto; padding: 0 16px; color: #222; line-height: 1.7; }
-  h1 { font-size: 24px; border-bottom: 2px solid #1677ff; padding-bottom: 8px; }
-  h2 { font-size: 19px; margin-top: 28px; color: #1677ff; }
-  h3 { font-size: 16px; margin-top: 20px; }
-  table { border-collapse: collapse; width: 100%; margin: 10px 0 16px; }
-  th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; font-size: 14px; }
-  th { background: #eef4ff; }
-  blockquote { margin: 8px 0; padding: 6px 12px; background: #f6f8fa; border-left: 4px solid #1677ff; color: #555; }
-  code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; }
-  ol, ul { padding-left: 24px; }
-  li { margin: 4px 0; }
-  @media print { body { margin: 0; } }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; max-width: 860px; margin: 24px auto; padding: 0 16px; color: #222; line-height: 1.7; }
+  h1 { font-size: 24px; border-bottom: 3px solid #1677ff; padding-bottom: 8px; }
+  h2 { font-size: 18px; margin-top: 28px; border-left: 4px solid #1677ff; padding-left: 8px; }
+  h3 { font-size: 15px; margin-top: 18px; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+  th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; font-size: 13px; }
+  th { background: #eef3ff; }
+  blockquote { border-left: 4px solid #ffb84d; background: #fff8ec; margin: 10px 0; padding: 8px 12px; color: #6b4d00; font-size: 13px; }
+  code { background: #f5f5f5; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+  li { margin: 4px 0; font-size: 14px; }
+  p { font-size: 14px; }
+  @media print { body { max-width: none; margin: 0; } h1 { page-break-before: avoid; } }
 </style>
 </head>
 <body>
 <h1>工程账号操作手册（ERP 基础资料录入）</h1>
-<blockquote>适用角色：工程。录入内容：成品、零件、BOM（含图片/图档）。<br>系统地址（局域网）：<b>http://192.168.1.114:5173</b><br>登录账号：<b>工程</b>　初始密码：<b>88888888</b>（登录后右上角「修改密码」建议立即修改）</blockquote>
+<p><b>适用角色：工程</b>。录入内容：成品、零件（图片/图档）、BOM。</p>
+<p>系统地址（局域网）：<b>http://192.168.1.114:5173</b></p>
+<p>登录账号：<b>工程</b>　初始密码：<b>88888888</b>（登录后点右上角「修改密码」建议立即修改）</p>
 
 <h2>一、工程负责什么</h2>
 <table>
-<tr><th>工程负责</th><th>工程不管</th></tr>
-<tr><td>成品：新建、图片</td><td>价格：由采购填写</td></tr>
-<tr><td>零件：SKU/名称/规格/单位/图片/图档/模具/MOQ</td><td>供应商：由采购在零件上挂</td></tr>
-<tr><td>BOM：成品由哪些零件组成、每件用量</td><td>采购单/库存/出货/财务</td></tr>
+<tr><th>工程负责</th><th>工程不管（系统里也看不到/填不了）</th></tr>
+<tr><td>成品：新建、图片</td><td><b>价格</b>：由采购填写（零件列表对工程不显示价格列）</td></tr>
+<tr><td>零件：SKU / 名称 / 规格 / 单位 / 图片 / 图档 / 模具 / MOQ</td><td><b>供应商</b>：由采购负责挂到零件上</td></tr>
+<tr><td>BOM：成品由哪些零件组成、每件用量</td><td>订单 / 采购单 / 收货 / 库存 / 出货 / 财务</td></tr>
 </table>
+<blockquote>工程登录后只能看到「首页」和「基础资料」两个菜单，其他模块与工程无关。</blockquote>
 
-<h2>二、操作步骤</h2>
+<h2>二、录入顺序（建议）</h2>
+<ol>
+<li>先建<b>成品</b></li>
+<li>再录<b>零件</b>（编号照采购单抄，上传图片/图档）</li>
+<li>最后配 <b>BOM</b>（保存 BOM 后，零件文件会自动归位到对应成品目录）</li>
+</ol>
+
+<h2>三、操作步骤</h2>
 <h3>1. 录成品（基础资料 → 成品）</h3>
 <p>点「新建成品」，填写：</p>
 <table>
@@ -38,7 +49,7 @@
 <tr><td>SKU</td><td>成品编号，唯一不可重复（如 CSS-SQ、P1927-DAPM）</td></tr>
 <tr><td>名称</td><td>成品名称</td></tr>
 <tr><td>单位</td><td>默认「件」</td></tr>
-<tr><td>图片</td><td>点上传，选成品照片（可选）</td></tr>
+<tr><td>图片</td><td>点上传，选成品照片（可选；显示为同比例缩略图，点击可放大）</td></tr>
 </table>
 
 <h3>2. 录零件（基础资料 → 零件）</h3>
@@ -48,48 +59,48 @@
 <tr><td>SKU</td><td><b>零件固有编号，照采购单抄</b>（如 P1927-14872），唯一不可重复</td></tr>
 <tr><td>名称</td><td>零件名称（如 变速杆罩）</td></tr>
 <tr><td>单位</td><td>默认「个」（pcs）</td></tr>
-<tr><td>规格</td><td>材质/表面处理等（如 ADC12 电泳黑色）</td></tr>
-<tr><td>图片地址</td><td>点「上传图片」选零件照片</td></tr>
-<tr><td>图档地址</td><td>点「上传图档」传图纸/技术文件：支持 pdf / dwg / dxf / step / stp / igs / zip / xlsx 及图片，单个 ≤ 20MB</td></tr>
-<tr><td>模具</td><td>模具编号（可选）</td></tr>
-<tr><td>MOQ</td><td>最小起订量（可选，整数）</td></tr>
-<tr><td>价格</td><td><b>不用填</b>（采购负责）</td></tr>
-<tr><td>供应商</td><td><b>不用填</b>（采购负责挂）</td></tr>
+<tr><td>规格</td><td>材质/表面处理等（如 ADC12 电泳黑色），可不填</td></tr>
+<tr><td>图片地址</td><td>点「上传图片」选零件照片；支持 jpg / png / webp / gif</td></tr>
+<tr><td>图档地址</td><td>点「上传图档」传图纸/技术文件；支持 pdf / dwg / dxf / step / stp / igs / zip / xlsx，单个文件 ≤ 20MB</td></tr>
+<tr><td>模具</td><td><b>模具信息</b>：这个零件有没有开模具、模具编号等备注（如「模具号 M-101」，没有就留空）</td></tr>
+<tr><td>MOQ</td><td><b>最小起订量</b>：供应商要求一次最少买多少（如 500），没有就留空（整数）</td></tr>
 </table>
-<blockquote>列表会自动按「产品族前缀 + 编号大小」排序（如 CSS-001、CSS-012…，P1927-14872、P1927-14873…），同一产品的零件会排在一起。</blockquote>
+<blockquote>零件列表<b>没有价格、供应商字段</b>（这两项由采购负责），工程不用管。<br>列表自动按「产品族前缀 + 编号大小」排序（如 CSS-001、CSS-012…，P1927-14872、P1927-14873…），同一产品的零件会排在一起；右上角可按名称/SKU 搜索。</blockquote>
 
 <h3>3. 配 BOM（基础资料 → BOM 维护）</h3>
 <ol>
-<li>顶部「选择成品」下拉里选成品</li>
-<li>点「添加零件」——输入行出现在<b>第一行</b>：下拉选零件、填用量</li>
-<li>继续点「添加零件」可以连续加（新行始终在最上面），最左列有零件图片缩略图</li>
-<li>全部加完点「<b>保存 BOM</b>」</li>
+<li>顶部「选择成品」下拉选成品</li>
+<li>点「添加零件」——新行出现在<b>第一行</b>：最左列是零件图片缩略图，下拉选零件、填用量（每件成品用几个）</li>
+<li>连续点「添加零件」可继续加（新行始终在最上面）</li>
+<li>加完点「<b>保存 BOM</b>」</li>
 </ol>
+<blockquote>注意：没选零件或用量 ≤ 0 的行保存时会<b>弹提示</b>（不会静默丢失），补全或删掉该行再保存；同一零件重复添加也会提示合并。</blockquote>
 
-<h2>三、上传文件的存放规则（自动的，不用手动整理）</h2>
+<h2>四、上传文件的存放规则（自动的，不用手动整理）</h2>
 <p>上传图片/图档后，系统自动按下面规则放文件，无需工程手工建目录：</p>
 <ul>
 <li>挂在 1 个成品下的零件：<code>成品SKU/零件SKU-零件名/零件SKU-零件名.png、零件SKU-零件名-图档.pdf</code>（文件名带零件名）</li>
 <li>还没配 BOM 的新零件：先放 <code>_未分类/零件SKU-零件名/</code>，<b>保存 BOM 后自动归位到成品目录</b></li>
 <li>一个零件被多个成品共用：放 <code>_共用/</code></li>
+<li>成品图片：<code>成品SKU/成品SKU-成品名.png</code></li>
 </ul>
-<p>改名零件会同步改文件夹名；删除零件会删掉它的文件。</p>
+<p>改名零件会同步改文件夹和文件名；删除零件会删掉它的文件。</p>
+<blockquote>上传图片时表单里要先填好 SKU 和名称（否则会提示）；文件必须真实图片/图档（系统会校验内容，伪造文件会被拒绝）。</blockquote>
 
-<h2>四、如果手里有现成表格（重要）</h2>
+<h2>五、如果手里有现成表格（重要）</h2>
 <p><b>不需要一条条手录</b>：把 Excel 表格全部发给开发人员，由开发人员批量导入。建议表格按下面三张 sheet 整理（列名照抄）：</p>
-<table>
-<tr><th>sheet「成品」</th><td>成品SKU ｜ 成品名称 ｜ 单位</td></tr>
-<tr><th>sheet「零件」</th><td>零件SKU ｜ 零件名称 ｜ 单位 ｜ 规格 ｜ 供应商名称 ｜ 模具 ｜ MOQ</td></tr>
-<tr><th>sheet「BOM」</th><td>成品SKU ｜ 零件SKU ｜ 用量</td></tr>
-</table>
+<p><b>sheet「成品」</b>：成品SKU ｜ 成品名称 ｜ 单位</p>
+<p><b>sheet「零件」</b>：零件SKU ｜ 零件名称 ｜ 单位 ｜ 规格 ｜ 供应商名称 ｜ 模具 ｜ MOQ</p>
+<p><b>sheet「BOM」</b>：成品SKU ｜ 零件SKU ｜ 用量</p>
 <p>图片/图档如果也很多：打包发开发人员，文件名按 <code>零件SKU-零件名-图片.png</code>、<code>零件SKU-零件名-图档.pdf</code> 命名，开发人员批量导入后系统会自动放进对应目录。</p>
 
-<h2>五、常见问题</h2>
+<h2>六、常见问题</h2>
 <ul>
 <li>遇到问题：右下角「意见反馈」提交，开发人员会看到。</li>
 <li>SKU 重复会报错「已存在」：说明这条录过了，直接改原记录即可。</li>
 <li>忘密码：找开发人员重置。</li>
-<li>图片传错：编辑该零件重新上传即可覆盖。</li>
+<li>图片/图档传错：编辑该零件重新上传即可覆盖。</li>
+<li>看不到价格/供应商：正常——这两项归采购，工程界面本来就不显示。</li>
 </ul>
 </body>
 </html>
