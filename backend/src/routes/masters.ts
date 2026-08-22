@@ -76,8 +76,8 @@ async function productSkusForPart(partId: number): Promise<string[]> {
 
 /** 按零件文件夹内的文件更新零件图片/图档 URL（归位或改名后调用） */
 async function syncPartUrlsFromFolder(partId: number, relDir: string, files: string[]): Promise<void> {
-  const imageFile = files.find((f) => f.startsWith('图片'))
-  const drawingFile = files.find((f) => f.startsWith('图档'))
+  const drawingFile = files.find((f) => f.includes('-图档.'))
+  const imageFile = files.find((f) => !f.includes('-图档.'))
   const data: { imageUrl?: string; drawingsUrl?: string } = {}
   if (imageFile) data.imageUrl = urlFor(relDir, imageFile)
   if (drawingFile) data.drawingsUrl = urlFor(relDir, drawingFile)

@@ -128,7 +128,7 @@ describe('uploads', () => {
     })
     expect(res.statusCode).toBe(200)
     const url = res.json().url
-    expect(url).toBe('/uploads/ORG-P1/ORG-001-轴/图片.png')
+    expect(url).toBe('/uploads/ORG-P1/ORG-001-轴/ORG-001-轴.png')
     created.push(join(process.cwd(), url))
   })
 
@@ -141,7 +141,7 @@ describe('uploads', () => {
       partSku: 'ORG-002', partName: '螺丝', kind: 'image',
     })
     expect(uncat.statusCode).toBe(200)
-    expect(uncat.json().url).toBe('/uploads/_未分类/ORG-002-螺丝/图片.png')
+    expect(uncat.json().url).toBe('/uploads/_未分类/ORG-002-螺丝/ORG-002-螺丝.png')
     created.push(join(process.cwd(), uncat.json().url))
 
     const p1 = await prisma.product.create({ data: { sku: 'ORG-P1', name: '成品P1' } })
@@ -156,7 +156,7 @@ describe('uploads', () => {
       partSku: 'ORG-002', partName: '螺丝', kind: 'drawing',
     })
     expect(shared.statusCode).toBe(200)
-    expect(shared.json().url).toBe('/uploads/_共用/ORG-002-螺丝/图档.png')
+    expect(shared.json().url).toBe('/uploads/_共用/ORG-002-螺丝/ORG-002-螺丝-图档.png')
     created.push(join(process.cwd(), shared.json().url))
   })
 
@@ -170,7 +170,7 @@ describe('uploads', () => {
       partSku: 'ORG-003', partName: '活块', kind: 'image',
     })
     expect(up.statusCode).toBe(200)
-    expect(up.json().url).toBe('/uploads/_未分类/ORG-003-活块/图片.png')
+    expect(up.json().url).toBe('/uploads/_未分类/ORG-003-活块/ORG-003-活块.png')
 
     const bom = await app.inject({
       method: 'PUT', url: '/api/products/' + prod.id + '/bom', headers: { cookie },
@@ -179,9 +179,9 @@ describe('uploads', () => {
     expect(bom.statusCode).toBe(200)
 
     const updated = await prisma.part.findUnique({ where: { id: part.id } })
-    expect(updated?.imageUrl).toBe('/uploads/ORG-P1/ORG-003-活块/图片.png')
-    created.push(join(process.cwd(), '/uploads/ORG-P1/ORG-003-活块/图片.png'))
-    created.push(join(process.cwd(), '/uploads/_未分类/ORG-003-活块/图片.png'))
+    expect(updated?.imageUrl).toBe('/uploads/ORG-P1/ORG-003-活块/ORG-003-活块.png')
+    created.push(join(process.cwd(), '/uploads/ORG-P1/ORG-003-活块/ORG-003-活块.png'))
+    created.push(join(process.cwd(), '/uploads/_未分类/ORG-003-活块/ORG-003-活块.png'))
   })
 
   it('保存 BOM 时把根目录 uuid 文件也归位到零件文件夹', async () => {
@@ -205,11 +205,11 @@ describe('uploads', () => {
     expect(bom.statusCode).toBe(200)
 
     const updated = await prisma.part.findUnique({ where: { id: part.id } })
-    expect(updated?.imageUrl).toBe('/uploads/ORG-P1/ORG-005-旧图零件/图片.png')
+    expect(updated?.imageUrl).toBe('/uploads/ORG-P1/ORG-005-旧图零件/ORG-005-旧图零件.png')
     const { stat } = await import('node:fs/promises')
-    const moved = await stat(resolve(UPLOAD_DIR, 'ORG-P1', 'ORG-005-旧图零件', '图片.png')).then(() => true).catch(() => false)
+    const moved = await stat(resolve(UPLOAD_DIR, 'ORG-P1', 'ORG-005-旧图零件', 'ORG-005-旧图零件.png')).then(() => true).catch(() => false)
     expect(moved).toBe(true)
-    created.push(resolve(UPLOAD_DIR, 'ORG-P1', 'ORG-005-旧图零件', '图片.png'))
+    created.push(resolve(UPLOAD_DIR, 'ORG-P1', 'ORG-005-旧图零件', 'ORG-005-旧图零件.png'))
   })
 
   it('成品图片上传到 成品SKU/图片.ext', async () => {
@@ -240,8 +240,8 @@ describe('uploads', () => {
     })
     expect(renamed.statusCode).toBe(200)
     const renamedPart = await prisma.part.findUnique({ where: { id: part.id } })
-    expect(renamedPart?.imageUrl).toBe('/uploads/_未分类/ORG-004-新名/图片.png')
-    created.push(join(process.cwd(), '/uploads/_未分类/ORG-004-新名/图片.png'))
+    expect(renamedPart?.imageUrl).toBe('/uploads/_未分类/ORG-004-新名/ORG-004-新名.png')
+    created.push(join(process.cwd(), '/uploads/_未分类/ORG-004-新名/ORG-004-新名.png'))
 
     const del = await app.inject({ method: 'DELETE', url: '/api/parts/' + part.id, headers: { cookie } })
     expect(del.statusCode).toBe(200)

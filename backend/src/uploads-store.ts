@@ -26,9 +26,9 @@ export function partDirName(sku: string, name: string): string {
   return parts.join('-') || 'part'
 }
 
-/** 零件文件固定文件名：图片.ext / 图档.ext */
-export function partFileName(kind: 'image' | 'drawing', ext: string): string {
-  return (kind === 'image' ? '图片' : '图档') + ext
+/** 零件文件名：<零件SKU>-<名称>.ext / <零件SKU>-<名称>-图档.ext（带零件名，方便人看） */
+export function partFileName(kind: 'image' | 'drawing', ext: string, partDir: string): string {
+  return (kind === 'image' ? partDir : partDir + '-图档') + ext
 }
 
 /** 根据零件当前挂载的成品决定归属目录（相对 uploads） */
@@ -51,7 +51,7 @@ export async function placePartFile(
   ext: string,
 ): Promise<string> {
   const relDir = partTargetRelDir(productSkus, partDir)
-  const fileName = partFileName(kind, ext)
+  const fileName = partFileName(kind, ext, partDir)
   await mkdir(resolve(UPLOAD_DIR, relDir), { recursive: true })
   await rename(resolve(UPLOAD_DIR, tmpName), resolve(UPLOAD_DIR, relDir, fileName))
   return urlFor(relDir, fileName)
@@ -112,7 +112,17 @@ export async function movePartFolder(
     await mkdir(dirname(target), { recursive: true })
     await rename(current, target)
   }
-  const files = await readdir(target).catch(() => [])
+  // 文件夹已改名，里面的文件（旧名.png / 旧名-图档.pdf）同步改成新零件名
+  let files = await readdir(target).catch(() => [])
+  for (const f of files) {
+    if (f.startsWith(oldPartDir)) {
+      const renamedName = f.replace(oldPartDir, newPartDir)
+      if (renamedName !== f) {
+        await rename(resolve(target, f), resolve(target, renamedName)).catch(() => {})
+      }
+    }
+  }
+  files = await readdir(target).catch(() => [])
   return { relDir: newRelDir, files }
 }
 
@@ -136,7 +146,8 @@ export async function placeRootFileIntoPartFolder(
   const ext = '.' + (url.split('.').pop() ?? '')
   const src = resolve(UPLOAD_DIR, name)
   if (!(await stat(src).then(() => true).catch(() => false))) return null
-  const fileName = partFileName(kind, ext)
+  const partDir = relDir.split(/[\\/]/).pop() ?? 'part'
+  const fileName = partFileName(kind, ext, partDir)
   await mkdir(resolve(UPLOAD_DIR, relDir), { recursive: true })
   await rename(src, resolve(UPLOAD_DIR, relDir, fileName))
   return urlFor(relDir, fileName)
