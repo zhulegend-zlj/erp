@@ -731,7 +731,16 @@ function OrderMaterialsTab({ orders }: { orders: SalesOrder[] }) {
             dataIndex: 'imageUrl',
             key: 'imageUrl',
             render: (v: string) =>
-              v ? <Image src={v} width={48} height={48} style={{ objectFit: 'cover' }} /> : '-',
+              v ? (
+                <Image
+                  src={v}
+                  width={64}
+                  height={64}
+                  style={{ objectFit: 'contain', background: '#fafafa', border: '1px solid #eee' }}
+                />
+              ) : (
+                '-'
+              ),
           },
           { title: '供应商', dataIndex: 'supplierName', key: 'supplierName' },
           { title: '规格', dataIndex: 'spec', key: 'spec', render: (v: string) => v || '-' },
@@ -1037,7 +1046,16 @@ function WarehouseLedgerTab() {
             dataIndex: 'imageUrl',
             key: 'imageUrl',
             render: (v: string) =>
-              v ? <Image src={v} width={36} height={36} style={{ objectFit: 'cover' }} /> : '-',
+              v ? (
+                <Image
+                  src={v}
+                  width={48}
+                  height={48}
+                  style={{ objectFit: 'contain', background: '#fafafa', border: '1px solid #eee' }}
+                />
+              ) : (
+                '-'
+              ),
           },
           { title: '料号', dataIndex: 'sku', key: 'sku' },
           { title: '物料名称', dataIndex: 'name', key: 'name' },

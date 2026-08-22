@@ -372,7 +372,14 @@ function CrudTab({
       render: (v: unknown) => {
         if (v === null || v === undefined || v === '') return '-'
         if (f.type === 'image') {
-          return <Image src={String(v)} width={48} height={48} style={{ objectFit: 'cover' }} />
+          return (
+            <Image
+              src={String(v)}
+              width={64}
+              height={64}
+              style={{ objectFit: 'contain', background: '#fafafa', border: '1px solid #eee' }}
+            />
+          )
         }
         if (f.type === 'drawing') {
           return (
@@ -672,7 +679,12 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
             render: (_: unknown, r: BomRow) => {
               const url = parts.find((p) => p.id === r.partId)?.imageUrl
               return url ? (
-                <Image src={url} width={48} height={48} style={{ objectFit: 'cover' }} />
+                <Image
+                  src={url}
+                  width={64}
+                  height={64}
+                  style={{ objectFit: 'contain', background: '#fafafa', border: '1px solid #eee' }}
+                />
               ) : (
                 '-'
               )
