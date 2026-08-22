@@ -69,6 +69,8 @@ export function dashboardRoutes(app: FastifyInstance) {
         orderNo: order.orderNo,
         customerName: order.customer.name,
         status: order.status,
+        purchasing: order.purchasing,
+        producing: order.producing,
         progress: progressOf(order.status),
         cost,
         profit,

@@ -193,7 +193,7 @@ describe('orders', () => {
       payload: { status: 'shipped' }
     })
     expect(bad.statusCode).toBe(400)
-    expect(bad.json().error).toMatch(/不能从|无法|不合法/)
+    expect(bad.json().error).toMatch(/不能从|不能把|无法|不合法/)
   })
 
   it('非法目标状态返回 400', async () => {
@@ -218,7 +218,7 @@ describe('orders', () => {
     expect(bad.statusCode).toBe(400)
   })
 
-  it('未出货前可回退一步', async () => {
+  it('销售只能草稿↔已确认：确认后可回退，不能再往后推进', async () => {
     const app = buildApp()
     const { customer, product, cookie } = await seedOrder(app)
     const createRes = await app.inject({
@@ -245,16 +245,49 @@ describe('orders', () => {
       headers: { cookie },
       payload: { status: 'in_production' }
     })
-    expect(toProduction.statusCode).toBe(200)
-    expect(toProduction.json().status).toBe('in_production')
+    expect(toProduction.statusCode).toBe(400)
+    expect(toProduction.json().error).toContain('销售不能')
 
     const rollback = await app.inject({
       method: 'PATCH',
       url: `/api/orders/${orderId}/status`,
       headers: { cookie },
+      payload: { status: 'draft' }
+    })
+    expect(rollback.statusCode).toBe(200)
+    expect(rollback.json().status).toBe('draft')
+  })
+
+  it('老板可把运作中订单强制回退到已确认（清空双阶段标志）', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const bossCookie = await loginCookie(app, 'boss')
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/orders',
+      headers: { cookie },
+      payload: {
+        customerId: customer.id,
+        deliveryDate: '2026-09-30',
+        items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
+      }
+    })
+    const orderId = createRes.json().id
+    await prisma.salesOrder.update({
+      where: { id: orderId },
+      data: { status: 'in_production', purchasing: true, producing: true },
+    })
+
+    const rollback = await app.inject({
+      method: 'PATCH',
+      url: `/api/orders/${orderId}/status`,
+      headers: { cookie: bossCookie },
       payload: { status: 'confirmed' }
     })
     expect(rollback.statusCode).toBe(200)
-    expect(rollback.json().status).toBe('confirmed')
+    const refreshed = await prisma.salesOrder.findUnique({ where: { id: orderId } })
+    expect(refreshed?.status).toBe('confirmed')
+    expect(refreshed?.purchasing).toBe(false)
+    expect(refreshed?.producing).toBe(false)
   })
 })

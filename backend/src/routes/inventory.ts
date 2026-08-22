@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
+import { refreshProducingPhase } from '../domain/order-phase'
 import { parsePositiveInt, prismaErrorInfo } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
 
@@ -127,6 +128,8 @@ export function inventoryRoutes(app: FastifyInstance) {
           },
         })
         await applyStockChange(tx, 'product', data.productId, data.qty, 'production', created.id, data.salesOrderId)
+        // 刷新「生产中」：入库未收满保持生产中，收满自动熄灭（采购中也完成则自动推进待出货）
+        await refreshProducingPhase(tx, data.salesOrderId)
         return created
       })
       return reply.code(200).send(entry)

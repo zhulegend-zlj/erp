@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Card, Col, Progress, Row, Statistic, Table, Tag } from 'antd'
 import { api } from '../api'
-import { dateStr, money, notifyError, statusColor, statusLabel } from './common'
+import { dateStr, money, notifyError, orderPhaseLabel, phaseTagColor } from './common'
 
 interface DashboardOrder {
   id: number
   orderNo: string
   customerName: string
   status: string
+  purchasing?: boolean
+  producing?: boolean
   progress: number
   cost: number
   profit: number
@@ -48,7 +50,7 @@ export default function Dashboard() {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      render: (v: string) => <Tag color={statusColor(v)}>{statusLabel(v)}</Tag>,
+      render: (_: unknown, r: DashboardOrder) => <Tag color={phaseTagColor(r)}>{orderPhaseLabel(r)}</Tag>,
     },
     {
       title: '进度',

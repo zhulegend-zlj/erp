@@ -39,7 +39,7 @@ describe('hardening（加固回归）', () => {
   })
 
   describe('A2 状态机与出货', () => {
-    it('PATCH 不能把 ready 直接置为 shipped，只能回退', async () => {
+    it('PATCH 不能把 ready 直接置为 shipped；销售也不能回退运作中订单', async () => {
       const customer = await prisma.customer.create({ data: { name: '客户-H2' } })
       const product = await prisma.product.create({ data: { sku: 'F-H2', name: '成品H2' } })
       const order = await prisma.salesOrder.create({
@@ -55,11 +55,17 @@ describe('hardening（加固回归）', () => {
         payload: { status: 'shipped' },
       })
       expect(toShipped.statusCode).toBe(400)
-      const rollback = await app.inject({
+      const salesRollback = await app.inject({
         method: 'PATCH', url: '/api/orders/' + order.id + '/status', headers: { cookie },
         payload: { status: 'in_production' },
       })
-      expect(rollback.statusCode).toBe(200)
+      expect(salesRollback.statusCode).toBe(400)
+      const bossCookie = await loginCookie(app, 'boss')
+      const bossRollback = await app.inject({
+        method: 'PATCH', url: '/api/orders/' + order.id + '/status', headers: { cookie: bossCookie },
+        payload: { status: 'confirmed' },
+      })
+      expect(bossRollback.statusCode).toBe(200)
     })
   })
 
@@ -394,6 +400,110 @@ describe('hardening（加固回归）', () => {
       })
       expect(update.statusCode).toBe(400)
       expect(update.json().error).toContain('供应商')
+    })
+  })
+
+  describe('阶段机（采购中/生产中）', () => {
+    it('生成采购单点亮采购中；全部收货后熄灭并自动推进待出货', async () => {
+      const customer = await prisma.customer.create({ data: { name: '客户-PH' } })
+      const product = await prisma.product.create({ data: { sku: 'F-PH', name: '成品PH' } })
+      const part = await prisma.part.create({ data: { sku: 'P-PH', name: '零件PH' } })
+      const supplier = await prisma.supplier.create({ data: { name: '供应商-PH' } })
+      await prisma.part.update({ where: { id: part.id }, data: { supplierId: supplier.id } })
+      const order = await prisma.salesOrder.create({
+        data: {
+          orderNo: 'SO-PH', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          status: 'confirmed',
+          items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+        },
+      })
+      const app = buildApp()
+      const purchaseCookie = await loginCookie(app, 'purchase')
+      const po = await app.inject({
+        method: 'POST', url: '/api/purchase-orders', headers: { cookie: purchaseCookie },
+        payload: { supplierId: supplier.id, salesOrderId: order.id, items: [{ partId: part.id, qty: 10, unitPrice: 1 }] },
+      })
+      expect(po.statusCode).toBe(200)
+      const afterPo = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+      expect(afterPo?.purchasing).toBe(true)
+      expect(afterPo?.status).toBe('in_production')
+
+      const warehouseCookie = await loginCookie(app, 'warehouse')
+      const receipt = await app.inject({
+        method: 'POST', url: '/api/receipts', headers: { cookie: warehouseCookie },
+        payload: { purchaseOrderId: po.json().id, items: [{ partId: part.id, qty: 10 }] },
+      })
+      expect(receipt.statusCode).toBe(200)
+      const afterReceipt = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+      expect(afterReceipt?.purchasing).toBe(false)
+      expect(afterReceipt?.status).toBe('ready') // 采购完成且生产未开始 → 待出货
+    })
+
+    it('成品入库点亮生产中，收满后熄灭；采购+生产都完成自动待出货', async () => {
+      const customer = await prisma.customer.create({ data: { name: '客户-PR' } })
+      const product = await prisma.product.create({ data: { sku: 'F-PR', name: '成品PR' } })
+      const order = await prisma.salesOrder.create({
+        data: {
+          orderNo: 'SO-PR', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          status: 'in_production', purchasing: true,
+          items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+        },
+      })
+      const app = buildApp()
+      const cookie = await loginCookie(app, 'warehouse')
+      const partial = await app.inject({
+        method: 'POST', url: '/api/production-entries', headers: { cookie },
+        payload: { salesOrderId: order.id, productId: product.id, qty: 4 },
+      })
+      expect(partial.statusCode).toBe(200)
+      let row = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+      expect(row?.producing).toBe(true)
+      expect(row?.status).toBe('in_production')
+
+      // 采购中且未收满 → 仍是运作中
+      const full = await app.inject({
+        method: 'POST', url: '/api/production-entries', headers: { cookie },
+        payload: { salesOrderId: order.id, productId: product.id, qty: 6 },
+      })
+      expect(full.statusCode).toBe(200)
+      row = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+      expect(row?.producing).toBe(false)
+      expect(row?.status).toBe('in_production')
+
+      // 采购也完成 → 自动待出货
+      await prisma.salesOrder.update({ where: { id: order.id }, data: { purchasing: false, status: 'in_production' } })
+      const extra = await app.inject({
+        method: 'POST', url: '/api/production-entries', headers: { cookie },
+        payload: { salesOrderId: order.id, productId: product.id, qty: 1 },
+      })
+      expect(extra.statusCode).toBe(200)
+      row = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+      expect(row?.producing).toBe(false)
+      expect(row?.status).toBe('ready')
+    })
+  })
+
+  describe('销售单价可见性', () => {
+    it('purchase/warehouse/engineer 看不到销售单价，sales/boss 可以看到', async () => {
+      const customer = await prisma.customer.create({ data: { name: '客户-PRC' } })
+      const product = await prisma.product.create({ data: { sku: 'F-PRC', name: '成品PRC' } })
+      const order = await prisma.salesOrder.create({
+        data: {
+          orderNo: 'SO-PRC', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          status: 'confirmed',
+          items: { create: { productId: product.id, qty: 2, unitPrice: 99.5 } },
+        },
+      })
+      const app = buildApp()
+      const salesCookie = await loginCookie(app, 'sales')
+      const salesDetail = await app.inject({ method: 'GET', url: '/api/orders/' + order.id, headers: { cookie: salesCookie } })
+      expect(salesDetail.json().items[0].unitPrice).toBe('99.5')
+      for (const role of ['purchase', 'warehouse'] as const) {
+        const cookie = await loginCookie(app, role)
+        const detail = await app.inject({ method: 'GET', url: '/api/orders/' + order.id, headers: { cookie } })
+        expect(detail.statusCode).toBe(200)
+        expect(detail.json().items[0].unitPrice).toBeUndefined()
+      }
     })
   })
 

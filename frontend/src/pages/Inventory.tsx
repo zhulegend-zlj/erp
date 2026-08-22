@@ -11,18 +11,21 @@ import {
   Space,
   Table,
   Tabs,
+  Tag,
   message,
 } from 'antd'
 import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { dateStr, dateTimeStr, notifyError } from './common'
+import { dateStr, dateTimeStr, notifyError, orderPhaseLabel } from './common'
 import type { Paged } from './common'
 
 interface SalesOrder {
   id: number
   orderNo: string
   status: string
+  purchasing?: boolean
+  producing?: boolean
 }
 
 interface Part {
@@ -246,7 +249,7 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
         >
           <Select
             placeholder="选择订单"
-            options={orders.map((o) => ({ value: o.id, label: o.orderNo }))}
+            options={orders.map((o) => ({ value: o.id, label: o.orderNo + '（' + orderPhaseLabel(o) + '）' }))}
           />
         </Form.Item>
         <Form.Item
@@ -302,6 +305,7 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
 
 function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; products: Product[]; onDone?: () => void }) {
   const [submitting, setSubmitting] = useState(false)
+  const [orderProgress, setOrderProgress] = useState<{ producedQty: number; totalQty: number } | null>(null)
   const [form] = Form.useForm<{
     salesOrderId?: number
     productId?: number
@@ -325,6 +329,7 @@ function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; pr
       })
       message.success('成品入库成功')
       form.resetFields()
+      setOrderProgress(null)
       onDone?.()
     } catch (err) {
       notifyError(err)
@@ -344,7 +349,15 @@ function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; pr
         >
           <Select
             placeholder="选择订单"
-            options={orders.map((o) => ({ value: o.id, label: o.orderNo }))}
+            options={orders.map((o) => ({ value: o.id, label: o.orderNo + '（' + orderPhaseLabel(o) + '）' }))}
+            onChange={(v) => {
+              void api
+                .get<{ producedQty?: number; totalQty?: number }>('/orders/' + v)
+                .then(({ data }) =>
+                  setOrderProgress({ producedQty: data.producedQty ?? 0, totalQty: data.totalQty ?? 0 }),
+                )
+                .catch(notifyError)
+            }}
           />
         </Form.Item>
         <Form.Item
@@ -365,6 +378,14 @@ function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; pr
           <Input type="date" />
         </Form.Item>
       </Space>
+      {orderProgress ? (
+        <div style={{ marginBottom: 12 }}>
+          <Tag color="blue">已完成 {orderProgress.producedQty}/{orderProgress.totalQty} 台</Tag>
+          {orderProgress.totalQty > 0 && orderProgress.producedQty >= orderProgress.totalQty ? (
+            <Tag color="green">已收满，待出货</Tag>
+          ) : null}
+        </div>
+      ) : null}
       <Button type="primary" htmlType="submit" loading={submitting}>
         提交入库
       </Button>

@@ -58,6 +58,29 @@ export function statusLabel(status: string): string {
   return ORDER_STATUS_LABELS[status] ?? status
 }
 
+// 订单阶段标签：采购中/生产中可同时存在；确认后未开工显示「已确认」，
+// 进入运作环节后「已确认」隐藏（看板/订单/仓库统一口径）
+export function orderPhaseLabel(o: { status: string; purchasing?: boolean; producing?: boolean }): string {
+  if (o.status === 'draft') return '草稿'
+  if (o.status === 'ready') return '待出货'
+  if (o.status === 'shipped') return '已出货'
+  if (o.status === 'completed') return '已完成'
+  if (o.purchasing && o.producing) return '采购中 + 生产中'
+  if (o.purchasing) return '采购中'
+  if (o.producing) return '生产中'
+  return statusLabel(o.status)
+}
+
+// 阶段标签颜色（与订单列表/看板一致）
+export function phaseTagColor(o: { status: string; purchasing?: boolean; producing?: boolean }): string {
+  if (o.status === 'ready') return 'warning'
+  if (o.status === 'shipped') return 'cyan'
+  if (o.status === 'completed') return 'success'
+  if (o.status === 'draft') return 'default'
+  if (o.purchasing || o.producing) return 'processing'
+  return 'blue'
+}
+
 export function statusColor(status: string): string {
   const map: Record<string, string> = {
     draft: 'default',

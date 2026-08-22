@@ -94,6 +94,9 @@ model SalesOrder {
   customerId   Int
   deliveryDate DateTime
   status       String   @default("draft") // draft/confirmed/in_production/ready/shipped/completed
+  // 双阶段标志（可同时为真）：采购中=存在未收齐的采购单；生产中=已开始成品入库但未收满
+  purchasing   Boolean  @default(false)
+  producing    Boolean  @default(false)
   otherCost    Decimal  @default(0) @db.Decimal(12,2)
   createdAt    DateTime @default(now())
   items        SalesOrderItem[]

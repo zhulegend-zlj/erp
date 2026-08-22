@@ -12,6 +12,14 @@
 > 5. 上传安全：移除 SVG、图片魔数校验、/uploads 需登录才能访问（nosniff）、超限 413、失败清理临时文件；工程账号不能写零件 supplierId（供应商归采购）；
 > 6. 登录加失败限流（5 次锁 5 分钟）、金额/数量 zod 上界、全局 500 不再回显内部错误、分页参数严格解析、财务账期应收/应付扣已收/已付、前端 401 自动跳登录页。
 >
+> **工作流重构（2026-08-22 第二轮，按老板反馈）**：SalesOrder 新增 `purchasing`/`producing` 双阶段布尔列（迁移 `20260822050309_add_order_phase_flags`，家里双库已部署，**工厂拉代码后跑 `npx prisma migrate deploy`**）：
+> 1. 状态分工：销售/老板只能 草稿↔已确认 与 已出货→已完成（PATCH）；老板额外可把 in_production/ready 强制回退到 confirmed（清空双阶段标志）；ready→shipped 仍只能走出货页；
+> 2. 采购中：生成挂销售订单的采购单自动点亮，该订单全部采购单收货到 received 后自动熄灭；生产中：首次成品入库点亮，入库累计≥订单数量自动熄灭；两阶段都熄灭且状态 in_production 时自动推进 ready（待出货）；
+> 3. 双阶段可同时存在（货没到齐也能先生产）；订单/看板/仓库的订单下拉统一用 `orderPhaseLabel`（common.ts）显示阶段标签，进入运作后不再显示「已确认」；
+> 4. 销售单价权限：后端订单/出货单接口对 purchase/warehouse/engineer 剥离 unitPrice 与 otherCost（finance 保留成本利润汇总，sales/boss 完整）；
+> 5. 采购页：keepAlive 会话级状态保持（已选订单/明细/弹窗草稿）；生成采购单弹窗带 SKU + 用量/需求/库存/需采购 + 供应商列（默认/未设置/本次改选标识），单价默认带出零件价格，批量接口支持行级 supplierId 覆盖，保存时可选择是否同步供应商回零件资料；
+> 6. 仓库成品入库表单显示所选订单「已完成 X/Y 台」进度。
+>
 > **当前阶段**：老板正在用测试数据（TEST-P1 / T001-T004）按全流程逐阶段测试；工程稍后从零录精准数据（P1927-DAPM 等）。
 >
 > **在别处继续开发**：直接 `git pull origin main` 后按第 6 节启动；首次记得 `npx prisma migrate deploy` 与重建账号（见第 3 节）。
@@ -97,7 +105,7 @@ cd D:\AI\erp\frontend
 npm run build
 ```
 
-当前测试：112 个通过（新增 hardening.test.ts 加固回归：原子库存/状态机/收货校验/供应商归属/上传安全/登录限流/数值上界/账期余额口径等）。
+当前测试：116 个通过（hardening.test.ts 含加固 + 双阶段机 + 价格可见性回归；orders.test.ts 覆盖新状态分工与老板兜底回退）。
 
 ## 8. 注意事项
 

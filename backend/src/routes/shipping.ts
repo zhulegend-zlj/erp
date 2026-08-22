@@ -115,8 +115,9 @@ export function shippingRoutes(app: FastifyInstance) {
     return reply.code(200).send(leg)
   })
 
-  // 出货单列表：5 角色均可查，可选按订单过滤，legs 按 at 倒序
+  // 出货单列表：5 角色均可查，可选按订单过滤，legs 按 at 倒序；非销售/老板不返回销售单价
   app.get('/api/shipments', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
+    const role = (req as { user?: { role?: string } }).user?.role ?? ''
     const raw = (req.query as { orderId?: string }).orderId
     let where: { salesOrderId?: number } = {}
     if (raw !== undefined) {
@@ -138,8 +139,20 @@ export function shippingRoutes(app: FastifyInstance) {
       },
     } as const
     const orderBy = { id: 'desc' as const }
+    const hidePrice = role !== 'sales' && role !== 'boss'
+    const toRow = (row: Record<string, unknown>): Record<string, unknown> => {
+      if (!hidePrice) return row
+      const salesOrder = row.salesOrder as { items?: Array<Record<string, unknown>> } | undefined
+      return {
+        ...row,
+        salesOrder: salesOrder
+          ? { ...salesOrder, items: salesOrder.items?.map((it) => ({ ...it, unitPrice: undefined })) }
+          : salesOrder,
+      }
+    }
     if (pagination.kind === 'none') {
-      return prisma.shipment.findMany({ where, orderBy, include })
+      const rows = await prisma.shipment.findMany({ where, orderBy, include })
+      return rows.map((r) => toRow(r as unknown as Record<string, unknown>))
     }
     const page = pagination.page
     const [rows, total] = await Promise.all([
@@ -152,6 +165,10 @@ export function shippingRoutes(app: FastifyInstance) {
       }),
       prisma.shipment.count({ where }),
     ])
-    return pagedResult(rows, total, page)
+    return pagedResult(
+      rows.map((r) => toRow(r as unknown as Record<string, unknown>)),
+      total,
+      page,
+    )
   })
 }

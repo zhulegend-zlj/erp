@@ -3,7 +3,7 @@ import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Spac
 import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { dateStr, nextStatus, notifyError, prevStatus, statusColor, statusLabel } from './common'
+import { dateStr, notifyError, orderPhaseLabel, phaseTagColor, statusLabel } from './common'
 import type { Paged } from './common'
 
 interface Customer {
@@ -32,6 +32,8 @@ interface SalesOrder {
   customerId: number
   deliveryDate: string
   status: string
+  purchasing?: boolean
+  producing?: boolean
   customer: { name: string }
   items: OrderItem[]
 }
@@ -147,7 +149,7 @@ export default function Orders() {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      render: (v: string) => <Tag color={statusColor(v)}>{statusLabel(v)}</Tag>,
+      render: (_: unknown, r: SalesOrder) => <Tag color={phaseTagColor(r)}>{orderPhaseLabel(r)}</Tag>,
     },
     { title: '交期', dataIndex: 'deliveryDate', key: 'deliveryDate', render: dateStr },
     {
@@ -160,9 +162,14 @@ export default function Orders() {
       title: '操作',
       key: 'action',
       render: (_: unknown, r: SalesOrder) => {
-        const next = nextStatus(r.status)
-        const prev = prevStatus(r.status)
         if (!canAdvance) return null
+        // 新分工：销售/老板 草稿↔已确认、已出货→已完成；老板额外可强制回退运作中订单到已确认
+        const nextMap: Record<string, string> = { draft: 'confirmed', shipped: 'completed' }
+        const prevMap: Record<string, string> = { confirmed: 'draft' }
+        const bossPrev: Record<string, string> = { in_production: 'confirmed', ready: 'confirmed' }
+        const isBoss = user?.role === 'boss'
+        const next = nextMap[r.status] ?? null
+        const prev = isBoss ? (bossPrev[r.status] ?? prevMap[r.status] ?? null) : (prevMap[r.status] ?? null)
         return (
           <Space>
             {next ? (
@@ -184,13 +191,17 @@ export default function Orders() {
             ) : null}
             {prev ? (
               <Popconfirm
-                title={'确认回退到「' + statusLabel(prev) + '」？'}
+                title={
+                  isBoss && r.status !== 'confirmed'
+                    ? '确认强制回退到已确认？采购中/生产中将熄灭（紧急兜底）'
+                    : '确认回退到「' + statusLabel(prev) + '」？'
+                }
                 okText="确认回退"
                 cancelText="取消"
                 onConfirm={() => void handleStatusChange(r.id, prev, 'rollback')}
               >
                 <Button size="small" loading={advancingId === r.id}>
-                  回退至「{statusLabel(prev)}」
+                  {isBoss && r.status !== 'confirmed' ? '强制回退至已确认' : '回退至「' + statusLabel(prev) + '」'}
                 </Button>
               </Popconfirm>
             ) : null}

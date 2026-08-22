@@ -5,6 +5,7 @@ import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { bomExplode, computePurchaseGap } from '../domain/bom'
 import { applyStockChange } from '../domain/inventory'
+import { markPurchasingStarted, refreshPurchasingPhase } from '../domain/order-phase'
 import { prismaErrorInfo } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
 
@@ -27,9 +28,13 @@ const createPurchaseOrderSchema = z.object({
   items: z.array(purchaseItemSchema, { error: '明细必填' }).min(1, '采购单至少包含一个明细'),
 })
 
+// 批量生成允许行级供应商覆盖（未挂供应商的零件可在弹窗里现选，不强制先写回零件资料）
+const batchItemSchema = purchaseItemSchema.extend({
+  supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
+})
 const batchPurchaseOrderSchema = z.object({
   salesOrderId: z.number().int().positive().optional(),
-  items: z.array(purchaseItemSchema, { error: '明细必填' }).min(1, '采购单至少包含一个明细'),
+  items: z.array(batchItemSchema, { error: '明细必填' }).min(1, '采购单至少包含一个明细'),
 })
 
 const receiptSchema = z.object({
@@ -115,6 +120,7 @@ export function purchasingRoutes(app: FastifyInstance) {
     }
     const requirements = [...requiredMap.entries()].map(([partId, requiredQty]) => ({ partId, requiredQty }))
     const partIds = requirements.map((r) => r.partId)
+    const totalOrderQty = order.items.reduce((sum, it) => sum + it.qty, 0)
 
     const [parts, stocks] = await Promise.all([
       prisma.part.findMany({
@@ -136,6 +142,8 @@ export function purchasingRoutes(app: FastifyInstance) {
         partName: part?.name ?? '',
         supplierId: part?.supplierId ?? null,
         supplierName: part?.supplier?.name ?? '',
+        price: part?.price != null ? part.price.toNumber() : null,
+        usage: totalOrderQty > 0 ? r.requiredQty / totalOrderQty : 0,
         requiredQty: r.requiredQty,
         onHand,
         gapQty: gapMap.get(r.partId) ?? 0,
@@ -246,6 +254,8 @@ export function purchasingRoutes(app: FastifyInstance) {
           data: { purchaseOrderId: created.id, partId: item.partId, qty: item.qty, unitPrice: item.unitPrice },
         })
       }
+      // 挂销售订单的采购单：点亮订单「采购中」
+      await markPurchasingStarted(tx, data.salesOrderId)
       return tx.purchaseOrder.findUniqueOrThrow({
         where: { id: created.id },
         include: {
@@ -275,7 +285,11 @@ export function purchasingRoutes(app: FastifyInstance) {
     })
     const partMap = new Map(parts.map((p) => [p.id, p]))
 
-    const missingSupplier = data.items.filter((item) => !partMap.get(item.partId)?.supplierId)
+    // 供应商来源：行级覆盖 > 零件资料；两者都没有才报错
+    const missingSupplier = data.items.filter((item) => {
+      const part = partMap.get(item.partId)
+      return !(item.supplierId ?? part?.supplierId)
+    })
     if (missingSupplier.length > 0) {
       const names = missingSupplier
         .map((item) => partMap.get(item.partId)?.name ?? String(item.partId))
@@ -285,7 +299,7 @@ export function purchasingRoutes(app: FastifyInstance) {
 
     const groups = new Map<number, { partId: number; qty: number; unitPrice: number }[]>()
     for (const item of data.items) {
-      const supplierId = partMap.get(item.partId)!.supplierId!
+      const supplierId = item.supplierId ?? partMap.get(item.partId)!.supplierId!
       const list = groups.get(supplierId) ?? []
       list.push(item)
       groups.set(supplierId, list)
@@ -316,6 +330,8 @@ export function purchasingRoutes(app: FastifyInstance) {
           }),
         )
       }
+      // 挂销售订单的采购单：点亮订单「采购中」
+      await markPurchasingStarted(tx, data.salesOrderId)
       return createdOrders
     })
 
@@ -382,6 +398,8 @@ export function purchasingRoutes(app: FastifyInstance) {
         } else if (anyReceived) {
           await tx.purchaseOrder.update({ where: { id: purchaseOrder.id }, data: { status: 'partial' } })
         }
+        // 刷新订单「采购中」：全部采购单收齐自动熄灭，两阶段都完成自动推进待出货
+        await refreshPurchasingPhase(tx, purchaseOrder.salesOrderId)
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : '收货失败'
