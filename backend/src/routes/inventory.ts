@@ -216,17 +216,44 @@ export function inventoryRoutes(app: FastifyInstance) {
     const defectiveMap = new Map<number, number>(
       defectiveGroup.map((g) => [g.partId, g._sum.defectiveQty ?? 0]),
     )
+    // 退补货按零件汇总：已退/已补，用于不良品实时联动与应补计算
+    const rrGroup = await prisma.returnReplenish.groupBy({
+      by: ['partId'],
+      _sum: { returnQty: true, replenishQty: true },
+    })
+    const returnedMap = new Map<number, number>(rrGroup.map((g) => [g.partId, g._sum.returnQty ?? 0]))
+    const replenishedMap = new Map<number, number>(rrGroup.map((g) => [g.partId, g._sum.replenishQty ?? 0]))
 
     const rows = stocks.map((s) => {
       const master = s.itemType === 'part' ? partMap.get(s.itemId) : productMap.get(s.itemId)
+      if (s.itemType === 'product') {
+        return {
+          itemType: s.itemType,
+          itemId: s.itemId,
+          name: master?.name ?? productNameMap.get(s.itemId) ?? '',
+          sku: master?.sku ?? '',
+          imageUrl: master?.imageUrl ?? '',
+          qtyOnHand: s.qtyOnHand,
+          defectiveQty: 0,
+          returnedQty: 0,
+          replenishedQty: 0,
+          pendingReplenishQty: 0,
+        }
+      }
+      const receivedDefective = defectiveMap.get(s.itemId) ?? 0
+      const returnedQty = returnedMap.get(s.itemId) ?? 0
+      const replenishedQty = replenishedMap.get(s.itemId) ?? 0
       return {
         itemType: s.itemType,
         itemId: s.itemId,
-        name: master?.name ?? (s.itemType === 'part' ? partNameMap.get(s.itemId) ?? '' : productNameMap.get(s.itemId) ?? ''),
+        name: master?.name ?? partNameMap.get(s.itemId) ?? '',
         sku: master?.sku ?? '',
         imageUrl: master?.imageUrl ?? '',
         qtyOnHand: s.qtyOnHand,
-        defectiveQty: s.itemType === 'part' ? defectiveMap.get(s.itemId) ?? 0 : 0,
+        defectiveQty: Math.max(0, receivedDefective - returnedQty),
+        returnedQty,
+        replenishedQty,
+        pendingReplenishQty: Math.max(0, returnedQty - replenishedQty),
       }
     })
 

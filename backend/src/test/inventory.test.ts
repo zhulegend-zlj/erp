@@ -110,6 +110,72 @@ describe('inventory', () => {
     expect(productRow).toMatchObject({ itemType: 'product', itemId: product.id, name: '成品柜', qtyOnHand: 8, defectiveQty: 0 })
   })
 
+  it('库存列表不良品与退补货实时联动，并返回已退/已补/应补', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商-RR' } })
+    const part = await prisma.part.create({ data: { sku: 'P-RR', name: '联动零件', supplierId: supplier.id } })
+    const product = await prisma.product.create({ data: { sku: 'F-RR', name: '联动成品' } })
+    await prisma.stock.createMany({
+      data: [
+        { itemType: 'part', itemId: part.id, qtyOnHand: 50 },
+        { itemType: 'product', itemId: product.id, qtyOnHand: 8 },
+      ],
+    })
+    // 收货不良 10
+    await prisma.receipt.create({ data: { partId: part.id, qty: 20, defectiveQty: 10 } })
+    // 退补货：退 3 补 2 + 退 5 补 0 => 已退 8、已补 2、应补 6、不良 10-8=2
+    await prisma.returnReplenish.createMany({
+      data: [
+        { partId: part.id, supplierId: supplier.id, returnQty: 3, replenishQty: 2 },
+        { partId: part.id, supplierId: supplier.id, returnQty: 5, replenishQty: 0 },
+      ],
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'finance')
+    const res = await app.inject({ method: 'GET', url: '/api/stock', headers: { cookie } })
+    expect(res.statusCode).toBe(200)
+    const rows = res.json()
+    const partRow = rows.find((r: any) => r.itemType === 'part' && r.itemId === part.id)
+    const productRow = rows.find((r: any) => r.itemType === 'product' && r.itemId === product.id)
+    expect(partRow).toMatchObject({
+      itemType: 'part',
+      itemId: part.id,
+      qtyOnHand: 50,
+      defectiveQty: 2,
+      returnedQty: 8,
+      replenishedQty: 2,
+      pendingReplenishQty: 6,
+    })
+    expect(productRow).toMatchObject({
+      itemType: 'product',
+      itemId: product.id,
+      qtyOnHand: 8,
+      defectiveQty: 0,
+      returnedQty: 0,
+      replenishedQty: 0,
+      pendingReplenishQty: 0,
+    })
+  })
+
+  it('库存列表不良品不足退货时不出现负数', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商-RR2' } })
+    const part = await prisma.part.create({ data: { sku: 'P-RR2', name: '负数零件', supplierId: supplier.id } })
+    await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 10 } })
+    await prisma.receipt.create({ data: { partId: part.id, qty: 5, defectiveQty: 1 } })
+    await prisma.returnReplenish.create({ data: { partId: part.id, supplierId: supplier.id, returnQty: 2 } })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'finance')
+    const res = await app.inject({ method: 'GET', url: '/api/stock', headers: { cookie } })
+    expect(res.statusCode).toBe(200)
+    const rows = res.json()
+    const partRow = rows.find((r: any) => r.itemType === 'part' && r.itemId === part.id)
+    expect(partRow).toMatchObject({
+      defectiveQty: 0,
+      returnedQty: 2,
+      replenishedQty: 0,
+      pendingReplenishQty: 2,
+    })
+  })
+
   it('出入库流水按时间升序返回', async () => {
     const product = await prisma.product.create({ data: { sku: 'F8-LED', name: '成品LED' } })
     const part = await prisma.part.create({ data: { sku: 'P8-A', name: '木板' } })

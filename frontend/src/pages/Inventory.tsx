@@ -55,6 +55,9 @@ interface StockRow {
   imageUrl: string
   qtyOnHand: number
   defectiveQty?: number
+  returnedQty?: number
+  replenishedQty?: number
+  pendingReplenishQty?: number
 }
 
 interface PurchaseOrderOption {
@@ -954,6 +957,16 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
             render: (v: number | undefined) =>
               v && v > 0 ? <Tag color="red">{v}</Tag> : 0,
           },
+          { title: '已退', dataIndex: 'returnedQty', key: 'returnedQty', width: 80 },
+          { title: '已补', dataIndex: 'replenishedQty', key: 'replenishedQty', width: 80 },
+          {
+            title: '应补',
+            dataIndex: 'pendingReplenishQty',
+            key: 'pendingReplenishQty',
+            width: 80,
+            render: (v: number | undefined) =>
+              v && v > 0 ? <Tag color="orange">{v}</Tag> : 0,
+          },
         ]}
       />
     </div>
@@ -1285,6 +1298,7 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
   const [pos, setPos] = useState<PoForRR[]>([])
   const [stockMap, setStockMap] = useState<Map<number, number>>(new Map())
+  const [defectiveMap, setDefectiveMap] = useState<Map<number, number>>(new Map())
   const [boundPo, setBoundPo] = useState<PoForRR | null>(null)
   const [poPartIds, setPoPartIds] = useState<Set<number> | null>(null)
   const [lotNoOptions, setLotNoOptions] = useState<{ value: string }[]>([])
@@ -1338,6 +1352,7 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
       setSuppliers(s.data)
       setPos(po.data)
       setStockMap(new Map(stockRows.map((sr) => [sr.itemId, sr.qtyOnHand])))
+      setDefectiveMap(new Map(stockRows.map((sr) => [sr.itemId, sr.defectiveQty ?? 0])))
     } catch (err) {
       notifyError(err)
     } finally {
@@ -1452,6 +1467,7 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
             {watchedPartId ? (
               <div style={{ marginTop: -12, marginBottom: 8, color: '#666' }}>
                 当前库存 {stockMap.get(watchedPartId) ?? 0}
+                <span style={{ marginLeft: 8 }}>不良品 {defectiveMap.get(watchedPartId) ?? 0}</span>
               </div>
             ) : null}
           </Col>
