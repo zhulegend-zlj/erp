@@ -517,4 +517,29 @@ export function purchasingRoutes(app: FastifyInstance) {
     const updated = await prisma.receipt.update({ where: { id }, data })
     return reply.code(200).send(updated)
   })
+
+  // 撤销收货：库存反向扣回，原流水保留，新增 void 冲销流水
+  app.delete('/api/receipts/:id', { preHandler: requireRole('warehouse', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '收货记录 ID 必须为正整数' })
+    try {
+      await prisma.$transaction(async (tx) => {
+        const record = await tx.receipt.findUnique({ where: { id } })
+        if (!record) throw new Error('收货记录不存在')
+        const po = record.purchaseOrderId != null
+          ? await tx.purchaseOrder.findUnique({ where: { id: record.purchaseOrderId }, select: { salesOrderId: true } })
+          : null
+        await applyStockChange(tx, 'part', record.partId, -record.qty, 'void', id, po?.salesOrderId ?? null)
+        await tx.receipt.delete({ where: { id } })
+      })
+      return reply.code(200).send({ ok: true })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '撤销收货失败'
+      if (message.includes('收货记录不存在')) return reply.code(404).send({ error: message })
+      if (message.includes('库存不足')) return reply.code(400).send({ error: '该记录已被后续领用/使用，无法撤销' })
+      const info = prismaErrorInfo(err)
+      if (info) return reply.code(info.status).send({ error: info.message })
+      return reply.code(500).send({ error: '撤销收货失败，请稍后重试' })
+    }
+  })
 }

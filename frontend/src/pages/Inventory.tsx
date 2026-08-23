@@ -10,6 +10,7 @@ import {
   Col,
   InputNumber,
   Modal,
+  Popconfirm,
   Row,
   Select,
   Space,
@@ -108,6 +109,27 @@ interface ReceiptRecord {
   qcStatus: string | null
   defectiveQty: number
   receivedAt: string
+}
+
+interface IssueRecord {
+  id: number
+  partId: number
+  sku: string
+  name: string
+  qty: number
+  issuedBy: string
+  orderNo: string
+  issuedAt: string
+}
+
+interface ProductionEntryRecord {
+  id: number
+  productId: number
+  sku: string
+  name: string
+  qty: number
+  orderNo: string
+  entryDate: string
 }
 
 function ReceiptForm({ parts, suppliers, onDone }: { parts: Part[]; suppliers: SupplierOption[]; onDone?: () => void }) {
@@ -345,7 +367,8 @@ function ReceiptForm({ parts, suppliers, onDone }: { parts: Part[]; suppliers: S
 
 
 // 收货记录 QC 补录：收货入库后补充 QC 状态/不良品数量/来料单号（不良品仅作记录，不改库存）
-function QcPanel({ refreshToken }: { refreshToken: number }) {
+function QcPanel({ refreshToken, onDone }: { refreshToken: number; onDone?: () => void }) {
+  const { user } = useAuth()
   const [rows, setRows] = useState<ReceiptRecord[]>([])
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
@@ -354,6 +377,7 @@ function QcPanel({ refreshToken }: { refreshToken: number }) {
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm<{ qcStatus?: string; defectiveQty?: number; lotNo?: string }>()
   const [pageSize, setPageSize] = useState(10)
+  const canVoid = user?.role === 'warehouse' || user?.role === 'boss'
 
   async function load(targetPage = 1, size?: number) {
     setLoading(true)
@@ -404,6 +428,17 @@ function QcPanel({ refreshToken }: { refreshToken: number }) {
       notifyError(err)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function onVoid(r: ReceiptRecord) {
+    try {
+      await api.delete('/receipts/' + r.id)
+      message.success('已撤销')
+      await load(page)
+      onDone?.()
+    } catch (err) {
+      notifyError(err)
     }
   }
 
@@ -470,11 +505,26 @@ function QcPanel({ refreshToken }: { refreshToken: number }) {
           {
             title: '操作',
             key: 'action',
-            width: 100,
+            width: 180,
             render: (_: unknown, r: ReceiptRecord) => (
-              <Button size="small" onClick={() => openEdit(r)}>
-                QC 补录
-              </Button>
+              <Space size={4}>
+                <Button size="small" onClick={() => openEdit(r)}>
+                  QC 补录
+                </Button>
+                {canVoid ? (
+                  <Popconfirm
+                    title="撤销这条收货？"
+                    description="库存将扣回对应数量"
+                    onConfirm={() => void onVoid(r)}
+                    okText="撤销"
+                    okButtonProps={{ danger: true }}
+                  >
+                    <Button size="small" danger>
+                      撤销
+                    </Button>
+                  </Popconfirm>
+                ) : null}
+              </Space>
             ),
           },
         ]}
@@ -839,6 +889,203 @@ function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; pr
         提交入库
       </Button>
     </Form>
+  )
+}
+
+function RecentIssues({ refreshToken, onDone }: { refreshToken?: number; onDone?: () => void }) {
+  const { user } = useAuth()
+  const [rows, setRows] = useState<IssueRecord[]>([])
+  const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [pageSize, setPageSize] = useState(10)
+  const canVoid = user?.role === 'warehouse' || user?.role === 'boss'
+
+  async function load(targetPage = 1, size?: number) {
+    setLoading(true)
+    try {
+      const ps = size ?? pageSize
+      const { data } = await api.get<Paged<IssueRecord>>('/issues', {
+        params: { page: targetPage, pageSize: ps },
+      })
+      setRows(data.items)
+      setTotal(data.total)
+      setPage(data.page)
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken])
+
+  async function onVoid(r: IssueRecord) {
+    try {
+      await api.delete('/issues/' + r.id)
+      message.success('已撤销')
+      await load(page)
+      onDone?.()
+    } catch (err) {
+      notifyError(err)
+    }
+  }
+
+  return (
+    <Card title="最近领料记录" size="small" style={{ marginTop: 16 }}>
+      <Table<IssueRecord>
+        rowKey="id"
+        size="small"
+        loading={loading}
+        dataSource={rows}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          onChange: (p, s) => {
+            if (s !== pageSize) {
+              setPageSize(s)
+              void load(1, s)
+            } else {
+              void load(p)
+            }
+          },
+        }}
+        columns={[
+          { title: '时间', dataIndex: 'issuedAt', key: 'issuedAt', render: dateTimeStr, width: 150 },
+          {
+            title: '物料',
+            key: 'part',
+            render: (_: unknown, r: IssueRecord) => r.sku + '　' + r.name,
+          },
+          { title: '数量', dataIndex: 'qty', key: 'qty' },
+          { title: '领料人', dataIndex: 'issuedBy', key: 'issuedBy' },
+          { title: '订单号', dataIndex: 'orderNo', key: 'orderNo' },
+          {
+            title: '操作',
+            key: 'action',
+            width: 80,
+            render: (_: unknown, r: IssueRecord) =>
+              canVoid ? (
+                <Popconfirm
+                  title="撤销这条领料？"
+                  description="库存将加回对应数量"
+                  onConfirm={() => void onVoid(r)}
+                  okText="撤销"
+                  okButtonProps={{ danger: true }}
+                >
+                  <Button size="small" danger>
+                    撤销
+                  </Button>
+                </Popconfirm>
+              ) : null,
+          },
+        ]}
+      />
+    </Card>
+  )
+}
+
+function RecentProductions({ refreshToken, onDone }: { refreshToken?: number; onDone?: () => void }) {
+  const { user } = useAuth()
+  const [rows, setRows] = useState<ProductionEntryRecord[]>([])
+  const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [pageSize, setPageSize] = useState(10)
+  const canVoid = user?.role === 'warehouse' || user?.role === 'boss'
+
+  async function load(targetPage = 1, size?: number) {
+    setLoading(true)
+    try {
+      const ps = size ?? pageSize
+      const { data } = await api.get<Paged<ProductionEntryRecord>>('/production-entries', {
+        params: { page: targetPage, pageSize: ps },
+      })
+      setRows(data.items)
+      setTotal(data.total)
+      setPage(data.page)
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken])
+
+  async function onVoid(r: ProductionEntryRecord) {
+    try {
+      await api.delete('/production-entries/' + r.id)
+      message.success('已撤销')
+      await load(page)
+      onDone?.()
+    } catch (err) {
+      notifyError(err)
+    }
+  }
+
+  return (
+    <Card title="最近入库记录" size="small" style={{ marginTop: 16 }}>
+      <Table<ProductionEntryRecord>
+        rowKey="id"
+        size="small"
+        loading={loading}
+        dataSource={rows}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          onChange: (p, s) => {
+            if (s !== pageSize) {
+              setPageSize(s)
+              void load(1, s)
+            } else {
+              void load(p)
+            }
+          },
+        }}
+        columns={[
+          { title: '时间', dataIndex: 'entryDate', key: 'entryDate', render: dateTimeStr, width: 150 },
+          {
+            title: '成品',
+            key: 'product',
+            render: (_: unknown, r: ProductionEntryRecord) => r.sku + '　' + r.name,
+          },
+          { title: '数量', dataIndex: 'qty', key: 'qty' },
+          { title: '订单号', dataIndex: 'orderNo', key: 'orderNo' },
+          {
+            title: '操作',
+            key: 'action',
+            width: 80,
+            render: (_: unknown, r: ProductionEntryRecord) =>
+              canVoid ? (
+                <Popconfirm
+                  title="撤销这条入库？"
+                  description="库存将扣回对应数量"
+                  onConfirm={() => void onVoid(r)}
+                  okText="撤销"
+                  okButtonProps={{ danger: true }}
+                >
+                  <Button size="small" danger>
+                    撤销
+                  </Button>
+                </Popconfirm>
+              ) : null,
+          },
+        ]}
+      />
+    </Card>
   )
 }
 
@@ -1294,6 +1541,7 @@ interface PoForRR {
 }
 
 function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => void }) {
+  const { user } = useAuth()
   const [rows, setRows] = useState<ReturnReplenishRow[]>([])
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
   const [pos, setPos] = useState<PoForRR[]>([])
@@ -1319,6 +1567,7 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
     note?: string
   }>()
   const watchedPartId = Form.useWatch('partId', form)
+  const canVoid = user?.role === 'warehouse' || user?.role === 'boss'
 
   async function load(targetPage = 1, size?: number) {
     setLoading(true)
@@ -1426,6 +1675,17 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
       notifyError(err)
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function onVoid(r: ReturnReplenishRow) {
+    try {
+      await api.delete('/return-replenishments/' + r.id)
+      message.success('已撤销')
+      onDone?.()
+      await load(page)
+    } catch (err) {
+      notifyError(err)
     }
   }
 
@@ -1574,6 +1834,25 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
           { title: '采购单号', dataIndex: 'purchaseOrderNo', key: 'purchaseOrderNo' },
           { title: '来料单号', dataIndex: 'lotNo', key: 'lotNo' },
           { title: '备注', dataIndex: 'note', key: 'note' },
+          {
+            title: '操作',
+            key: 'action',
+            width: 80,
+            render: (_: unknown, r: ReturnReplenishRow) =>
+              canVoid ? (
+                <Popconfirm
+                  title="撤销这条退补货？"
+                  description="退货数量将加回库存，补货数量将扣回库存"
+                  onConfirm={() => void onVoid(r)}
+                  okText="撤销"
+                  okButtonProps={{ danger: true }}
+                >
+                  <Button size="small" danger>
+                    撤销
+                  </Button>
+                </Popconfirm>
+              ) : null,
+          },
         ]}
       />
     </div>
@@ -1742,39 +2021,60 @@ export default function Inventory() {
       .catch(notifyError)
   }, [])
 
-  const canOperate = user?.role === 'warehouse'
+  const canManage = user?.role === 'warehouse' || user?.role === 'boss'
+  const isWarehouse = user?.role === 'warehouse'
 
   const items = [
-    ...(canOperate
+    ...(canManage
       ? [
           {
             key: 'receipt',
             label: '收货入库',
             children: (
               <>
-                <ReceiptForm
-                  parts={parts}
-                  suppliers={suppliers}
-                  onDone={() => setRefreshToken((t) => t + 1)}
-                />
-                <QcPanel refreshToken={refreshToken} />
+                {isWarehouse ? (
+                  <ReceiptForm
+                    parts={parts}
+                    suppliers={suppliers}
+                    onDone={() => setRefreshToken((t) => t + 1)}
+                  />
+                ) : (
+                  <Alert type="info" showIcon message="当前为只读（老板），可在下方撤销误登记记录。" />
+                )}
+                <QcPanel refreshToken={refreshToken} onDone={() => setRefreshToken((t) => t + 1)} />
               </>
             ),
           },
           {
             key: 'issue',
             label: '领料出库',
-            children: <IssueForm orders={orders} parts={parts} onDone={() => setRefreshToken((t) => t + 1)} />,
+            children: (
+              <>
+                {isWarehouse ? (
+                  <IssueForm orders={orders} parts={parts} onDone={() => setRefreshToken((t) => t + 1)} />
+                ) : (
+                  <Alert type="info" showIcon message="当前为只读（老板），可在下方撤销误登记记录。" />
+                )}
+                <RecentIssues refreshToken={refreshToken} onDone={() => setRefreshToken((t) => t + 1)} />
+              </>
+            ),
           },
           {
             key: 'production',
             label: '成品入库',
             children: (
-              <ProductionForm
-                orders={orders}
-                products={products}
-                onDone={() => setRefreshToken((t) => t + 1)}
-              />
+              <>
+                {isWarehouse ? (
+                  <ProductionForm
+                    orders={orders}
+                    products={products}
+                    onDone={() => setRefreshToken((t) => t + 1)}
+                  />
+                ) : (
+                  <Alert type="info" showIcon message="当前为只读（老板），可在下方撤销误登记记录。" />
+                )}
+                <RecentProductions refreshToken={refreshToken} onDone={() => setRefreshToken((t) => t + 1)} />
+              </>
             ),
           },
         ]
@@ -1804,7 +2104,7 @@ export default function Inventory() {
 
   return (
     <Card title="库存管理">
-      <Tabs defaultActiveKey={canOperate ? 'receipt' : 'stock'} items={items} />
+      <Tabs defaultActiveKey={canManage ? 'receipt' : 'stock'} items={items} />
     </Card>
   )
 }

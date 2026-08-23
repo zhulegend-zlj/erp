@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
-import { prismaErrorInfo } from '../errors'
+import { parsePositiveInt, prismaErrorInfo } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
 
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
@@ -119,6 +119,33 @@ export function returnReplenishRoutes(app: FastifyInstance) {
       const info = prismaErrorInfo(err)
       if (info) return reply.code(info.status).send({ error: info.message })
       return reply.code(500).send({ error: '退补货失败，请稍后重试' })
+    }
+  })
+
+  // 撤销退补货：退货数量加回、补货数量扣回，原流水保留，新增 void 冲销流水
+  app.delete('/api/return-replenishments/:id', { preHandler: requireRole('warehouse', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '退补货记录 ID 必须为正整数' })
+    try {
+      await prisma.$transaction(async (tx) => {
+        const record = await tx.returnReplenish.findUnique({ where: { id } })
+        if (!record) throw new Error('退补货记录不存在')
+        if (record.returnQty > 0) {
+          await applyStockChange(tx, 'part', record.partId, record.returnQty, 'void', id)
+        }
+        if (record.replenishQty > 0) {
+          await applyStockChange(tx, 'part', record.partId, -record.replenishQty, 'void', id)
+        }
+        await tx.returnReplenish.delete({ where: { id } })
+      })
+      return reply.code(200).send({ ok: true })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '撤销退补货失败'
+      if (message.includes('退补货记录不存在')) return reply.code(404).send({ error: message })
+      if (message.includes('库存不足')) return reply.code(400).send({ error: '该记录已被后续领用/使用，无法撤销' })
+      const info = prismaErrorInfo(err)
+      if (info) return reply.code(info.status).send({ error: info.message })
+      return reply.code(500).send({ error: '撤销退补货失败，请稍后重试' })
     }
   })
 }

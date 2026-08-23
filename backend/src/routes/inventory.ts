@@ -100,6 +100,59 @@ export function inventoryRoutes(app: FastifyInstance) {
     }
   })
 
+  // 最近领料记录：仓库/boss 可查（撤销页用），按发料时间倒序分页
+  app.get('/api/issues', { preHandler: requireRole('warehouse', 'boss') }, async (req, reply) => {
+    const pagination = parsePagination(req.query as Record<string, unknown>)
+    if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
+    const include = {
+      part: { select: { id: true, sku: true, name: true } },
+      salesOrder: { select: { id: true, orderNo: true } },
+    } as const
+    const orderBy = [{ issuedAt: 'desc' as const }, { id: 'desc' as const }]
+    const toRow = (r: any) => ({
+      id: r.id,
+      partId: r.partId,
+      sku: r.part.sku,
+      name: r.part.name,
+      qty: r.qty,
+      issuedBy: r.issuedBy,
+      orderNo: r.salesOrder.orderNo,
+      issuedAt: r.issuedAt,
+    })
+    if (pagination.kind === 'none') {
+      const rows = await prisma.issue.findMany({ include, orderBy })
+      return rows.map(toRow)
+    }
+    const page = pagination.page
+    const [rows, total] = await Promise.all([
+      prisma.issue.findMany({ include, orderBy, skip: (page.page - 1) * page.pageSize, take: page.pageSize }),
+      prisma.issue.count(),
+    ])
+    return pagedResult(rows.map(toRow), total, page)
+  })
+
+  // 撤销领料：库存反向加回，原流水保留，新增 void 冲销流水
+  app.delete('/api/issues/:id', { preHandler: requireRole('warehouse', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '领料记录 ID 必须为正整数' })
+    try {
+      await prisma.$transaction(async (tx) => {
+        const record = await tx.issue.findUnique({ where: { id } })
+        if (!record) throw new Error('领料记录不存在')
+        await applyStockChange(tx, 'part', record.partId, record.qty, 'void', id, record.salesOrderId)
+        await tx.issue.delete({ where: { id } })
+      })
+      return reply.code(200).send({ ok: true })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '撤销领料失败'
+      if (message.includes('领料记录不存在')) return reply.code(404).send({ error: message })
+      if (message.includes('库存不足')) return reply.code(400).send({ error: '该记录已被后续领用/使用，无法撤销' })
+      const info = prismaErrorInfo(err)
+      if (info) return reply.code(info.status).send({ error: info.message })
+      return reply.code(500).send({ error: '撤销领料失败，请稍后重试' })
+    }
+  })
+
   // 成品入库：仅 warehouse
   app.post('/api/production-entries', { preHandler: requireRole('warehouse') }, async (req, reply) => {
     const data = parseBody(productionEntrySchema, req.body, reply)
@@ -143,6 +196,58 @@ export function inventoryRoutes(app: FastifyInstance) {
       const info = prismaErrorInfo(err)
       if (info) return reply.code(info.status).send({ error: info.message })
       return reply.code(500).send({ error: '成品入库失败，请稍后重试' })
+    }
+  })
+
+  // 最近成品入库记录：仓库/boss 可查（撤销页用），按入库时间倒序分页
+  app.get('/api/production-entries', { preHandler: requireRole('warehouse', 'boss') }, async (req, reply) => {
+    const pagination = parsePagination(req.query as Record<string, unknown>)
+    if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
+    const include = {
+      product: { select: { id: true, sku: true, name: true } },
+      salesOrder: { select: { id: true, orderNo: true } },
+    } as const
+    const orderBy = [{ entryDate: 'desc' as const }, { id: 'desc' as const }]
+    const toRow = (r: any) => ({
+      id: r.id,
+      productId: r.productId,
+      sku: r.product.sku,
+      name: r.product.name,
+      qty: r.qty,
+      orderNo: r.salesOrder.orderNo,
+      entryDate: r.entryDate,
+    })
+    if (pagination.kind === 'none') {
+      const rows = await prisma.productionEntry.findMany({ include, orderBy })
+      return rows.map(toRow)
+    }
+    const page = pagination.page
+    const [rows, total] = await Promise.all([
+      prisma.productionEntry.findMany({ include, orderBy, skip: (page.page - 1) * page.pageSize, take: page.pageSize }),
+      prisma.productionEntry.count(),
+    ])
+    return pagedResult(rows.map(toRow), total, page)
+  })
+
+  // 撤销成品入库：库存反向扣回，原流水保留，新增 void 冲销流水
+  app.delete('/api/production-entries/:id', { preHandler: requireRole('warehouse', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '成品入库记录 ID 必须为正整数' })
+    try {
+      await prisma.$transaction(async (tx) => {
+        const record = await tx.productionEntry.findUnique({ where: { id } })
+        if (!record) throw new Error('成品入库记录不存在')
+        await applyStockChange(tx, 'product', record.productId, -record.qty, 'void', id, record.salesOrderId)
+        await tx.productionEntry.delete({ where: { id } })
+      })
+      return reply.code(200).send({ ok: true })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '撤销成品入库失败'
+      if (message.includes('成品入库记录不存在')) return reply.code(404).send({ error: message })
+      if (message.includes('库存不足')) return reply.code(400).send({ error: '该记录已被后续使用，无法撤销' })
+      const info = prismaErrorInfo(err)
+      if (info) return reply.code(info.status).send({ error: info.message })
+      return reply.code(500).send({ error: '撤销成品入库失败，请稍后重试' })
     }
   })
 

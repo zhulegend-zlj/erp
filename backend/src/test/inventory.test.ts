@@ -424,4 +424,144 @@ describe('inventory', () => {
     })
     expect(badId.statusCode).toBe(400)
   })
+
+  it('撤销收货扣回库存并保留冲销流水', async () => {
+    const part = await prisma.part.create({ data: { sku: 'P-VOID-R', name: '撤销收货零件' } })
+    await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 50 } })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    const created = await app.inject({
+      method: 'POST', url: '/api/receipts', headers: { cookie },
+      payload: { items: [{ partId: part.id, qty: 20 }] },
+    })
+    expect(created.statusCode).toBe(200)
+    let stock = await prisma.stock.findUnique({ where: { itemType_itemId: { itemType: 'part', itemId: part.id } } })
+    expect(stock?.qtyOnHand).toBe(70)
+    const receipt = await prisma.receipt.findFirst({ where: { partId: part.id } })
+    const res = await app.inject({ method: 'DELETE', url: '/api/receipts/' + receipt!.id, headers: { cookie } })
+    expect(res.statusCode).toBe(200)
+    stock = await prisma.stock.findUnique({ where: { itemType_itemId: { itemType: 'part', itemId: part.id } } })
+    expect(stock?.qtyOnHand).toBe(50)
+    const voidLedger = await prisma.inventoryLedger.findFirst({ where: { refType: 'void', refId: receipt!.id } })
+    expect(voidLedger).toMatchObject({ delta: -20, balance: 50 })
+    const original = await prisma.inventoryLedger.findFirst({ where: { refType: 'receipt', refId: receipt!.id } })
+    expect(original).toMatchObject({ delta: 20, balance: 70 })
+  })
+
+  it('撤销领料加回库存', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F-VOID-I', name: '撤销领料成品' } })
+    const part = await prisma.part.create({ data: { sku: 'P-VOID-I', name: '撤销领料零件' } })
+    await prisma.bom.create({ data: { productId: product.id, partId: part.id, qty: 1 } })
+    await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 50 } })
+    const customer = await prisma.customer.create({ data: { name: '客户VOID-I' } })
+    const order = await prisma.salesOrder.create({
+      data: {
+        orderNo: 'SO-VOID-I', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
+        items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+      },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    const created = await app.inject({
+      method: 'POST', url: '/api/issues', headers: { cookie },
+      payload: { salesOrderId: order.id, issuedBy: '张组长', items: [{ partId: part.id, qty: 30 }] },
+    })
+    expect(created.statusCode).toBe(200)
+    let stock = await prisma.stock.findUnique({ where: { itemType_itemId: { itemType: 'part', itemId: part.id } } })
+    expect(stock?.qtyOnHand).toBe(20)
+    const issue = await prisma.issue.findFirst({ where: { partId: part.id } })
+    const res = await app.inject({ method: 'DELETE', url: '/api/issues/' + issue!.id, headers: { cookie } })
+    expect(res.statusCode).toBe(200)
+    stock = await prisma.stock.findUnique({ where: { itemType_itemId: { itemType: 'part', itemId: part.id } } })
+    expect(stock?.qtyOnHand).toBe(50)
+    const voidLedger = await prisma.inventoryLedger.findFirst({ where: { refType: 'void', refId: issue!.id } })
+    expect(voidLedger).toMatchObject({ delta: 30, balance: 50 })
+  })
+
+  it('撤销成品入库扣回库存', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F-VOID-P', name: '撤销入库成品' } })
+    await prisma.stock.create({ data: { itemType: 'product', itemId: product.id, qtyOnHand: 5 } })
+    const customer = await prisma.customer.create({ data: { name: '客户VOID-P' } })
+    const order = await prisma.salesOrder.create({
+      data: {
+        orderNo: 'SO-VOID-P', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
+        items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+      },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    const created = await app.inject({
+      method: 'POST', url: '/api/production-entries', headers: { cookie },
+      payload: { salesOrderId: order.id, productId: product.id, qty: 5 },
+    })
+    expect(created.statusCode).toBe(200)
+    let stock = await prisma.stock.findUnique({ where: { itemType_itemId: { itemType: 'product', itemId: product.id } } })
+    expect(stock?.qtyOnHand).toBe(10)
+    const entry = await prisma.productionEntry.findFirst({ where: { productId: product.id } })
+    const res = await app.inject({ method: 'DELETE', url: '/api/production-entries/' + entry!.id, headers: { cookie } })
+    expect(res.statusCode).toBe(200)
+    stock = await prisma.stock.findUnique({ where: { itemType_itemId: { itemType: 'product', itemId: product.id } } })
+    expect(stock?.qtyOnHand).toBe(5)
+    const voidLedger = await prisma.inventoryLedger.findFirst({ where: { refType: 'void', refId: entry!.id } })
+    expect(voidLedger).toMatchObject({ delta: -5, balance: 5 })
+  })
+
+  it('撤销退补货反向:退的加回、补的扣回', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商VOID-RR' } })
+    const part = await prisma.part.create({ data: { sku: 'P-VOID-RR', name: '退补货零件', supplierId: supplier.id } })
+    await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 30 } })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    const created = await app.inject({
+      method: 'POST', url: '/api/return-replenishments', headers: { cookie },
+      payload: { partId: part.id, supplierId: supplier.id, returnQty: 5, replenishQty: 3 },
+    })
+    expect(created.statusCode).toBe(200)
+    let stock = await prisma.stock.findUnique({ where: { itemType_itemId: { itemType: 'part', itemId: part.id } } })
+    expect(stock?.qtyOnHand).toBe(28)
+    const rr = await prisma.returnReplenish.findFirst({ where: { partId: part.id } })
+    const res = await app.inject({ method: 'DELETE', url: '/api/return-replenishments/' + rr!.id, headers: { cookie } })
+    expect(res.statusCode).toBe(200)
+    stock = await prisma.stock.findUnique({ where: { itemType_itemId: { itemType: 'part', itemId: part.id } } })
+    expect(stock?.qtyOnHand).toBe(30)
+    const voids = await prisma.inventoryLedger.findMany({ where: { refType: 'void', refId: rr!.id, itemId: part.id } })
+    expect(voids.length).toBe(2)
+    expect(voids.some((v) => v.delta === 5)).toBe(true)
+    expect(voids.some((v) => v.delta === -3)).toBe(true)
+  })
+
+  it('撤销收货但库存已被后续领用消耗时返回400', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F-VOID-B', name: '库存不足成品' } })
+    const part = await prisma.part.create({ data: { sku: 'P-VOID-B', name: '库存不足零件' } })
+    await prisma.bom.create({ data: { productId: product.id, partId: part.id, qty: 1 } })
+    await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 10 } })
+    const customer = await prisma.customer.create({ data: { name: '客户VOID-B' } })
+    const order = await prisma.salesOrder.create({
+      data: {
+        orderNo: 'SO-VOID-B', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
+        items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+      },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    const recv = await app.inject({
+      method: 'POST', url: '/api/receipts', headers: { cookie },
+      payload: { items: [{ partId: part.id, qty: 20 }] },
+    })
+    expect(recv.statusCode).toBe(200)
+    const iss = await app.inject({
+      method: 'POST', url: '/api/issues', headers: { cookie },
+      payload: { salesOrderId: order.id, issuedBy: '组长', items: [{ partId: part.id, qty: 30 }] },
+    })
+    expect(iss.statusCode).toBe(200)
+    const receipt = await prisma.receipt.findFirst({ where: { partId: part.id } })
+    const res = await app.inject({ method: 'DELETE', url: '/api/receipts/' + receipt!.id, headers: { cookie } })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('该记录已被后续领用/使用，无法撤销')
+    const stock = await prisma.stock.findUnique({ where: { itemType_itemId: { itemType: 'part', itemId: part.id } } })
+    expect(stock?.qtyOnHand).toBe(0)
+  })
 })
