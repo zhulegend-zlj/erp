@@ -208,6 +208,15 @@ export function inventoryRoutes(app: FastifyInstance) {
 
     const partMap = new Map(parts.map((p) => [p.id, p]))
     const productMap = new Map(products.map((p) => [p.id, p]))
+    // 不良品按零件汇总：收货记录 QC 补录的 defectiveQty
+    const defectiveGroup = await prisma.receipt.groupBy({
+      by: ['partId'],
+      _sum: { defectiveQty: true },
+    })
+    const defectiveMap = new Map<number, number>(
+      defectiveGroup.map((g) => [g.partId, g._sum.defectiveQty ?? 0]),
+    )
+
     const rows = stocks.map((s) => {
       const master = s.itemType === 'part' ? partMap.get(s.itemId) : productMap.get(s.itemId)
       return {
@@ -217,6 +226,7 @@ export function inventoryRoutes(app: FastifyInstance) {
         sku: master?.sku ?? '',
         imageUrl: master?.imageUrl ?? '',
         qtyOnHand: s.qtyOnHand,
+        defectiveQty: s.itemType === 'part' ? defectiveMap.get(s.itemId) ?? 0 : 0,
       }
     })
 

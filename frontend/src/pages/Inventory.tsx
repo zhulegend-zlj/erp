@@ -54,6 +54,7 @@ interface StockRow {
   sku: string
   imageUrl: string
   qtyOnHand: number
+  defectiveQty?: number
 }
 
 interface PurchaseOrderOption {
@@ -945,6 +946,14 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
           { title: '名称', dataIndex: 'name', key: 'name' },
           { title: 'ID', dataIndex: 'itemId', key: 'itemId', width: 80 },
           { title: '当前数量', dataIndex: 'qtyOnHand', key: 'qtyOnHand' },
+          {
+            title: '不良品',
+            dataIndex: 'defectiveQty',
+            key: 'defectiveQty',
+            width: 90,
+            render: (v: number | undefined) =>
+              v && v > 0 ? <Tag color="red">{v}</Tag> : 0,
+          },
         ]}
       />
     </div>
@@ -1275,6 +1284,7 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
   const [rows, setRows] = useState<ReturnReplenishRow[]>([])
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
   const [pos, setPos] = useState<PoForRR[]>([])
+  const [stockMap, setStockMap] = useState<Map<number, number>>(new Map())
   const [boundPo, setBoundPo] = useState<PoForRR | null>(null)
   const [poPartIds, setPoPartIds] = useState<Set<number> | null>(null)
   const [lotNoOptions, setLotNoOptions] = useState<{ value: string }[]>([])
@@ -1294,23 +1304,40 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
     lotNo?: string
     note?: string
   }>()
+  const watchedPartId = Form.useWatch('partId', form)
 
   async function load(targetPage = 1, size?: number) {
     setLoading(true)
     try {
       const ps = size ?? pageSize
-      const [r, s, po] = await Promise.all([
+      // 拉取全部零件库存，构建 itemId -> qtyOnHand 映射，用于退补货显示当前库存
+      const fetchStockRows = async () => {
+        const collected: StockRow[] = []
+        let p = 1
+        for (;;) {
+          const res = await api.get<Paged<StockRow>>('/stock', {
+            params: { itemType: 'part', page: p, pageSize: 200 },
+          })
+          collected.push(...res.data.items)
+          if (collected.length >= res.data.total || res.data.items.length === 0) break
+          p += 1
+        }
+        return collected
+      }
+      const [r, s, po, stockRows] = await Promise.all([
         api.get<Paged<ReturnReplenishRow>>('/return-replenishments', {
           params: { page: targetPage, pageSize: ps },
         }),
         api.get<SupplierOption[]>('/suppliers'),
         api.get<PoForRR[]>('/purchase-orders'),
+        fetchStockRows(),
       ])
       setRows(r.data.items)
       setTotal(r.data.total)
       setPage(r.data.page)
       setSuppliers(s.data)
       setPos(po.data)
+      setStockMap(new Map(stockRows.map((sr) => [sr.itemId, sr.qtyOnHand])))
     } catch (err) {
       notifyError(err)
     } finally {
@@ -1373,7 +1400,10 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
         lotNo: values.lotNo,
         note: values.note,
       })
-      message.success('退补货已登记')
+      const msgs: string[] = []
+      if ((values.returnQty ?? 0) > 0) msgs.push('退货 ' + values.returnQty + ' 已扣库存')
+      if ((values.replenishQty ?? 0) > 0) msgs.push('补货 ' + values.replenishQty + ' 已增加库存')
+      message.success(msgs.length > 0 ? msgs.join('；') : '退补货已登记')
       form.resetFields()
       onDone?.()
       await load()
@@ -1419,6 +1449,11 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
                 }))}
               />
             </Form.Item>
+            {watchedPartId ? (
+              <div style={{ marginTop: -12, marginBottom: 8, color: '#666' }}>
+                当前库存 {stockMap.get(watchedPartId) ?? 0}
+              </div>
+            ) : null}
           </Col>
           <Col span={8}>
             <Form.Item name="supplierId" label="供应商" rules={[{ required: true, message: '选择供应商' }]}>

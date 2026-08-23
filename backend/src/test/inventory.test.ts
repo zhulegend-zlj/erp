@@ -88,7 +88,7 @@ describe('inventory', () => {
     expect(entry).toMatchObject({ salesOrderId: order.id, productId: product.id, qty: 20 })
   })
 
-  it('库存列表返回 itemType/itemId/名称/qtyOnHand', async () => {
+  it('库存列表返回 itemType/itemId/名称/qtyOnHand/不良品', async () => {
     const part = await prisma.part.create({ data: { sku: 'P8-A', name: '木板' } })
     const product = await prisma.product.create({ data: { sku: 'F8-1', name: '成品柜' } })
     await prisma.stock.createMany({
@@ -97,6 +97,8 @@ describe('inventory', () => {
         { itemType: 'product', itemId: product.id, qtyOnHand: 8 }
       ]
     })
+    // 收货记录 QC 补录不良品：零件汇总为该 part 的 defectiveQty 之和，成品为 0
+    await prisma.receipt.create({ data: { partId: part.id, qty: 20, defectiveQty: 5 } })
     const app = buildApp()
     const cookie = await loginCookie(app, 'finance')
     const res = await app.inject({ method: 'GET', url: '/api/stock', headers: { cookie } })
@@ -104,8 +106,8 @@ describe('inventory', () => {
     const rows = res.json()
     const partRow = rows.find((r: any) => r.itemType === 'part' && r.itemId === part.id)
     const productRow = rows.find((r: any) => r.itemType === 'product' && r.itemId === product.id)
-    expect(partRow).toMatchObject({ itemType: 'part', itemId: part.id, name: '木板', qtyOnHand: 20 })
-    expect(productRow).toMatchObject({ itemType: 'product', itemId: product.id, name: '成品柜', qtyOnHand: 8 })
+    expect(partRow).toMatchObject({ itemType: 'part', itemId: part.id, name: '木板', qtyOnHand: 20, defectiveQty: 5 })
+    expect(productRow).toMatchObject({ itemType: 'product', itemId: product.id, name: '成品柜', qtyOnHand: 8, defectiveQty: 0 })
   })
 
   it('出入库流水按时间升序返回', async () => {
