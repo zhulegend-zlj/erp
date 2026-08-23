@@ -726,6 +726,7 @@ export function inventoryRoutes(app: FastifyInstance) {
         select: {
           id: true,
           orderNo: true,
+          supplier: { select: { name: true } },
           items: {
             include: { part: { select: { id: true, sku: true, name: true } } },
             orderBy: { partId: 'asc' as const },
@@ -740,15 +741,25 @@ export function inventoryRoutes(app: FastifyInstance) {
         bomPartMap.set(b.partId, { partId: b.partId, sku: b.part.sku, name: b.part.name })
       }
     }
+    // 汇总所有涉及零件 id，一次查询当前库存（缺省 0）
+    const allPartIds = new Set<number>()
+    for (const b of boms) allPartIds.add(b.partId)
+    for (const po of purchaseOrders) for (const it of po.items) allPartIds.add(it.partId)
+    const stockRows = await prisma.stock.findMany({
+      where: { itemType: 'part', itemId: { in: [...allPartIds] } },
+    })
+    const onHandMap = new Map(stockRows.map((s) => [s.itemId, s.qtyOnHand]))
+    const onHandOf = (partId: number) => onHandMap.get(partId) ?? 0
     return {
       orderNo: order.orderNo,
       status: order.status,
       purchaseOrders: purchaseOrders.map((po) => ({
         id: po.id,
         orderNo: po.orderNo,
-        items: po.items.map((it) => ({ partId: it.partId, sku: it.part.sku, name: it.part.name })),
+        supplierName: po.supplier?.name ?? '',
+        items: po.items.map((it) => ({ partId: it.partId, sku: it.part.sku, name: it.part.name, onHand: onHandOf(it.partId) })),
       })),
-      bomParts: [...bomPartMap.values()],
+      bomParts: [...bomPartMap.values()].map((p) => ({ ...p, onHand: onHandOf(p.partId) })),
     }
   })
 }

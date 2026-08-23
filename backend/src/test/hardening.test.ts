@@ -784,11 +784,19 @@ describe('hardening（加固回归）', () => {
         method: 'GET', url: '/api/inventory/issue-context?orderId=' + order.id, headers: { cookie },
       })
       expect(res.statusCode).toBe(200)
-      const body = res.json() as { orderNo: string; purchaseOrders: { orderNo: string; items: { partId: number; sku: string }[] }[]; bomParts: { partId: number; sku: string }[] }
+      const body = res.json() as {
+        orderNo: string
+        purchaseOrders: { orderNo: string; supplierName: string; items: { partId: number; sku: string; onHand: number }[] }[]
+        bomParts: { partId: number; sku: string; name: string; onHand: number }[]
+      }
       expect(body.orderNo).toBe('SO-IC')
       expect(body.purchaseOrders).toHaveLength(1)
-      expect(body.purchaseOrders[0]).toMatchObject({ orderNo: 'PO-IC', items: [{ partId: part.id, sku: 'P-IC' }] })
-      expect(body.bomParts).toEqual([{ partId: part.id, sku: 'P-IC', name: '零件IC' }])
+      expect(body.purchaseOrders[0]).toMatchObject({
+        orderNo: 'PO-IC',
+        supplierName: '供应商-IC',
+        items: [{ partId: part.id, sku: 'P-IC', onHand: 0 }],
+      })
+      expect(body.bomParts).toEqual([{ partId: part.id, sku: 'P-IC', name: '零件IC', onHand: 0 }])
     })
   })
 

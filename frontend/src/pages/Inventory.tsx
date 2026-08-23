@@ -376,7 +376,7 @@ function QcPanel({ refreshToken }: { refreshToken: number }) {
   function openEdit(r: ReceiptRecord) {
     setEditing(r)
     form.setFieldsValue({
-      qcStatus: r.qcStatus ?? undefined,
+      qcStatus: r.qcStatus ?? 'ok',
       defectiveQty: r.defectiveQty ?? 0,
       lotNo: r.lotNo ?? undefined,
     })
@@ -520,23 +520,25 @@ function QcPanel({ refreshToken }: { refreshToken: number }) {
 interface IssueContext {
   orderNo: string
   status: string
-  purchaseOrders: { id: number; orderNo: string; items: { partId: number; sku: string; name: string }[] }[]
-  bomParts: { partId: number; sku: string; name: string }[]
+  purchaseOrders: { id: number; orderNo: string; supplierName: string; items: { partId: number; sku: string; name: string; onHand: number }[] }[]
+  bomParts: { partId: number; sku: string; name: string; onHand: number }[]
 }
 
 interface IssueRow {
   partId?: number
   sku?: string
   name?: string
+  onHand?: number
   qty?: number | null
 }
 
 function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Part[]; onDone?: () => void }) {
   const [submitting, setSubmitting] = useState(false)
   const [context, setContext] = useState<IssueContext | null>(null)
-  const [boundPo, setBoundPo] = useState<{ orderNo: string; items: { partId: number; sku: string; name: string }[] } | null>(null)
+  const [boundPos, setBoundPos] = useState<{ orderNo: string; supplierName: string; items: { partId: number; sku: string; name: string; onHand: number }[] }[]>([])
   const [form] = Form.useForm<{
     salesOrderId?: number
+    poOrderNo?: string[]
     issuedBy?: string
     note?: string
     items?: IssueRow[]
@@ -544,9 +546,9 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
   const watchedItems = Form.useWatch('items', form) as IssueRow[] | undefined
 
   async function onOrderChange(v?: number) {
-    form.setFieldsValue({ items: undefined })
+    form.setFieldsValue({ items: undefined, poOrderNo: undefined })
     setContext(null)
-    setBoundPo(null)
+    setBoundPos([])
     if (!v) return
     try {
       const { data } = await api.get<IssueContext>('/inventory/issue-context', { params: { orderId: v } })
@@ -557,16 +559,26 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
     }
   }
 
-  async function onPoChange(orderNo?: string) {
+  async function onPoChange(orderNos?: string[]) {
     form.setFieldsValue({ items: undefined })
-    setBoundPo(null)
-    if (!orderNo || !context) return
-    const po = context.purchaseOrders.find((p) => p.orderNo === orderNo)
-    if (!po) return
-    setBoundPo(po)
-    // 自动带出该采购单的零件行，仓库只需填数量（可删行）
+    setBoundPos([])
+    if (!orderNos || orderNos.length === 0 || !context) return
+    const pos: typeof context.purchaseOrders = []
+    for (const no of orderNos) {
+      const po = context.purchaseOrders.find((p) => p.orderNo === no)
+      if (po) pos.push(po)
+    }
+    if (pos.length === 0) return
+    setBoundPos(pos)
+    // 合并选中采购单的零件行（按 partId 去重，保留 sku/name/onHand），仓库只需填数量（可删行）
+    const merged = new Map<number, { partId: number; sku: string; name: string; onHand: number }>()
+    for (const po of pos) {
+      for (const it of po.items) {
+        if (!merged.has(it.partId)) merged.set(it.partId, it)
+      }
+    }
     form.setFieldsValue({
-      items: po.items.map((it) => ({ partId: it.partId, sku: it.sku, name: it.name, qty: undefined })),
+      items: [...merged.values()].map((it) => ({ partId: it.partId, sku: it.sku, name: it.name, onHand: it.onHand, qty: undefined })),
     })
   }
 
@@ -593,9 +605,11 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
         })),
       })
       message.success('领料出库成功')
+      localStorage.setItem('erp-issue-by', values.issuedBy ?? '')
       form.resetFields()
+      form.setFieldsValue({ issuedBy: values.issuedBy ?? '' })
       setContext(null)
-      setBoundPo(null)
+      setBoundPos([])
       onDone?.()
     } catch (err) {
       notifyError(err)
@@ -604,12 +618,17 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
     }
   }
 
-  const bomPartOptions = (context ? context.bomParts : parts.map((p) => ({ partId: p.id, sku: p.sku, name: p.name }))).map(
-    (p) => ({ value: p.partId, label: p.sku + '　' + p.name }),
+  const bomPartOptions = (context ? context.bomParts : parts.map((p) => ({ partId: p.id, sku: p.sku, name: p.name, onHand: 0 }))).map(
+    (p) => ({ value: p.partId, label: p.sku + '　' + p.name, onHand: p.onHand ?? 0 }),
   )
 
   return (
-    <Form form={form} layout="vertical" onFinish={submit}>
+    <Form
+      form={form}
+      layout="vertical"
+      onFinish={submit}
+      initialValues={{ issuedBy: localStorage.getItem('erp-issue-by') ?? undefined }}
+    >
       <Space style={{ display: 'flex' }} align="start" wrap>
         <Form.Item
           name="salesOrderId"
@@ -625,6 +644,7 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
         </Form.Item>
         <Form.Item name="poOrderNo" label="采购订单（自动带出零件）" style={{ width: 280, marginBottom: 16 }}>
           <Select
+            mode="multiple"
             allowClear
             showSearch
             optionFilterProp="label"
@@ -633,7 +653,7 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
             onChange={onPoChange}
             options={(context?.purchaseOrders ?? []).map((po) => ({
               value: po.orderNo,
-              label: po.orderNo,
+              label: po.orderNo + '（' + (po.supplierName || '—') + '）',
             }))}
           />
         </Form.Item>
@@ -656,12 +676,14 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
           style={{ marginBottom: 12 }}
           message="该订单还没有采购单，可直接按 BOM 零件选择领料。"
         />
-      ) : boundPo ? (
+      ) : boundPos.length > 0 ? (
         <Alert
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message={'已绑定采购单 ' + boundPo.orderNo + '：零件已自动带出，只需填写数量，不需要的零件可删除。'}
+          message={
+            '已绑定 ' + boundPos.length + ' 张采购单（' + boundPos.map((p) => p.orderNo).join('、') + '）：零件已合并带出，只需填写数量，不需要的零件可删除。'
+          }
         />
       ) : null}
       <Form.List name="items">
@@ -669,7 +691,9 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
           <>
             {fields.map((field, index) => {
               const it = watchedItems?.[index]
-              const fromPo = !!boundPo && index < boundPo.items.length
+              const poPartIds = new Set(boundPos.flatMap((p) => p.items.map((i) => i.partId)))
+              const fromPo = !!it?.partId && poPartIds.has(it.partId)
+              const partOption = it?.partId ? bomPartOptions.find((o) => o.value === it.partId) : undefined
               return (
                 <div key={field.key} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 8 }}>
                   {fromPo ? (
@@ -677,20 +701,27 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
                       <Form.Item name={[field.name, 'partId']} hidden>
                         <Input />
                       </Form.Item>
-                      <div style={{ width: 260, lineHeight: '32px' }}>{it?.sku}　{it?.name}</div>
+                      <div style={{ width: 300, lineHeight: '32px' }}>
+                        {it?.sku}　{it?.name}　<span style={{ color: '#999' }}>库存 {it?.onHand ?? 0}</span>
+                      </div>
                     </>
                   ) : (
-                    <Form.Item
-                      name={[field.name, 'partId']}
-                      rules={[{ required: true, message: '选择零件' }]}
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Select
-                        style={{ width: 260 }}
-                        placeholder="选择零件"
-                        options={bomPartOptions}
-                      />
-                    </Form.Item>
+                    <>
+                      <Form.Item
+                        name={[field.name, 'partId']}
+                        rules={[{ required: true, message: '选择零件' }]}
+                        style={{ marginBottom: 0 }}
+                      >
+                        <Select
+                          style={{ width: 260 }}
+                          placeholder="选择零件"
+                          options={bomPartOptions}
+                        />
+                      </Form.Item>
+                      {partOption ? (
+                        <div style={{ lineHeight: '32px', color: '#999' }}>库存 {partOption.onHand ?? 0}</div>
+                      ) : null}
+                    </>
                   )}
                   <Form.Item
                     name={[field.name, 'qty']}
