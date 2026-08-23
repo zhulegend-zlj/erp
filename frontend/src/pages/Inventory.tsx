@@ -645,6 +645,7 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
         <Form.Item name="poOrderNo" label="采购订单（自动带出零件）" style={{ width: 280, marginBottom: 16 }}>
           <Select
             mode="multiple"
+            maxTagCount="responsive"
             allowClear
             showSearch
             optionFilterProp="label"
