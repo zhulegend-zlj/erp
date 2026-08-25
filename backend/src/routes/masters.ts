@@ -486,7 +486,12 @@ export function mastersRoutes(app: FastifyInstance) {
     ws.autoFilter = { from: 'A1', to: (showPrice ? 'N' : 'M') + (boms.length + 1) }
     const buf = await wb.xlsx.writeBuffer()
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-    const fileName = 'erp-' + product.sku + '-BOM-' + date + '.xlsx'
+    // 文件名带导出身份（中文账号名，如 工程/采购），便于区分谁导出的版本
+    const userId = (req as { user?: { userId?: number; role?: string } }).user?.userId
+    const exporter = userId != null
+      ? ((await prisma.user.findUnique({ where: { id: userId }, select: { name: true } }))?.name || role)
+      : role
+    const fileName = 'erp-' + product.sku + '-BOM-' + date + '-' + exporter + '.xlsx'
     reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     reply.header('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(fileName) + '; filename="erp-bom.xlsx"')
     reply.send(Buffer.from(buf))

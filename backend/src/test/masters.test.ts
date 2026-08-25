@@ -312,6 +312,7 @@ describe('masters 权限（工程/采购分工）', () => {
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toContain('spreadsheetml')
     expect(res.headers['content-disposition']).toContain('erp-F-EXP-BOM-')
+    expect(res.headers['content-disposition']).toContain('-engineer.xlsx') // 文件名带导出身份（测试账号 username=engineer；生产环境为中文账号如 工程）
     const buf = res.rawPayload as Buffer
     expect(buf[0]).toBe(0x50)
     expect(buf[1]).toBe(0x4b)
