@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
-import { rename as renameFile, stat } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { mkdir, readdir, rename, rename as renameFile, stat } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
@@ -12,10 +13,12 @@ import {
   movePartFolder,
   moveProductFolder,
   partDirName,
+  partTargetRelDir,
   placeRootFileIntoPartFolder,
-  rehomePartFolder,
   removePartFolder,
+  SHARED,
   slugify,
+  UNCATEGORIZED,
   UPLOAD_DIR,
   urlFor,
 } from '../uploads-store'
@@ -98,9 +101,14 @@ async function syncPartUrlsFromFolder(partId: number, relDir: string, files: str
   // 注意：不能用「不含 -图档. 的文件就是图片」判断——-图档2.pdf 不含该子串，会被误判成图片。
   const drawingFile = files.find((f) => /-图档\.[^.]+$/i.test(f))
   const imageFile = files.find((f) => /\.(png|jpe?g|webp|gif)$/i.test(f) && !f.includes('图档'))
+  const newImage = imageFile ? urlFor(relDir, imageFile) : null
+  const newDrawing = drawingFile ? urlFor(relDir, drawingFile) : null
+  if (!newImage && !newDrawing) return
+  // 与库内现值比较，未变化则跳过写库（避免保存 BOM 时对每个零件做无效 UPDATE）
+  const current = await prisma.part.findUnique({ where: { id: partId }, select: { imageUrl: true, drawingsUrl: true } })
   const data: { imageUrl?: string; drawingsUrl?: string } = {}
-  if (imageFile) data.imageUrl = urlFor(relDir, imageFile)
-  if (drawingFile) data.drawingsUrl = urlFor(relDir, drawingFile)
+  if (newImage && current?.imageUrl !== newImage) data.imageUrl = newImage
+  if (newDrawing && current?.drawingsUrl !== newDrawing) data.drawingsUrl = newDrawing
   if (data.imageUrl || data.drawingsUrl) {
     await prisma.part.update({ where: { id: partId }, data })
   }
@@ -440,20 +448,64 @@ export function mastersRoutes(app: FastifyInstance) {
       prisma.bom.deleteMany({ where: { productId } }),
       prisma.bom.createMany({ data: items.map((item) => ({ productId, ...item })) }),
     ])
-    // 保存 BOM 后把受影响的零件文件归位（_未分类 → 成品目录 / _共用），并同步数据库 URL
+    // 保存 BOM 后把受影响的零件文件归位（_未分类 → 成品目录 / _共用），并同步数据库 URL。
+    // 批量化：受影响零件/零件→成品归属各一条 SQL；uploads 目录结构只扫一遍；位置未变且 URL 已就位则零操作。
     const affected = [...new Set([...oldPartIds, ...items.map((i) => i.partId)])]
-    for (const partId of affected) {
-      const part = await prisma.part.findUnique({ where: { id: partId } })
-      if (!part) continue
-      const productSkus = await productSkusForPart(partId)
+    const parts = await prisma.part.findMany({ where: { id: { in: affected } } })
+    const bomRows = await prisma.bom.findMany({
+      where: { partId: { in: affected } },
+      select: { partId: true, product: { select: { sku: true } } },
+    })
+    const skusByPart = new Map<number, string[]>()
+    for (const b of bomRows) {
+      const arr = skusByPart.get(b.partId) ?? []
+      arr.push(b.product.sku)
+      skusByPart.set(b.partId, arr)
+    }
+    // 一次扫描 uploads 目录树，建立 零件文件夹名 → { abs, relDir } 索引
+    const rootEntries = await readdir(UPLOAD_DIR, { withFileTypes: true }).catch(() => [] as Dirent[])
+    const folderIndex = new Map<string, { abs: string }>()
+    const scanDir = async (rel: string) => {
+      const entries = await readdir(resolve(UPLOAD_DIR, rel), { withFileTypes: true }).catch(() => [] as Dirent[])
+      for (const e of entries) {
+        if (e.isDirectory()) folderIndex.set(e.name, { abs: resolve(UPLOAD_DIR, rel, e.name) })
+      }
+    }
+    await scanDir(UNCATEGORIZED)
+    await scanDir(SHARED)
+    for (const e of rootEntries) {
+      if (e.isDirectory() && !e.name.startsWith('_')) await scanDir(e.name)
+    }
+
+    for (const part of parts) {
+      const productSkus = skusByPart.get(part.id) ?? []
       const partDir = partDirName(part.sku, part.name)
-      const result = await rehomePartFolder(partDir, productSkus)
-      await syncPartUrlsFromFolder(partId, result.relDir, result.files)
+      const targetRelDir = partTargetRelDir(productSkus, partDir)
+      const targetAbs = resolve(UPLOAD_DIR, targetRelDir)
+      const current = folderIndex.get(partDir)
+      const moved = current !== undefined && current.abs !== targetAbs
+      if (moved) {
+        await mkdir(dirname(targetAbs), { recursive: true })
+        await rename(current.abs, targetAbs)
+      }
+      // URL 已指向目标目录则无需再同步（最常见情况：再次保存 BOM 零开销）
+      const prefix = '/uploads/' + targetRelDir.replace(/\\/g, '/') + '/'
+      const inPlace =
+        (part.imageUrl == null || part.imageUrl.startsWith(prefix)) &&
+        (part.drawingsUrl == null || part.drawingsUrl.startsWith(prefix))
+      if (current !== undefined && (moved || !inPlace)) {
+        const files = await readdir(targetAbs).catch(() => [] as string[])
+        await syncPartUrlsFromFolder(part.id, targetRelDir, files)
+      }
       // 旧版兜底：图片/图档若还是根目录 uuid 文件，一并归入零件文件夹
-      const imageUrl = await placeRootFileIntoPartFolder(part.imageUrl, result.relDir, 'image')
-      if (imageUrl) await prisma.part.update({ where: { id: partId }, data: { imageUrl } })
-      const drawingsUrl = await placeRootFileIntoPartFolder(part.drawingsUrl, result.relDir, 'drawing')
-      if (drawingsUrl) await prisma.part.update({ where: { id: partId }, data: { drawingsUrl } })
+      const imageUrl = await placeRootFileIntoPartFolder(part.imageUrl, targetRelDir, 'image')
+      const drawingsUrl = await placeRootFileIntoPartFolder(part.drawingsUrl, targetRelDir, 'drawing')
+      if (imageUrl || drawingsUrl) {
+        await prisma.part.update({
+          where: { id: part.id },
+          data: { ...(imageUrl ? { imageUrl } : {}), ...(drawingsUrl ? { drawingsUrl } : {}) },
+        })
+      }
     }
     const boms = await prisma.bom.findMany({
       where: { productId },
