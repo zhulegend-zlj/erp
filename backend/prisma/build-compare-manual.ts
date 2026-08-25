@@ -11,6 +11,8 @@ const V3_FILE = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/ms
 const V3I_FILE = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3I清单-螺丝物料表.xlsx'
 const V3I_TABLE = 'D:/AI/erp-backups/CSP-V3I-SKU对照表.xlsx'
 const RAR_V3 = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3_2D PDF.rar'
+const CSS_FILE = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSS_SQ黑色+USB清单-物料明细.xlsx'
+const RAR_CSS = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSS_SQ 2D PDF.rar'
 const RAR_V3I = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3i_2D PDF.rar'
 const UNRAR = 'C:/Program Files/WinRAR/UnRAR.exe'
 const OUT = process.env.BUILD_OUT || 'D:/AI/erp-backups/ERP对照手册-20260825.xlsx'
@@ -34,6 +36,7 @@ function screwSku(name: string, dims: string): string {
   if (name.includes('直纹') && name.includes('杯头')) return size + '-杯头直纹'
   if (name.includes('杯头')) return size + '-杯头'
   if (name.includes('扁头')) return size + '-扁头'
+  if (name.includes('盘头')) return size + (name.includes('自攻') ? '-盘头自攻' : '-盘头')
   if (name.includes('十字')) return size + '-十字'
   if (name.includes('沉头')) return size + '-平头'
   if (name.includes('平头')) return size + '-平头'
@@ -185,6 +188,87 @@ async function main() {
     dwgSheet.push(['V3', base, k || '-', '-', sameInV3I ? '与 V3i 包内同文件' : 'V3 版本'])
   }
 
+  // ===== CSS_SQ 对照 =====
+  const wbCss = XLSX.read(readFileSync(CSS_FILE), { type: 'buffer' })
+  const cssRows = XLSX.utils.sheet_to_json(wbCss.Sheets[wbCss.SheetNames[0]!], { header: 1, defval: '', raw: false }) as unknown[][]
+  const cssData = cssRows.slice(1).filter((r) => (r[0] ?? '') !== '' || (r[5] ?? '') !== '')
+  const cssPdfs = rarFiles(RAR_CSS)
+  const cssPdfByKey = new Map<string, string[]>()
+  for (const f of cssPdfs) {
+    const base = f.split(/[\\/]/).pop()!
+    const m = base.match(/^(css-\d+[a-z]?)/i)
+    if (m) {
+      const k = idKey(m[1])
+      const list = cssPdfByKey.get(k) ?? []
+      list.push(base.trim())
+      cssPdfByKey.set(k, list)
+    }
+  }
+  const partProducts = new Map<number, string[]>()
+  for (const b of boms) {
+    const arr = partProducts.get(b.partId) ?? []
+    arr.push(b.product.sku)
+    partProducts.set(b.partId, arr)
+  }
+  const cssSheet: unknown[][] = [['表内序号', '原表料号', 'ERP料号', '中文名称', '用量', '与已有零件关系', '图片', '图档', '供应商', '备注']]
+  let cssMiscSeq = 100
+  const cssByName = new Map<string, string>()
+  for (const p of parts) {
+    const key = p.name.replace(/[腳]/g, '脚').replace(/[墊]/g, '垫')
+    if (p.sku.startsWith('CSP-') && !cssByName.has(key)) cssByName.set(key, p.sku)
+  }
+  for (const raw of cssData) {
+    const seq = clean(raw[0])
+    const idRaw = clean(raw[1]).replace(/^['"]+/, '').trim()
+    const name = clean(raw[5]) || clean(raw[4]) || clean(raw[3])
+    const dims = clean(raw[9])
+    const amountRaw = raw[11]
+    const amount = amountRaw === null || amountRaw === undefined || String(amountRaw).trim() === '' ? 1 : Number(amountRaw)
+    if (!name) continue
+    const isFastener = /螺丝|螺母|垫片|机米|螺钉/.test(name)
+    let sku = ''
+    let rel = '新零件'
+    let note = ''
+    if (/^CSS-/i.test(idRaw)) {
+      sku = idRaw
+      if (name.includes('磁铁')) note = '磁铁1（官方料号，与磁铁2分开）'
+      if (sku === 'CSS-062') note = '与 V3 CSP-060 PU泡棉 同名，老板确认独立建'
+    } else if (idRaw === 'xzzx') {
+      sku = 'xzzx'
+    } else if (isFastener) {
+      sku = screwSku(name, dims)
+    } else if (idRaw === '' || idRaw === '-') {
+      if (name === '磁铁') {
+        cssMiscSeq++
+        sku = 'CSS-' + cssMiscSeq
+        note = '磁铁2（与 CSS-095 不同规格，分开建）'
+      } else {
+        const same = cssByName.get(name.replace(/[腳]/g, '脚').replace(/[墊]/g, '垫'))
+        if (same) { sku = same }
+        else { cssMiscSeq++; sku = 'CSS-' + cssMiscSeq }
+      }
+    } else {
+      sku = idRaw
+    }
+    if (name === '插销') note = (note ? note + '；' : '') + '插销两行不同规格，分开建料号'
+    if (name === 'CS_USB_A') note = (note ? note + '；' : '') + '按老板确认归入 CSS-1xx'
+    if (seq === '55' && name.includes('棉绳')) note = (note ? note + '；' : '') + '表内序号与第55行重复，按物理行处理'
+    const p = partMap.get(sku)
+    const prods = p ? (partProducts.get(p.id) ?? []) : []
+    rel = prods.length > 1 ? '公用（与V3/V3I共用）' : '新零件'
+    cssSheet.push([seq, idRaw || '-', sku, name, amount, rel, p?.imageUrl ? '有' : '无', p?.drawingsUrl ? '有' : '无', p?.supplier?.name ?? '', note])
+  }
+
+  // CSS_SQ 图档对照（并入图档对照表）
+  const cssIds = new Set(cssData.map((r) => idKey(clean(r[1]).replace(/^['"]+/, ''))))
+  for (const f of cssPdfs) {
+    const base = f.split(/[\\/]/).pop()!.trim()
+    const m = base.match(/^(css-\d+[a-z]?)/i)
+    const k = m ? idKey(m[1]) : ''
+    const target = k && partMap.has(k.toUpperCase()) ? k.toUpperCase() : '-'
+    dwgSheet.push(['CSS', base, k || '-', target, cssIds.has(k) ? '已挂到对应零件' : '表内无此行（未挂）'])
+  }
+
   // ===== 待办与待确认 =====
   const todoSheet: unknown[][] = [['类别', '内容']]
   const todos: [string, string][] = [
@@ -202,6 +286,10 @@ async function main() {
     ['表内瑕疵-序号', 'V3 表序号列缺 30、序号 67 出现两次（3M胶贴物理位置第53行）'],
     ['表内瑕疵-重量', 'V3 序号84/85 重量列写的是「线长确认/线长未确认」备注，已按原样录入'],
     ['表内瑕疵-料号名称', 'V3I 序号7 料号写 M6x16 但名称是 M6x28，已按名称 M6x28-平头 与 V3 共用'],
+    ['待补图纸-CSS_SQ', 'CSS-016 输出电子壳 / CSS-058 开关把手 / CSS-HMC-V3 滚动电子（表内无对应图档）'],
+    ['缺图片-CSS_SQ', 'CSS-114 包装袋、CSS-115 CS_USB_A（表内无图）'],
+    ['表内瑕疵-CSS_SQ', '序号 72 缺失；序号 55 出现两次（M2.5x5 螺丝 与 棉绳）'],
+    ['口径说明-CSS_SQ', '磁铁两行分开（CSS-095 / CSS-104）、插销两行分开（CSS-101/CSS-102）、PU泡棉 CSS-062 独立建、新杂项 CSS-101 起编'],
   ]
   for (const [c, t] of todos) todoSheet.push([c, t])
 
@@ -227,8 +315,9 @@ async function main() {
     ['3. 有出入直接在 ERP 里改（工程改零件/BOM，采购改供应商/价格），改完告诉我，我重新生成手册核对'],
     [''],
     ['四、ERP 当前数据概况'],
-    ['- 成品：CSP-V3（CSP V3 挂档器，107 零件/107 BOM 行）、CSP-V3I（CSP V3I 脚踏板，146 BOM 行，67 个零件与 V3 共用）'],
-    ['- 零件总数 187；有图片 181；有图档 102'],
+    ['- 成品：CSP-V3（CSP V3 挂档器，107 零件/107 BOM 行）、CSP-V3I（CSP V3I 脚踏板，146 BOM 行，67 个与 V3 共用）、CSS-SQ（CSS_SQ 挂档器（黑色+USB），82 BOM 行，8 个与已有零件共用）'],
+    ['- 零件总数 261；CSS_SQ 新杂项编号从 CSS-101 起编（老板确认）'],
+    ['- CSS_SQ 特殊口径：磁铁两行分开（CSS-095/CSS-104）、插销两行分开（CSS-101/CSS-102）、CS_USB_A=CSS-115、PU泡棉 CSS-062 独立建'],
   ]
   guideSheet.push()
 
@@ -241,11 +330,17 @@ async function main() {
   append('说明', guideSheet, [90])
   append('V3对照', v3Sheet, [8, 18, 16, 28, 6, 6, 6, 14, 46])
   append('V3I对照', v3iSheet, [8, 18, 16, 28, 6, 18, 6, 6, 14, 60])
+  append('CSS-SQ对照', cssSheet, [8, 16, 16, 26, 6, 14, 6, 6, 14, 50])
   append('图档对照', dwgSheet, [6, 60, 12, 34, 26])
   append('待办与待确认', todoSheet, [22, 100])
-  XLSX.writeFile(wbOut, OUT)
+  let finalOut = OUT
+  for (const suffix of ['', '-v2', '-v3']) {
+    const candidate = suffix ? OUT.replace('.xlsx', suffix + '.xlsx') : OUT
+    try { XLSX.writeFile(wbOut, candidate); finalOut = candidate; break }
+    catch (e) { if (String(e).includes('EBUSY')) continue; throw e }
+  }
   console.log('V3 行:', v3Sheet.length - 1, '；V3I 行:', v3iSheet.length - 1, '；图档对照:', dwgSheet.length - 1, '；待办:', todoSheet.length - 1)
-  console.log('已输出:', OUT)
+  console.log('已输出:', finalOut)
   await prisma.$disconnect()
 }
 
