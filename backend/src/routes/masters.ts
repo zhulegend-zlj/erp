@@ -1,11 +1,11 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
-import { mkdir, readdir, rename, rename as renameFile, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rename as renameFile, stat } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { requireRole } from '../auth/guard'
 import { parsePositiveInt } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
@@ -136,6 +136,29 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown, reply: FastifyReply):
     return null
   }
   return result.data
+}
+
+/** 解析 PNG/JPEG 尺寸（用于导出表格时保持缩略图比例） */
+function imageSize(buf: Buffer): { w: number; h: number } | null {
+  if (buf.length < 24) return null
+  if (buf[0] === 0x89 && buf[1] === 0x50) {
+    return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) }
+  }
+  if (buf[0] === 0xff && buf[1] === 0xd8) {
+    let i = 2
+    while (i < buf.length - 9) {
+      if (buf[i] !== 0xff) {
+        i++
+        continue
+      }
+      const marker = buf[i + 1]
+      if (marker !== undefined && marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) }
+      }
+      i += 2 + buf.readUInt16BE(i + 2)
+    }
+  }
+  return null
 }
 
 function parseId(req: { params: { id: string } }, reply: FastifyReply): number | null {
@@ -399,14 +422,29 @@ export function mastersRoutes(app: FastifyInstance) {
       'Finish\n表面处理', 'Amout\n用量', 'Drawings\n图档', 'tooling  模具', 'MOQ\n起订量', 'price   价格',
       '用在何处', 'manufacturing technique\n生产工艺', 'Art.ID\n图号', 'Vendorid\n供应商',
     ]
-    const rows: unknown[][] = [header]
-    boms.forEach((b, i) => {
+    const widths = [8, 16, 12, 14, 26, 26, 10, 8, 24, 20, 22, 8, 10, 10, 8, 10, 10, 14, 10, 14]
+    // exceljs 生成：嵌入图片缩略图 + 表头样式 + 冻结首行 + 每列筛选排序
+    const wb = new ExcelJS.Workbook()
+    wb.creator = 'erp'
+    const ws = wb.addWorksheet(product.sku, { views: [{ state: 'frozen', ySplit: 1 }] })
+    ws.columns = header.map((h, i) => ({ header: h, key: 'c' + i, width: widths[i] ?? 10 }))
+    const headerRow = ws.getRow(1)
+    headerRow.height = 32
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, size: 11 }
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF3FF' } }
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+      cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } }
+    })
+    const IMG_COL_INDEX = 2 // C 列（图片，0 基）
+    for (let i = 0; i < boms.length; i++) {
+      const b = boms[i]!
       const p = b.part
       const price = p.price == null ? '' : Number(p.price.toString())
-      rows.push([
+      const row = ws.addRow([
         i + 1, // 序号
         p.sku, // 料号
-        '', // 图片（文件，不导出）
+        '', // 图片（下方嵌入缩略图）
         '', // Description-EN（未录入）
         p.nameEn ?? '', // 英文品名
         p.name, // 中文名称
@@ -425,17 +463,37 @@ export function mastersRoutes(app: FastifyInstance) {
         p.artId ?? '', // 图号
         p.supplier?.name ?? '', // 供应商
       ])
-    })
-    const ws = XLSX.utils.aoa_to_sheet(rows)
-    ws['!cols'] = [{ wch: 8 }, { wch: 16 }, { wch: 10 }, { wch: 14 }, { wch: 26 }, { wch: 26 }, { wch: 10 }, { wch: 8 }, { wch: 24 }, { wch: 20 }, { wch: 22 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 14 }]
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, product.sku)
-    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+      row.eachCell((cell) => {
+        cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } }
+        cell.alignment = { vertical: 'middle', wrapText: true }
+      })
+      // 嵌入零件图片缩略图（保持比例，行高放大）
+      if (p.imageUrl) {
+        const rel = p.imageUrl.replace(/^\/uploads\//, '')
+        const raw = await readFile(resolve(UPLOAD_DIR, rel)).catch(() => null)
+        if (raw) {
+          const buf = Buffer.from(raw)
+          const ext = /\.png$/i.test(rel) ? 'png' : 'jpeg'
+          const imageId = wb.addImage({ base64: buf.toString('base64'), extension: ext })
+          const dims = imageSize(buf)
+          const h = 46
+          const w = dims && dims.h > 0 ? Math.min(84, Math.round((dims.w / dims.h) * h)) : 64
+          ws.addImage(imageId, {
+            tl: { col: IMG_COL_INDEX + 0.15, row: i + 1 + 0.08 },
+            ext: { width: w, height: h },
+          })
+          row.height = 52
+        }
+      }
+    }
+    // 每列排序筛选：覆盖全部列（A..T，含表头到末行）
+    ws.autoFilter = { from: 'A1', to: 'T' + (boms.length + 1) }
+    const buf = await wb.xlsx.writeBuffer()
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     const fileName = 'erp-' + product.sku + '-BOM-' + date + '.xlsx'
     reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     reply.header('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(fileName) + '; filename="erp-bom.xlsx"')
-    reply.send(buf)
+    reply.send(Buffer.from(buf))
   })
 
   app.put('/api/products/:id/bom', { preHandler: requireRole(...ENGINEER_WRITE_ROLES) }, async (req, reply) => {

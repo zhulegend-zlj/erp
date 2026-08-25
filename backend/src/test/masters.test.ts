@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import ExcelJS from 'exceljs'
 import { buildApp } from '../server'
 import { prisma } from '../db'
 import { UPLOAD_DIR, partDirName } from '../uploads-store'
@@ -291,14 +292,22 @@ describe('masters 权限（工程/采购分工）', () => {
     expect((await app.inject({ method: 'GET', url: '/api/parts?productId=abc', headers: { cookie } })).statusCode).toBe(400)
   })
 
-  it('BOM 一键导出：xlsx 文件 + erp 文件名', async () => {
+  it('BOM 一键导出：xlsx + erp 文件名 + 每列筛选 + 嵌入图片', async () => {
     const app = buildApp()
     const cookie = await loginCookie(app, 'engineer')
     const prod = await prisma.product.create({ data: { sku: 'F-EXP', name: '成品EXP' } })
     const part = await prisma.part.create({
       data: { sku: 'P-EXP', name: '零件EXP', nameEn: 'part EXP', weight: '12g', revision: '1', material: 'AL', dimensions: '10x10', finish: '黑色阳极' },
     })
+    // 给零件一个真实图片（测试环境 UPLOAD_DIR 为临时目录）
+    const partDir = partDirName(part.sku, part.name)
+    const folder = resolve(UPLOAD_DIR, '_未分类', partDir)
+    mkdirSync(folder, { recursive: true })
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+    writeFileSync(resolve(folder, partDir + '.png'), png)
+    await prisma.part.update({ where: { id: part.id }, data: { imageUrl: '/uploads/_未分类/' + partDir + '/' + partDir + '.png' } })
     await prisma.bom.create({ data: { productId: prod.id, partId: part.id, qty: 5 } })
+
     const res = await app.inject({ method: 'GET', url: '/api/products/' + prod.id + '/bom/export', headers: { cookie } })
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toContain('spreadsheetml')
@@ -306,6 +315,16 @@ describe('masters 权限（工程/采购分工）', () => {
     const buf = res.rawPayload as Buffer
     expect(buf[0]).toBe(0x50)
     expect(buf[1]).toBe(0x4b)
+    // 用 exceljs 读回验证：自动筛选 + 嵌入图片 + 20 列表头
+    const wb = new ExcelJS.Workbook()
+    // exceljs 自带类型与 @types/node 的泛型 Buffer 不兼容，测试内强制转换
+    await wb.xlsx.load(buf as never)
+    const ws = wb.worksheets[0]
+    expect(ws).toBeTruthy()
+    expect(ws!.autoFilter).toBeTruthy()
+    expect(ws!.columnCount).toBe(20)
+    expect(ws!.rowCount).toBe(2) // 表头 + 1 行数据
+    expect(ws!.getImages().length).toBe(1)
     // 不存在的成品 → 404
     expect((await app.inject({ method: 'GET', url: '/api/products/999999/bom/export', headers: { cookie } })).statusCode).toBe(404)
   })
