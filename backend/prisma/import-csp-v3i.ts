@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import * as XLSX from 'xlsx'
-import { UPLOAD_DIR, partDirName, partTargetRelDir, placePartFile, rehomePartFolder, urlFor } from '../src/uploads-store'
+import { UPLOAD_DIR, findPartFolder, partDirName, partTargetRelDir, placePartFile, rehomePartFolder, urlFor } from '../src/uploads-store'
 
 const prisma = new PrismaClient()
 const FILE = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3I清单-螺丝物料表.xlsx'
@@ -249,9 +249,9 @@ async function main() {
       const v3iRev = Math.max(0, ...files.map(revOf))
       if (v3iRev > v3Rev && part.drawingsUrl) {
         const partDir = partDirName(part.sku, part.name)
-        const currentRel = part.drawingsUrl.replace(/^\/uploads\//, '').replace(/\/[^/]+$/, '')
-        const relDir = currentRel || partTargetRelDir(['CSP-V3'], partDir)
-        const absDir = resolve(UPLOAD_DIR, relDir)
+        const folderAbs = (await findPartFolder(partDir)) ?? resolve(UPLOAD_DIR, partTargetRelDir(['CSP-V3', 'CSP-V3I'], partDir))
+        const absDir = folderAbs
+        const relDir = folderAbs.slice(UPLOAD_DIR.length + 1).replace(/\\/g, '/')
         const oldMain = resolve(absDir, partDir + '-图档.pdf')
         const newFile = files[0]!
         const foundNew = rarIndex.get(newFile.trim().toLowerCase())
