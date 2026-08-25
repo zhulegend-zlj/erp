@@ -71,8 +71,11 @@ async function main() {
     const isFastener = /螺丝|螺母|垫片|机米/.test(name)
     let sku = ''
     if (/^CSP-013$/i.test(id)) {
-      csp13Seq++
-      sku = 'CSP-013-' + csp13Seq
+      // 老板已在 ERP 中将 V3 铝套管改为按尺寸命名：CSP-013-<长度>
+      const lenM = name.match(/20\s*[*x]\s*(\d+(?:\.\d+)?)/i)
+      sku = 'CSP-013-' + (lenM ? String(Number(lenM[1])) : String(++csp13Seq))
+    } else if (/^CSP-216$/i.test(id)) {
+      sku = 'CSP-216-V3' // 老板已改（与 V3I 的 CSP-216-v3i 区分）
     } else if (/^CSP-/.test(id)) {
       sku = id
     } else if (isFastener) {
@@ -81,6 +84,7 @@ async function main() {
     } else if (id === '' || id === '-') {
       mSeq++
       sku = 'CSP-' + (200 + mSeq)
+      if (name === '包装泡棉') sku = 'CSP-216-V3' // 老板已改（与 V3I 的 CSP-216-v3i 区分）
     } else {
       sku = id
     }

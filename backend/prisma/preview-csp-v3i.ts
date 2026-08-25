@@ -13,7 +13,7 @@ const RAR_V3I = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/ms
 const RAR_V3 = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3_2D PDF.rar'
 const UNRAR = 'C:/Program Files/WinRAR/UnRAR.exe'
 const TAR = 'C:/Windows/System32/tar.exe'
-const OUT = 'D:/AI/erp-backups/CSP-V3I-SKU对照表.xlsx'
+const OUT = process.env.PREVIEW_OUT || 'D:/AI/erp-backups/CSP-V3I-SKU对照表.xlsx'
 const TMP = resolve(process.cwd(), 'tmp-v3i-xlsx')
 
 function clean(v: unknown): string {
