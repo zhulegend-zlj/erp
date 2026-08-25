@@ -50,6 +50,56 @@ export async function refreshPurchasingPhase(
   await tx.salesOrder.update({ where: { id: salesOrderId }, data })
 }
 
+/** 撤销收货后调用：采购中可能重新点亮，状态必要时从 ready 退回 in_production */
+export async function refreshPurchasingPhaseAfterUndo(
+  tx: Prisma.TransactionClient,
+  salesOrderId: number | null | undefined,
+): Promise<void> {
+  if (!salesOrderId) return
+  const order = await tx.salesOrder.findUnique({
+    where: { id: salesOrderId },
+    select: { id: true, status: true },
+  })
+  if (!order) return
+  const pos = await tx.purchaseOrder.findMany({
+    where: { salesOrderId },
+    select: { status: true },
+  })
+  const purchasing = pos.length > 0 && pos.some((p) => p.status !== 'received')
+  const data: { purchasing: boolean; status?: string } = { purchasing }
+  // 撤销导致未收齐：采购中重新点亮；已推进到待出货的订单退回生产中（已出货/已完成不倒退）
+  if (purchasing && order.status === 'ready') data.status = 'in_production'
+  await tx.salesOrder.update({ where: { id: salesOrderId }, data })
+}
+
+/** 撤销成品入库后调用：生产中可能重新点亮，状态必要时从 ready 退回 in_production */
+export async function refreshProducingPhaseAfterUndo(
+  tx: Prisma.TransactionClient,
+  salesOrderId: number | null | undefined,
+): Promise<void> {
+  if (!salesOrderId) return
+  const order = await tx.salesOrder.findUnique({
+    where: { id: salesOrderId },
+    select: { id: true, status: true, items: { select: { productId: true, qty: true } } },
+  })
+  if (!order) return
+  const groups = await tx.productionEntry.groupBy({
+    by: ['productId'],
+    where: { salesOrderId },
+    _sum: { qty: true },
+  })
+  const doneMap = new Map(groups.map((g) => [g.productId, g._sum.qty ?? 0]))
+  const producing =
+    groups.length > 0 && order.items.some((it) => (doneMap.get(it.productId) ?? 0) < it.qty)
+  // 全部成品明细收满且确有入库记录才视为生产完成；全部撤销后同样视为未完成
+  const productionComplete =
+    groups.length > 0 && order.items.every((it) => (doneMap.get(it.productId) ?? 0) >= it.qty)
+  const data: { producing: boolean; status?: string } = { producing }
+  // 撤销导致生产不再完成：已推进到待出货的订单退回生产中（已出货/已完成不倒退）
+  if (order.status === 'ready' && !productionComplete) data.status = 'in_production'
+  await tx.salesOrder.update({ where: { id: salesOrderId }, data })
+}
+
 /** 成品入库后调用：按入库累计刷新生产中，并尝试自动推进 ready */
 export async function refreshProducingPhase(
   tx: Prisma.TransactionClient,

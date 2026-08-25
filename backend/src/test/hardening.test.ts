@@ -503,6 +503,106 @@ describe('hardening（加固回归）', () => {
       expect(afterProd?.status).toBe('ready')
     })
 
+    it('撤销收货：采购单状态回退 open，订单「采购中」重新点亮', async () => {
+      const customer = await prisma.customer.create({ data: { name: '客户-UO1' } })
+      const product = await prisma.product.create({ data: { sku: 'F-UO1', name: '成品UO1' } })
+      const part = await prisma.part.create({ data: { sku: 'P-UO1', name: '零件UO1' } })
+      const supplier = await prisma.supplier.create({ data: { name: '供应商-UO1' } })
+      await prisma.part.update({ where: { id: part.id }, data: { supplierId: supplier.id } })
+      const order = await prisma.salesOrder.create({
+        data: {
+          orderNo: 'SO-UO1', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          status: 'confirmed',
+          items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+        },
+      })
+      const app = buildApp()
+      const purchaseCookie = await loginCookie(app, 'purchase')
+      const po = await app.inject({
+        method: 'POST', url: '/api/purchase-orders', headers: { cookie: purchaseCookie },
+        payload: { supplierId: supplier.id, salesOrderId: order.id, items: [{ partId: part.id, qty: 10, unitPrice: 1 }] },
+      })
+      expect(po.statusCode).toBe(200)
+      const warehouseCookie = await loginCookie(app, 'warehouse')
+      const receipt = await app.inject({
+        method: 'POST', url: '/api/receipts', headers: { cookie: warehouseCookie },
+        payload: { purchaseOrderId: po.json().id, items: [{ partId: part.id, qty: 10 }] },
+      })
+      expect(receipt.statusCode).toBe(200)
+      // 收货后：采购单收齐、订单采购中熄灭
+      expect((await prisma.purchaseOrder.findUnique({ where: { id: po.json().id } }))?.status).toBe('received')
+      expect((await prisma.salesOrder.findUnique({ where: { id: order.id } }))?.purchasing).toBe(false)
+
+      // 撤销收货
+      const receipts = await app.inject({ method: 'GET', url: '/api/receipts', headers: { cookie: warehouseCookie } })
+      const receiptId = (receipts.json() as { id: number }[]).find((r) => r.id)?.id
+      expect(receiptId).toBeTruthy()
+      const undo = await app.inject({ method: 'DELETE', url: '/api/receipts/' + receiptId, headers: { cookie: warehouseCookie } })
+      expect(undo.statusCode).toBe(200)
+      // 采购单回退 open、订单采购中重新点亮、状态仍 in_production（生产未完成不待出货）
+      expect((await prisma.purchaseOrder.findUnique({ where: { id: po.json().id } }))?.status).toBe('open')
+      const row = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+      expect(row?.purchasing).toBe(true)
+      expect(row?.status).toBe('in_production')
+    })
+
+    it('撤销成品入库：生产中重新点亮，ready 退回 in_production', async () => {
+      const customer = await prisma.customer.create({ data: { name: '客户-UO2' } })
+      const product = await prisma.product.create({ data: { sku: 'F-UO2', name: '成品UO2' } })
+      const part = await prisma.part.create({ data: { sku: 'P-UO2', name: '零件UO2' } })
+      const supplier = await prisma.supplier.create({ data: { name: '供应商-UO2' } })
+      await prisma.part.update({ where: { id: part.id }, data: { supplierId: supplier.id } })
+      const order = await prisma.salesOrder.create({
+        data: {
+          orderNo: 'SO-UO2', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          status: 'confirmed',
+          items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+        },
+      })
+      const app = buildApp()
+      const purchaseCookie = await loginCookie(app, 'purchase')
+      const po = await app.inject({
+        method: 'POST', url: '/api/purchase-orders', headers: { cookie: purchaseCookie },
+        payload: { supplierId: supplier.id, salesOrderId: order.id, items: [{ partId: part.id, qty: 10, unitPrice: 1 }] },
+      })
+      expect(po.statusCode).toBe(200)
+      const warehouseCookie = await loginCookie(app, 'warehouse')
+      await app.inject({
+        method: 'POST', url: '/api/receipts', headers: { cookie: warehouseCookie },
+        payload: { purchaseOrderId: po.json().id, items: [{ partId: part.id, qty: 10 }] },
+      })
+      await app.inject({
+        method: 'POST', url: '/api/production-entries', headers: { cookie: warehouseCookie },
+        payload: { salesOrderId: order.id, productId: product.id, qty: 4 },
+      })
+      await app.inject({
+        method: 'POST', url: '/api/production-entries', headers: { cookie: warehouseCookie },
+        payload: { salesOrderId: order.id, productId: product.id, qty: 6 },
+      })
+      // 采购+生产都完成 → ready
+      expect((await prisma.salesOrder.findUnique({ where: { id: order.id } }))?.status).toBe('ready')
+
+      // 撤销其中一条成品入库（4+6 → 撤销 6，剩余 4 未收满）
+      const entries = await app.inject({ method: 'GET', url: '/api/production-entries', headers: { cookie: warehouseCookie } })
+      const entry6 = (entries.json() as { id: number; qty: number }[]).find((r) => r.qty === 6)
+      expect(entry6).toBeTruthy()
+      const undo = await app.inject({ method: 'DELETE', url: '/api/production-entries/' + entry6!.id, headers: { cookie: warehouseCookie } })
+      expect(undo.statusCode).toBe(200)
+      let row = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+      expect(row?.producing).toBe(true)
+      expect(row?.status).toBe('in_production')
+
+      // 再撤销剩余 4：生产记录清空后「生产中」熄灭，但状态保持 in_production（不可待出货）
+      const entries2 = await app.inject({ method: 'GET', url: '/api/production-entries', headers: { cookie: warehouseCookie } })
+      const entry4 = (entries2.json() as { id: number; qty: number }[]).find((r) => r.qty === 4)
+      expect(entry4).toBeTruthy()
+      const undo2 = await app.inject({ method: 'DELETE', url: '/api/production-entries/' + entry4!.id, headers: { cookie: warehouseCookie } })
+      expect(undo2.statusCode).toBe(200)
+      row = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+      expect(row?.producing).toBe(false)
+      expect(row?.status).toBe('in_production')
+    })
+
     it('成品入库点亮生产中，收满后熄灭；采购+生产都完成自动待出货', async () => {
       const customer = await prisma.customer.create({ data: { name: '客户-PR' } })
       const product = await prisma.product.create({ data: { sku: 'F-PR', name: '成品PR' } })

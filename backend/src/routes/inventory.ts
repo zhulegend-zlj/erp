@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
-import { refreshProducingPhase } from '../domain/order-phase'
+import { refreshProducingPhase, refreshProducingPhaseAfterUndo } from '../domain/order-phase'
 import { parsePositiveInt, prismaErrorInfo } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
 
@@ -239,6 +239,8 @@ export function inventoryRoutes(app: FastifyInstance) {
         if (!record) throw new Error('成品入库记录不存在')
         await applyStockChange(tx, 'product', record.productId, -record.qty, 'void', id, record.salesOrderId)
         await tx.productionEntry.delete({ where: { id } })
+        // 撤销后按剩余入库重算「生产中」：成品未收满时重新点亮，必要时从待出货退回生产中
+        await refreshProducingPhaseAfterUndo(tx, record.salesOrderId)
       })
       return reply.code(200).send({ ok: true })
     } catch (err) {

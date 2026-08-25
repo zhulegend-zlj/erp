@@ -5,7 +5,7 @@ import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { bomExplode, computePurchaseGap } from '../domain/bom'
 import { applyStockChange } from '../domain/inventory'
-import { markPurchasingStarted, refreshPurchasingPhase } from '../domain/order-phase'
+import { markPurchasingStarted, refreshPurchasingPhase, refreshPurchasingPhaseAfterUndo } from '../domain/order-phase'
 import { parsePositiveInt, prismaErrorInfo } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
 
@@ -527,10 +527,27 @@ export function purchasingRoutes(app: FastifyInstance) {
         const record = await tx.receipt.findUnique({ where: { id } })
         if (!record) throw new Error('收货记录不存在')
         const po = record.purchaseOrderId != null
-          ? await tx.purchaseOrder.findUnique({ where: { id: record.purchaseOrderId }, select: { salesOrderId: true } })
+          ? await tx.purchaseOrder.findUnique({
+              where: { id: record.purchaseOrderId },
+              select: { id: true, salesOrderId: true, items: { select: { partId: true, qty: true } } },
+            })
           : null
         await applyStockChange(tx, 'part', record.partId, -record.qty, 'void', id, po?.salesOrderId ?? null)
         await tx.receipt.delete({ where: { id } })
+        if (po) {
+          // 撤销后按剩余收货重算采购单状态（收齐→received / 部分→partial / 无→open），并回退订单「采购中」标志
+          const groups = await tx.receipt.groupBy({
+            by: ['partId'],
+            where: { purchaseOrderId: po.id },
+            _sum: { qty: true },
+          })
+          const receivedMap = new Map(groups.map((g) => [g.partId, g._sum.qty ?? 0]))
+          const allReceived = po.items.every((i) => (receivedMap.get(i.partId) ?? 0) >= i.qty)
+          const anyReceived = po.items.some((i) => (receivedMap.get(i.partId) ?? 0) > 0)
+          const status = allReceived ? 'received' : anyReceived ? 'partial' : 'open'
+          await tx.purchaseOrder.update({ where: { id: po.id }, data: { status } })
+          await refreshPurchasingPhaseAfterUndo(tx, po.salesOrderId)
+        }
       })
       return reply.code(200).send({ ok: true })
     } catch (err) {
