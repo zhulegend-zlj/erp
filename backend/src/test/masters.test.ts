@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { buildApp } from '../server'
 import { prisma } from '../db'
+import { UPLOAD_DIR, partDirName } from '../uploads-store'
 import { loginCookie, resetDb } from './helpers'
 
 describe('masters 权限（工程/采购分工）', () => {
@@ -305,6 +308,34 @@ describe('masters 权限（工程/采购分工）', () => {
     expect(buf[1]).toBe(0x4b)
     // 不存在的成品 → 404
     expect((await app.inject({ method: 'GET', url: '/api/products/999999/bom/export', headers: { cookie } })).statusCode).toBe(404)
+  })
+
+  it('保存 BOM 归位时，-图档2.pdf 旧版留档不会被误认成图片', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'engineer')
+    // 成品 + 零件（挂在成品下），零件文件夹放 图片 + 主图档 + 旧版图档2
+    const product = await prisma.product.create({ data: { sku: 'F-SYNC', name: '成品SYNC' } })
+    const part = await prisma.part.create({ data: { sku: 'P-SYNC', name: '弹簧SYNC' } })
+    const partDir = partDirName(part.sku, part.name)
+    const folder = resolve(UPLOAD_DIR, '_未分类', partDir)
+    mkdirSync(folder, { recursive: true })
+    writeFileSync(resolve(folder, partDir + '.jpeg'), Buffer.from([0xff, 0xd8, 0xff, 0xd9]))
+    writeFileSync(resolve(folder, partDir + '-图档.pdf'), Buffer.from('%PDF-1.4'))
+    writeFileSync(resolve(folder, partDir + '-图档2.pdf'), Buffer.from('%PDF-1.4 old'))
+    const imageUrl = '/uploads/_未分类/' + partDir + '/' + partDir + '.jpeg'
+    const drawingsUrl = '/uploads/_未分类/' + partDir + '/' + partDir + '-图档.pdf'
+    await prisma.part.update({ where: { id: part.id }, data: { imageUrl, drawingsUrl } })
+
+    // 保存 BOM（触发归位 + 同步 URL）
+    const save = await app.inject({
+      method: 'PUT', url: '/api/products/' + product.id + '/bom', headers: { cookie },
+      payload: [{ partId: part.id, qty: 2 }]
+    })
+    expect(save.statusCode).toBe(200)
+
+    const after = await prisma.part.findUnique({ where: { id: part.id } })
+    expect(after?.imageUrl).toBe('/uploads/F-SYNC/' + partDir + '/' + partDir + '.jpeg')
+    expect(after?.drawingsUrl).toBe('/uploads/F-SYNC/' + partDir + '/' + partDir + '-图档.pdf')
   })
 
   it('零件列表分页时保持同一排序', async () => {

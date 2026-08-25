@@ -94,8 +94,10 @@ async function productSkusForPart(partId: number): Promise<string[]> {
 
 /** 按零件文件夹内的文件更新零件图片/图档 URL（归位或改名后调用） */
 async function syncPartUrlsFromFolder(partId: number, relDir: string, files: string[]): Promise<void> {
-  const drawingFile = files.find((f) => f.includes('-图档.'))
-  const imageFile = files.find((f) => !f.includes('-图档.'))
+  // 主图档 = <partDir>-图档.<ext>（-图档2.pdf 等旧版留档不算图档）；图片 = 图片扩展名文件。
+  // 注意：不能用「不含 -图档. 的文件就是图片」判断——-图档2.pdf 不含该子串，会被误判成图片。
+  const drawingFile = files.find((f) => /-图档\.[^.]+$/i.test(f))
+  const imageFile = files.find((f) => /\.(png|jpe?g|webp|gif)$/i.test(f) && !f.includes('图档'))
   const data: { imageUrl?: string; drawingsUrl?: string } = {}
   if (imageFile) data.imageUrl = urlFor(relDir, imageFile)
   if (drawingFile) data.drawingsUrl = urlFor(relDir, drawingFile)
