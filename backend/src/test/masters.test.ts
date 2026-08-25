@@ -322,7 +322,7 @@ describe('masters 权限（工程/采购分工）', () => {
     const ws = wb.worksheets[0]
     expect(ws).toBeTruthy()
     expect(ws!.autoFilter).toBeTruthy()
-    expect(ws!.columnCount).toBe(20)
+    expect(ws!.columnCount).toBe(13)
     expect(ws!.rowCount).toBe(2) // 表头 + 1 行数据
     expect(ws!.getImages().length).toBe(1)
     // 不存在的成品 → 404

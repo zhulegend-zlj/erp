@@ -386,7 +386,8 @@ export function mastersRoutes(app: FastifyInstance) {
     })
   })
 
-  // BOM 一键导出：列布局完全照工程 CSP_V3 清单表格 20 列（含空列），文件名带 erp
+  // BOM 一键导出：13 列（序号/料号/图片/Description-EN/英文品名/中文名称/重量/版本/材质/尺寸规格/表面处理/用量/供应商），
+  // 嵌入图片缩略图 + 表头样式 + 冻结首行 + 每列排序筛选，文件名带 erp
   app.get('/api/products/:id/bom/export', { preHandler: requireRole(...READ_ROLES) }, async (req, reply) => {
     const productId = parseId(req as { params: { id: string } }, reply)
     if (productId === null) return
@@ -413,16 +414,13 @@ export function mastersRoutes(app: FastifyInstance) {
       return a < b ? -1 : a > b ? 1 : 0
     }
     boms.sort((x, y) => cmp(x.part.sku, y.part.sku))
-    // 价格列：仅采购/老板可见（与零件列表口径一致），其余角色导出为空
-    const role = (req as { user?: { role?: string } }).user?.role ?? ''
-    const showPrice = role === 'purchase' || role === 'boss'
+    // 导出列（老板口径）：序号/料号/图片/Description-EN/英文品名/中文名称/重量/版本/材质/尺寸规格/表面处理/用量/供应商
     const header = [
       'Item-No.\n序号', 'Part ID\n料号', 'photo\n图片', 'Description - EN', 'Part name (EN)\n（英文品名）',
       'Part Name （CN）\n中文名称', 'Weight（g)\n重量', 'Revision\n版本', 'Material \n材质', 'Dimensions\n尺寸规格 ',
-      'Finish\n表面处理', 'Amout\n用量', 'Drawings\n图档', 'tooling  模具', 'MOQ\n起订量', 'price   价格',
-      '用在何处', 'manufacturing technique\n生产工艺', 'Art.ID\n图号', 'Vendorid\n供应商',
+      'Finish\n表面处理', 'Amout\n用量', 'Vendorid\n供应商',
     ]
-    const widths = [8, 16, 12, 14, 26, 26, 10, 8, 24, 20, 22, 8, 10, 10, 8, 10, 10, 14, 10, 14]
+    const widths = [8, 16, 12, 14, 26, 26, 10, 8, 24, 20, 22, 8, 14]
     // exceljs 生成：嵌入图片缩略图 + 表头样式 + 冻结首行 + 每列筛选排序
     const wb = new ExcelJS.Workbook()
     wb.creator = 'erp'
@@ -440,7 +438,6 @@ export function mastersRoutes(app: FastifyInstance) {
     for (let i = 0; i < boms.length; i++) {
       const b = boms[i]!
       const p = b.part
-      const price = p.price == null ? '' : Number(p.price.toString())
       const row = ws.addRow([
         i + 1, // 序号
         p.sku, // 料号
@@ -454,13 +451,6 @@ export function mastersRoutes(app: FastifyInstance) {
         p.dimensions ?? '', // 尺寸规格
         p.finish ?? '', // 表面处理
         b.qty, // 用量
-        '', // 图档（文件，不导出）
-        p.tooling ?? '', // 模具
-        p.moq ?? '', // 起订量
-        showPrice ? price : '', // 价格
-        p.usedIn ?? '', // 用在何处
-        p.process ?? '', // 生产工艺
-        p.artId ?? '', // 图号
         p.supplier?.name ?? '', // 供应商
       ])
       row.eachCell((cell) => {
@@ -486,8 +476,8 @@ export function mastersRoutes(app: FastifyInstance) {
         }
       }
     }
-    // 每列排序筛选：覆盖全部列（A..T，含表头到末行）
-    ws.autoFilter = { from: 'A1', to: 'T' + (boms.length + 1) }
+    // 每列排序筛选：覆盖全部列（A..M，含表头到末行）
+    ws.autoFilter = { from: 'A1', to: 'M' + (boms.length + 1) }
     const buf = await wb.xlsx.writeBuffer()
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     const fileName = 'erp-' + product.sku + '-BOM-' + date + '.xlsx'
