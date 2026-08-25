@@ -15,7 +15,7 @@ import {
   Upload,
   message,
 } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, LinkOutlined, UploadOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, DeleteOutlined, LinkOutlined, UploadOutlined, DownloadOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { useKeepAliveState } from './keepAlive'
@@ -241,6 +241,8 @@ function CrudTab({
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [keyword, setKeyword] = useState('')
+  const [productId, setProductId] = useState<number | undefined>()
+  const [products, setProducts] = useState<{ id: number; sku: string; name: string }[]>([])
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkingRow, setLinkingRow] = useState<CrudRow | null>(null)
   const [linkSupplierId, setLinkSupplierId] = useState<number | undefined>()
@@ -262,13 +264,15 @@ function CrudTab({
     }
   }
 
-  async function load(targetPage = 1, size?: number, searchTerm?: string) {
+  async function load(targetPage = 1, size?: number, searchTerm?: string, prodId?: number) {
     setLoading(true)
     try {
       const ps = size ?? pageSize
       const kw = searchTerm !== undefined ? searchTerm : keyword
+      const pid = prodId !== undefined ? prodId : productId
       const params: Record<string, string | number> = { page: targetPage, pageSize: ps }
       if (kw) params.search = kw
+      if (pid) params.productId = pid
       const { data } = await api.get<Paged<CrudRow>>(resource.path, {
         params,
       })
@@ -292,6 +296,10 @@ function CrudTab({
       void api
         .get<SupplierOption[]>('/suppliers')
         .then(({ data }) => setSuppliers(data))
+        .catch(notifyError)
+      void api
+        .get<{ id: number; sku: string; name: string }[]>('/products')
+        .then(({ data }) => setProducts(data))
         .catch(notifyError)
     }
   }, [resource.path])
@@ -460,8 +468,21 @@ function CrudTab({
               新建{resource.label}
             </Button>
           ) : null}
+          <Select
+            allowClear
+            showSearch
+            placeholder="全部零件（可按成品筛选）"
+            style={{ width: 240 }}
+            value={productId}
+            onChange={(v) => {
+              setProductId(v)
+              void load(1, undefined, undefined, v)
+            }}
+            optionFilterProp="label"
+            options={products.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
+          />
           <Input.Search
-            placeholder="按料号/名称/英文品名搜索"
+            placeholder="按料号/名称/英文品名/供应商/表面处理搜索"
             allowClear
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
@@ -469,7 +490,7 @@ function CrudTab({
               setKeyword(v)
               void load(1, undefined, v)
             }}
-            style={{ width: 260 }}
+            style={{ width: 300 }}
           />
         </Space>
       ) : canWrite ? (
@@ -663,6 +684,24 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)))
   }
 
+  async function exportBom() {
+    if (!productId) return
+    try {
+      const res = await api.get('/products/' + productId + '/bom/export', { responseType: 'blob' })
+      const cd = (res.headers as Record<string, unknown>)['content-disposition'] as string | undefined
+      const m = cd && /filename\*=UTF-8''([^;]+)/.exec(cd)
+      const name = m ? decodeURIComponent(m[1] ?? '') : 'erp-BOM.xlsx'
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      a.click()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      notifyError(err)
+    }
+  }
+
   async function save() {
     if (!productId) {
       message.warning('请先选择成品')
@@ -719,6 +758,15 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
             保存 BOM
           </Button>
         ) : null}
+        <Button
+          icon={<DownloadOutlined />}
+          disabled={!productId}
+          onClick={() => {
+            if (productId) void exportBom()
+          }}
+        >
+          导出表格
+        </Button>
       </Space>
       {canWrite && productId ? (
         <Space style={{ marginBottom: 8 }}>

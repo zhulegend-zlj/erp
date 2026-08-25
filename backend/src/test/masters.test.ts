@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { buildApp } from '../server'
+import { prisma } from '../db'
 import { loginCookie, resetDb } from './helpers'
 
 describe('masters 权限（工程/采购分工）', () => {
@@ -252,6 +253,58 @@ describe('masters 权限（工程/采购分工）', () => {
     // 非字符串参数 → 400
     const bad = await app.inject({ method: 'GET', url: '/api/parts?search=1&search=2', headers: { cookie } })
     expect(bad.statusCode).toBe(400)
+  })
+
+  it('零件搜索支持供应商/表面处理，且支持按成品过滤', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    const sup = await prisma.supplier.create({ data: { name: '晨鑫五金' } })
+    const p1 = await prisma.part.create({ data: { sku: 'P-SF1', name: '垫片A', finish: '电镀黑镍', supplierId: sup.id } })
+    await prisma.part.create({ data: { sku: 'P-SF2', name: '螺丝B', finish: '红色阳极', supplierId: sup.id } })
+    const p3 = await prisma.part.create({ data: { sku: 'P-SF3', name: '套管C', finish: '黑色阳极' } })
+    // 供应商搜索
+    const bySup = await app.inject({ method: 'GET', url: '/api/parts?search=' + encodeURIComponent('晨鑫'), headers: { cookie } })
+    expect(bySup.statusCode).toBe(200)
+    expect((bySup.json() as { sku: string }[]).map((p) => p.sku).sort()).toEqual(['P-SF1', 'P-SF2'])
+    // 表面处理搜索
+    const byFinish = await app.inject({ method: 'GET', url: '/api/parts?search=' + encodeURIComponent('电镀黑镍'), headers: { cookie } })
+    expect((byFinish.json() as { sku: string }[]).map((p) => p.sku)).toEqual(['P-SF1'])
+    // 按成品过滤：只返回该成品 BOM 内的零件
+    const prod = await prisma.product.create({ data: { sku: 'F-FILT', name: '成品FILT' } })
+    await prisma.bom.create({ data: { productId: prod.id, partId: p1.id, qty: 2 } })
+    await prisma.bom.create({ data: { productId: prod.id, partId: p3.id, qty: 3 } })
+    const filtered = await app.inject({ method: 'GET', url: '/api/parts?productId=' + prod.id, headers: { cookie } })
+    expect(filtered.statusCode).toBe(200)
+    expect((filtered.json() as { sku: string }[]).map((p) => p.sku).sort()).toEqual(['P-SF1', 'P-SF3'])
+    // 成品过滤 + 搜索组合 + 分页
+    const combo = await app.inject({
+      method: 'GET', url: '/api/parts?productId=' + prod.id + '&search=' + encodeURIComponent('套管') + '&page=1&pageSize=5', headers: { cookie }
+    })
+    expect(combo.statusCode).toBe(200)
+    expect(combo.json().total).toBe(1)
+    expect((combo.json().items as { sku: string }[]).map((p) => p.sku)).toEqual(['P-SF3'])
+    // 不存在的成品 → 404；非法 productId → 400
+    expect((await app.inject({ method: 'GET', url: '/api/parts?productId=999999', headers: { cookie } })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/parts?productId=abc', headers: { cookie } })).statusCode).toBe(400)
+  })
+
+  it('BOM 一键导出：xlsx 文件 + erp 文件名', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'engineer')
+    const prod = await prisma.product.create({ data: { sku: 'F-EXP', name: '成品EXP' } })
+    const part = await prisma.part.create({
+      data: { sku: 'P-EXP', name: '零件EXP', nameEn: 'part EXP', weight: '12g', revision: '1', material: 'AL', dimensions: '10x10', finish: '黑色阳极' },
+    })
+    await prisma.bom.create({ data: { productId: prod.id, partId: part.id, qty: 5 } })
+    const res = await app.inject({ method: 'GET', url: '/api/products/' + prod.id + '/bom/export', headers: { cookie } })
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('spreadsheetml')
+    expect(res.headers['content-disposition']).toContain('erp-F-EXP-BOM-')
+    const buf = res.rawPayload as Buffer
+    expect(buf[0]).toBe(0x50)
+    expect(buf[1]).toBe(0x4b)
+    // 不存在的成品 → 404
+    expect((await app.inject({ method: 'GET', url: '/api/products/999999/bom/export', headers: { cookie } })).statusCode).toBe(404)
   })
 
   it('零件列表分页时保持同一排序', async () => {

@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db'
+import * as XLSX from 'xlsx'
 import { requireRole } from '../auth/guard'
 import { parsePositiveInt } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
@@ -155,17 +156,32 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
     // 零件：按 SKU 字母前缀分组（同一产品族排在一起），组内按 SKU 中的数字从小到大排序
     if (spec.resource === 'part') {
       const orderBySql = Prisma.sql`ORDER BY lower(substring("sku" FROM '^[A-Za-z]*')) ASC, (SELECT array_agg(x)::bigint[] FROM regexp_matches("sku", '[0-9]+', 'g') AS x) ASC, "sku" ASC`
-      // 搜索：料号/中文名称/英文品名，不区分大小写模糊匹配（LIKE 特殊字符转义）
+      // 搜索：料号/中文名称/英文品名/供应商/表面处理，不区分大小写模糊匹配（LIKE 特殊字符转义）
       const searchRaw = (req.query as Record<string, unknown>).search
       let search = ''
       if (searchRaw !== undefined && searchRaw !== null) {
         if (typeof searchRaw !== 'string') return reply.code(400).send({ error: 'search 必须为字符串' })
         search = searchRaw.trim().slice(0, 100)
       }
-      const escaped = search.replace(/[\\%_]/g, (c) => '\\' + c)
-      const whereSql = search
-        ? Prisma.sql`WHERE (lower("sku") LIKE lower(${'%' + escaped + '%'}) ESCAPE '\\' OR lower("name") LIKE lower(${'%' + escaped + '%'}) ESCAPE '\\' OR lower(coalesce("nameEn", '')) LIKE lower(${'%' + escaped + '%'}) ESCAPE '\\')`
-        : Prisma.empty
+      // 成品筛选：只显示该成品 BOM 内的零件
+      const productIdRaw = (req.query as Record<string, unknown>).productId
+      let productId: number | null = null
+      if (productIdRaw !== undefined && productIdRaw !== null && String(productIdRaw) !== '') {
+        productId = parsePositiveInt(String(productIdRaw))
+        if (productId === null) return reply.code(400).send({ error: 'productId 必须为正整数' })
+        const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true } })
+        if (!product) return reply.code(404).send({ error: '成品不存在' })
+      }
+      const conds: Prisma.Sql[] = []
+      if (search) {
+        const escaped = search.replace(/[\\%_]/g, (c) => '\\' + c)
+        const pattern = '%' + escaped + '%'
+        conds.push(Prisma.sql`(lower("sku") LIKE lower(${pattern}) ESCAPE '\\' OR lower("name") LIKE lower(${pattern}) ESCAPE '\\' OR lower(coalesce("nameEn", '')) LIKE lower(${pattern}) ESCAPE '\\' OR lower(coalesce("finish", '')) LIKE lower(${pattern}) ESCAPE '\\' OR EXISTS (SELECT 1 FROM "Supplier" s WHERE s.id = "Part"."supplierId" AND lower(s.name) LIKE lower(${pattern}) ESCAPE '\\'))`)
+      }
+      if (productId !== null) {
+        conds.push(Prisma.sql`id IN (SELECT "partId" FROM "Bom" WHERE "productId" = ${productId})`)
+      }
+      const whereSql = conds.length > 0 ? Prisma.sql`WHERE ${Prisma.join(conds, ' AND ')}` : Prisma.empty
       const role = (req as { user?: { role?: string } }).user?.role ?? ''
       // 采购价格仅采购/老板可见：其余角色（工程/仓库/销售/财务）剥离 price
       const hidePrice = role !== 'purchase' && role !== 'boss'
@@ -335,6 +351,81 @@ export function mastersRoutes(app: FastifyInstance) {
       orderBy: { partId: 'asc' },
       include: { part: { select: { id: true, sku: true, name: true } } },
     })
+  })
+
+  // BOM 一键导出：列布局完全照工程 CSP_V3 清单表格 20 列（含空列），文件名带 erp
+  app.get('/api/products/:id/bom/export', { preHandler: requireRole(...READ_ROLES) }, async (req, reply) => {
+    const productId = parseId(req as { params: { id: string } }, reply)
+    if (productId === null) return
+    const product = await prisma.product.findUnique({ where: { id: productId } })
+    if (!product) return reply.code(404).send({ error: '成品不存在' })
+    const boms = await prisma.bom.findMany({
+      where: { productId },
+      include: { part: { include: { supplier: { select: { name: true } } } } },
+    })
+    // 排序与零件页一致：SKU 字母前缀分组 + 组内数字升序
+    const prefixOf = (s: string) => (s.match(/^[A-Za-z]*/)?.[0] ?? '').toLowerCase()
+    const digitsOf = (s: string) => (s.match(/[0-9]+/g) ?? []).map(Number)
+    const cmp = (a: string, b: string) => {
+      const pa = prefixOf(a)
+      const pb = prefixOf(b)
+      if (pa !== pb) return pa < pb ? -1 : 1
+      const da = digitsOf(a)
+      const db = digitsOf(b)
+      for (let i = 0; i < Math.max(da.length, db.length); i++) {
+        const x = da[i] ?? -1
+        const y = db[i] ?? -1
+        if (x !== y) return x - y
+      }
+      return a < b ? -1 : a > b ? 1 : 0
+    }
+    boms.sort((x, y) => cmp(x.part.sku, y.part.sku))
+    // 价格列：仅采购/老板可见（与零件列表口径一致），其余角色导出为空
+    const role = (req as { user?: { role?: string } }).user?.role ?? ''
+    const showPrice = role === 'purchase' || role === 'boss'
+    const header = [
+      'Item-No.\n序号', 'Part ID\n料号', 'photo\n图片', 'Description - EN', 'Part name (EN)\n（英文品名）',
+      'Part Name （CN）\n中文名称', 'Weight（g)\n重量', 'Revision\n版本', 'Material \n材质', 'Dimensions\n尺寸规格 ',
+      'Finish\n表面处理', 'Amout\n用量', 'Drawings\n图档', 'tooling  模具', 'MOQ\n起订量', 'price   价格',
+      '用在何处', 'manufacturing technique\n生产工艺', 'Art.ID\n图号', 'Vendorid\n供应商',
+    ]
+    const rows: unknown[][] = [header]
+    boms.forEach((b, i) => {
+      const p = b.part
+      const price = p.price == null ? '' : Number(p.price.toString())
+      rows.push([
+        i + 1, // 序号
+        p.sku, // 料号
+        '', // 图片（文件，不导出）
+        '', // Description-EN（未录入）
+        p.nameEn ?? '', // 英文品名
+        p.name, // 中文名称
+        p.weight ?? '', // 重量
+        p.revision ?? '', // 版本
+        p.material ?? '', // 材质
+        p.dimensions ?? '', // 尺寸规格
+        p.finish ?? '', // 表面处理
+        b.qty, // 用量
+        '', // 图档（文件，不导出）
+        p.tooling ?? '', // 模具
+        p.moq ?? '', // 起订量
+        showPrice ? price : '', // 价格
+        p.usedIn ?? '', // 用在何处
+        p.process ?? '', // 生产工艺
+        p.artId ?? '', // 图号
+        p.supplier?.name ?? '', // 供应商
+      ])
+    })
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    ws['!cols'] = [{ wch: 8 }, { wch: 16 }, { wch: 10 }, { wch: 14 }, { wch: 26 }, { wch: 26 }, { wch: 10 }, { wch: 8 }, { wch: 24 }, { wch: 20 }, { wch: 22 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 14 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, product.sku)
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const fileName = 'erp-' + product.sku + '-BOM-' + date + '.xlsx'
+    reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    reply.header('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(fileName) + '; filename="erp-bom.xlsx"')
+    reply.send(buf)
   })
 
   app.put('/api/products/:id/bom', { preHandler: requireRole(...ENGINEER_WRITE_ROLES) }, async (req, reply) => {
