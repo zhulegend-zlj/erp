@@ -414,13 +414,18 @@ export function mastersRoutes(app: FastifyInstance) {
       return a < b ? -1 : a > b ? 1 : 0
     }
     boms.sort((x, y) => cmp(x.part.sku, y.part.sku))
-    // 导出列（老板口径）：序号/料号/图片/Description-EN/英文品名/中文名称/重量/版本/材质/尺寸规格/表面处理/用量/供应商
+    // 导出列（权限口径）：基础 13 列（序号/料号/图片/Description-EN/英文品名/中文名称/重量/版本/材质/尺寸规格/表面处理/用量/供应商）；
+    // 采购/老板额外在「用量」后带「价格」列（与零件列表价格可见性口径一致），其余角色无价格列
+    const role = (req as { user?: { role?: string } }).user?.role ?? ''
+    const showPrice = role === 'purchase' || role === 'boss'
     const header = [
       'Item-No.\n序号', 'Part ID\n料号', 'photo\n图片', 'Description - EN', 'Part name (EN)\n（英文品名）',
       'Part Name （CN）\n中文名称', 'Weight（g)\n重量', 'Revision\n版本', 'Material \n材质', 'Dimensions\n尺寸规格 ',
-      'Finish\n表面处理', 'Amout\n用量', 'Vendorid\n供应商',
+      'Finish\n表面处理', 'Amout\n用量',
+      ...(showPrice ? ['price   价格'] : []),
+      'Vendorid\n供应商',
     ]
-    const widths = [8, 16, 12, 14, 26, 26, 10, 8, 24, 20, 22, 8, 14]
+    const widths = [8, 16, 12, 14, 26, 26, 10, 8, 24, 20, 22, 8, ...(showPrice ? [10] : []), 14]
     // exceljs 生成：嵌入图片缩略图 + 表头样式 + 冻结首行 + 每列筛选排序
     const wb = new ExcelJS.Workbook()
     wb.creator = 'erp'
@@ -451,6 +456,7 @@ export function mastersRoutes(app: FastifyInstance) {
         p.dimensions ?? '', // 尺寸规格
         p.finish ?? '', // 表面处理
         b.qty, // 用量
+        ...(showPrice ? [p.price == null ? '' : Number(p.price.toString())] : []), // 价格（仅采购/老板）
         p.supplier?.name ?? '', // 供应商
       ])
       row.eachCell((cell) => {
@@ -476,8 +482,8 @@ export function mastersRoutes(app: FastifyInstance) {
         }
       }
     }
-    // 每列排序筛选：覆盖全部列（A..M，含表头到末行）
-    ws.autoFilter = { from: 'A1', to: 'M' + (boms.length + 1) }
+    // 每列排序筛选：覆盖全部列（含价格列则为 A..N，否则 A..M）
+    ws.autoFilter = { from: 'A1', to: (showPrice ? 'N' : 'M') + (boms.length + 1) }
     const buf = await wb.xlsx.writeBuffer()
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     const fileName = 'erp-' + product.sku + '-BOM-' + date + '.xlsx'
