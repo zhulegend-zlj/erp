@@ -215,7 +215,7 @@ async function main() {
     }
 
     // 图片：优先 V3I 表内嵌图（物理行号 = 数据行号 + 1），否则共用零件用 V3 已上传图片
-    let imgPath = sheetImgs.get(ri + 1) ?? null
+    let imgPath = sheetImgs.get(ri) ?? null
     let imgFrom = ''
     if (!imgPath) {
       const v3img = v3Parts.get(sku)?.imageUrl
@@ -285,15 +285,16 @@ async function main() {
     for (const e of extraDrawings) ws2.addRow([e])
     ws2.getColumn(1).width = 90
   }
-  // 原文件被 Excel 打开时（EBUSY）自动落到 -v2 文件名
+  // 原文件被 Excel 打开时（EBUSY）依次回退到 -v2 / -v3 文件名
   let finalOut = OUT
-  try {
-    await wbOut.xlsx.writeFile(OUT)
-  } catch (e) {
-    if (String(e).includes('EBUSY')) {
-      finalOut = OUT.replace('.xlsx', '-v2.xlsx')
-      await wbOut.xlsx.writeFile(finalOut)
-    } else {
+  for (const suffix of ['', '-v2', '-v3']) {
+    const candidate = suffix ? OUT.replace('.xlsx', suffix + '.xlsx') : OUT
+    try {
+      await wbOut.xlsx.writeFile(candidate)
+      finalOut = candidate
+      break
+    } catch (e) {
+      if (String(e).includes('EBUSY')) continue
       throw e
     }
   }
