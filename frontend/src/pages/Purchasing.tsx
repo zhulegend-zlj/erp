@@ -396,8 +396,10 @@ export default function Purchasing() {
             style={{ marginTop: 16 }}
             type="success"
             showIcon
-            message="最近生成的采购单"
+            closable
+            message="最近生成的采购单（点右侧 × 可关闭）"
             description={lastPos.map((po) => po.orderNo).join('、')}
+            onClose={() => setLastPos([])}
           />
         ) : null}
       </Card>
