@@ -905,10 +905,29 @@ function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; pr
             }}
           />
         </Form.Item>
-        <Form.Item name="qty" label="数量" rules={[{ required: true, message: '数量' }]}>
+        <Form.Item
+          name="qty"
+          label="数量"
+          rules={[
+            { required: true, message: '数量' },
+            {
+              validator: (_, v: number | undefined | null) => {
+                if (v == null) return Promise.resolve()
+                if (selectedProductId != null && remainQty <= 0) {
+                  message.warning('该成品已收满，不能再入库')
+                  return Promise.reject(new Error('该成品已收满，不能再入库'))
+                }
+                if (selectedProductId != null && v > remainQty) {
+                  message.warning('入库数量不能超过 ' + remainQty + ' 台（该成品订单数量 ' + productTotal + ' 台，已入库 ' + productDone + ' 台）')
+                  return Promise.reject(new Error('最多只能入 ' + remainQty + ' 台'))
+                }
+                return Promise.resolve()
+              },
+            },
+          ]}
+        >
           <InputNumber
             min={1}
-            max={selectedProductId != null && remainQty > 0 ? remainQty : 1}
             precision={0}
             step={1}
             placeholder="数量"
