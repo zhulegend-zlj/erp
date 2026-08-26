@@ -282,6 +282,20 @@ export default function Purchasing() {
           .then(({ data: rd }) => setRequirements(rd))
           .catch(notifyError)
       }
+      // 生成采购单后刷新「待采购」横幅与订单下拉——该订单已有采购单，横幅自动消失，无需刷新页面
+      void Promise.all([
+        api.get<SalesOrder[]>('/orders'),
+        api.get<SalesOrder[]>('/orders', { params: { pendingPurchase: 'true' } }),
+      ])
+        .then(([o, p]) => {
+          setOrders(o.data)
+          setPendingOrders(p.data)
+          // 「只看待采购」模式下，当前订单已不在待采购列表 → 自动切回「显示全部订单」，避免下拉显示数字 ID
+          if (orderId != null && !p.data.some((x) => x.id === orderId)) {
+            setPendingOnly(false)
+          }
+        })
+        .catch(notifyError)
     } catch (err) {
       notifyError(err)
     } finally {
