@@ -216,12 +216,23 @@ export function ordersRoutes(app: FastifyInstance) {
     for (const g of producedByProductRows) {
       producedByProduct[g.productId] = g._sum.qty ?? 0
     }
+    // 按成品维度的已出货量（出货排程页「可排剩余」用）
+    const shippedByProductRows = await prisma.shipmentLine.groupBy({
+      by: ['productId'],
+      where: { salesOrderId: id },
+      _sum: { qty: true },
+    })
+    const shippedByProduct: Record<number, number> = {}
+    for (const g of shippedByProductRows) {
+      shippedByProduct[g.productId] = g._sum.qty ?? 0
+    }
     const totalQty = order.items.reduce((sum, it) => sum + it.qty, 0)
     return {
       ...sanitizeOrderForRole(order, role),
       producedQty: produced._sum.qty ?? 0,
       producedByProduct,
       shippedQty: shipped._sum.qty ?? 0,
+      shippedByProduct,
       totalQty,
     }
   })

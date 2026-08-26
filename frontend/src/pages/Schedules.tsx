@@ -16,6 +16,7 @@ interface OrderOption {
   customerPoNo: string | null
   status: string
   customer?: { name: string }
+  shippedByProduct?: Record<number, number>
   items?: Array<{
     productId: number
     qty: number
@@ -88,6 +89,53 @@ export default function Schedules() {
     .filter((o) => ['confirmed', 'in_production', 'ready'].includes(o.status))
     .map((o) => ({ value: o.id, label: o.orderNo + '（PO ' + (o.customerPoNo ?? '-') + '）' }))
 
+  // 已排程数量（未取消）：按 订单+成品 汇总（rows 为全量排程）
+  function scheduledQty(salesOrderId: number, productId: number): number {
+    return rows
+      .filter((r) => r.salesOrderId === salesOrderId && r.productId === productId && r.status !== 'cancelled')
+      .reduce((sum, r) => sum + r.qty, 0)
+  }
+
+  function remainQty(productId: number | undefined): number {
+    if (productId == null || !orderDetail) return 0
+    const it = orderDetail.items?.find((x) => x.productId === productId)
+    if (!it) return 0
+    const shipped = orderDetail.shippedByProduct?.[productId] ?? 0
+    return it.qty - scheduledQty(orderDetail.id, productId) - shipped
+  }
+
+  // 订单明细指导行：成品 / 订单数量 / 已排程 / 已出 / 可排剩余 / 要求日 / 承诺日
+  const detailRows = (orderDetail?.items ?? []).map((it) => {
+    const scheduled = scheduledQty(orderDetail!.id, it.productId)
+    const shipped = orderDetail?.shippedByProduct?.[it.productId] ?? 0
+    return {
+      key: it.productId,
+      product: it.product.name + '（' + it.product.sku + '）',
+      orderQty: it.qty,
+      scheduled,
+      shipped,
+      remain: it.qty - scheduled - shipped,
+      needBy: it.customerDeliveryDate ? String(it.customerDeliveryDate).slice(0, 10) : '-',
+      promised: it.zrhDeliveryDate ? String(it.zrhDeliveryDate).slice(0, 10) : '-',
+    }
+  })
+
+  const detailColumns = [
+    { title: '成品', dataIndex: 'product', key: 'product' },
+    { title: '订单数量', dataIndex: 'orderQty', key: 'orderQty', width: 90 },
+    { title: '已排程', dataIndex: 'scheduled', key: 'scheduled', width: 80 },
+    { title: '已出货', dataIndex: 'shipped', key: 'shipped', width: 80 },
+    {
+      title: '剩余可排',
+      dataIndex: 'remain',
+      key: 'remain',
+      width: 100,
+      render: (v: number) => (v > 0 ? <Tag color="green">{v}</Tag> : <Tag color="red">已排满</Tag>),
+    },
+    { title: '客户要求日', dataIndex: 'needBy', key: 'needBy', width: 112 },
+    { title: '承诺日(PD)', dataIndex: 'promised', key: 'promised', width: 112 },
+  ]
+
   async function onOrderSelect(orderId: number) {
     try {
       const { data } = await api.get<OrderOption>('/orders/' + orderId)
@@ -112,6 +160,15 @@ export default function Schedules() {
   async function handleCreate(values: { salesOrderId?: number; productId?: number; qty?: number; hubId?: number; needByDate?: string; promisedDate?: string; note?: string }) {
     if (!values.salesOrderId || !values.productId || !values.qty) {
       message.warning('请选择订单/成品并填写数量')
+      return
+    }
+    const remain = remainQty(values.productId)
+    if (remain <= 0) {
+      message.warning('该成品已排满（订单数量已全部排程/出货），不能再排')
+      return
+    }
+    if (values.qty > remain) {
+      message.warning('排程数量不能超过剩余可排 ' + remain + ' 台')
       return
     }
     setSubmitting(true)
@@ -262,7 +319,7 @@ export default function Schedules() {
               style={{ width: 220 }}
               options={(orderDetail?.items ?? []).map((it) => ({
                 value: it.productId,
-                label: it.product.name + '（' + it.product.sku + '，订单 ' + it.qty + '）',
+                label: it.product.name + '（' + it.product.sku + '，订单 ' + it.qty + '，剩余可排 ' + remainQty(it.productId) + '）',
               }))}
               onChange={(v) => {
                 // 交期已在订单明细行级：选完成品自动带出该行的客户要求日与承诺日（可改）
@@ -321,6 +378,17 @@ export default function Schedules() {
       ) : (
         <p style={{ marginBottom: 12 }}>仓库角色：对「待备货」的排程点击「已备好」，销售即可在出货页安排装车。</p>
       )}
+      {orderDetail ? (
+        <Table
+          size="small"
+          rowKey="key"
+          pagination={false}
+          style={{ marginBottom: 16 }}
+          title={() => <span style={{ fontWeight: 600 }}>订单 {orderDetail.orderNo} 明细（录入排程参考：剩余可排 = 订单数量 - 已排程 - 已出货）</span>}
+          dataSource={detailRows}
+          columns={detailColumns}
+        />
+      ) : null}
       <Table<ScheduleRow>
         rowKey="id"
         columns={columns}
