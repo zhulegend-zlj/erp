@@ -150,6 +150,7 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   // 右上角日期与发票号
   const d2 = ws.getCell('M2')
   d2.value = excelDate(d.shipment.shippedAt)
+  d2.numFmt = 'm/d/yy' // 与 Due Date 同款美式日期（如 8/14/26）
   setVal(ws, 'M3', d.shipment.invoiceNo ?? '')
 
   // 抬头（Issuer）
