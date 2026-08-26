@@ -85,19 +85,19 @@ function readSheet(fileName: string, sheetName: string): unknown[][] {
 
 const PRODUCTS = [
   {
-    sku: 'CSS-SQ',
+    sku: 'CSS_SQ',
     name: '挂档器',
     file: '2026年7月22日始挂档器(SQ)物料入出库表.xlsx',
     sheets: ['订单269777物料计算', '订单269776物料计算'],
   },
   {
-    sku: 'CSP-V3',
+    sku: 'CSP_V3',
     name: '脚踏板 V3',
     file: '2026年7月22日始脚踏板物料入出库表.xlsx',
     sheets: ['订单269018(V3)物料计算', '订单269174(V3)物料计算'],
   },
   {
-    sku: 'CSP-V3I',
+    sku: 'CSP_V3I',
     name: 'V3I',
     file: '2026年7月22日始脚踏板物料入出库表.xlsx',
     sheets: ['订单269021(V3I)物料计算'],

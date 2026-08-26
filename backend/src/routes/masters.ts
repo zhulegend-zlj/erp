@@ -24,8 +24,9 @@ import {
 } from '../uploads-store'
 
 const READ_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance', 'engineer'] as const
-// 客户/供应商：采购与老板维护
+// 客户/供应商：采购与老板维护；客户额外开放给销售（销售最熟客户，可增改删）
 const SUPPLIER_WRITE_ROLES = ['boss', 'purchase'] as const
+const CUSTOMER_WRITE_ROLES = ['boss', 'purchase', 'sales'] as const
 // 成品/零件/BOM：工程与老板维护
 const ENGINEER_WRITE_ROLES = ['boss', 'engineer'] as const
 
@@ -38,6 +39,11 @@ const customerSchema = z.object({
   vatNo: z.string().nullable().optional(),
   eori: z.string().nullable().optional(),
   notifyParty: z.string().nullable().optional(),
+  // 单证默认值（新建订单/出货自动带出）
+  defaultPaymentTerms: z.string().nullable().optional(),
+  defaultIncoterm: z.string().nullable().optional(),
+  defaultMark: z.string().nullable().optional(),
+  defaultTaxRate: z.string().nullable().optional(),
 })
 
 const supplierSchema = z.object({
@@ -379,7 +385,7 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
 }
 
 export function mastersRoutes(app: FastifyInstance) {
-  registerCrud(app, { resource: 'customer', schema: customerSchema, writeRoles: SUPPLIER_WRITE_ROLES })
+  registerCrud(app, { resource: 'customer', schema: customerSchema, writeRoles: CUSTOMER_WRITE_ROLES })
   registerCrud(app, { resource: 'supplier', schema: supplierSchema, writeRoles: SUPPLIER_WRITE_ROLES })
   registerCrud(app, { resource: 'product', schema: productSchema, writeRoles: ENGINEER_WRITE_ROLES })
   registerCrud(app, { resource: 'part', schema: partSchema, writeRoles: ENGINEER_WRITE_ROLES })

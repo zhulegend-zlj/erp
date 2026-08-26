@@ -43,7 +43,7 @@ describe('dashboard', () => {
       data: {
         orderNo: 'SO-BOSS-A',
         customerId: customer.id,
-        deliveryDate: new Date(),
+        zrhDeliveryDate: new Date(),
         status: 'confirmed',
         otherCost: 50,
         items: { create: { productId: product.id, qty: 2, unitPrice: 100 } }
@@ -69,7 +69,7 @@ describe('dashboard', () => {
       data: {
         orderNo: 'SO-BOSS-B',
         customerId: customer.id,
-        deliveryDate: new Date(),
+        zrhDeliveryDate: new Date(),
         status: 'shipped',
         otherCost: 0,
         items: { create: { productId: product.id, qty: 1, unitPrice: 50 } }

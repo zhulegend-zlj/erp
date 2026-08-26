@@ -29,6 +29,8 @@ export async function resetDb(): Promise<void> {
   await prisma.productionEntry.deleteMany()
   await prisma.purchaseOrderItem.deleteMany()
   await prisma.purchaseOrder.deleteMany()
+  await prisma.shipmentSchedule.deleteMany()
+  await prisma.shipToHub.deleteMany()
   await prisma.salesOrderItem.deleteMany()
   await prisma.salesOrder.deleteMany()
   await prisma.bom.deleteMany()

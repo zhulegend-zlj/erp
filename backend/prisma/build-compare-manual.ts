@@ -9,7 +9,7 @@ import * as XLSX from 'xlsx'
 const prisma = new PrismaClient()
 const V3_FILE = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3清单_物料明细.xlsx'
 const V3I_FILE = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3I清单-螺丝物料表.xlsx'
-const V3I_TABLE = 'D:/AI/erp-backups/CSP-V3I-SKU对照表.xlsx'
+const V3I_TABLE = 'D:/AI/erp-backups/CSP_V3I-SKU对照表.xlsx'
 const RAR_V3 = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3_2D PDF.rar'
 const CSS_FILE = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSS_SQ黑色+USB清单-物料明细.xlsx'
 const RAR_CSS = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSS_SQ 2D PDF.rar'
@@ -121,7 +121,7 @@ async function main() {
 
   // ===== V3I 对照（以老板复核后的对照表为口径 + 导入时的覆盖） =====
   const wbT = XLSX.read(readFileSync(V3I_TABLE), { type: 'buffer' })
-  const trows = XLSX.utils.sheet_to_json(wbT.Sheets['CSP-V3I对照'], { header: 1, defval: '', raw: false }) as unknown[][]
+  const trows = XLSX.utils.sheet_to_json(wbT.Sheets['CSP_V3I对照'], { header: 1, defval: '', raw: false }) as unknown[][]
   const v3iSheet: unknown[][] = [['表内序号', '原表料号', 'ERP料号', '中文名称', '用量', '与V3关系', '图片', '图档', '供应商', '备注']]
   const overrides: Record<string, string> = {}
   for (const r of trows.slice(1)) {
@@ -315,7 +315,7 @@ async function main() {
     ['3. 有出入直接在 ERP 里改（工程改零件/BOM，采购改供应商/价格），改完告诉我，我重新生成手册核对'],
     [''],
     ['四、ERP 当前数据概况'],
-    ['- 成品：CSP-V3（CSP V3 挂档器，107 零件/107 BOM 行）、CSP-V3I（CSP V3I 脚踏板，146 BOM 行，67 个与 V3 共用）、CSS-SQ（CSS_SQ 挂档器（黑色+USB），82 BOM 行，8 个与已有零件共用）'],
+    ['- 成品：CSP_V3（CSP V3 挂档器，107 零件/107 BOM 行）、CSP_V3I（CSP V3I 脚踏板，146 BOM 行，67 个与 V3 共用）、CSS_SQ（CSS_SQ 挂档器（黑色+USB），82 BOM 行，8 个与已有零件共用）'],
     ['- 零件总数 261；CSS_SQ 新杂项编号从 CSS-101 起编（老板确认）'],
     ['- CSS_SQ 特殊口径：磁铁两行分开（CSS-095/CSS-104）、插销两行分开（CSS-101/CSS-102）、CS_USB_A=CSS-115、PU泡棉 CSS-062 独立建'],
   ]
@@ -330,7 +330,7 @@ async function main() {
   append('说明', guideSheet, [90])
   append('V3对照', v3Sheet, [8, 18, 16, 28, 6, 6, 6, 14, 46])
   append('V3I对照', v3iSheet, [8, 18, 16, 28, 6, 18, 6, 6, 14, 60])
-  append('CSS-SQ对照', cssSheet, [8, 16, 16, 26, 6, 14, 6, 6, 14, 50])
+  append('CSS_SQ对照', cssSheet, [8, 16, 16, 26, 6, 14, 6, 6, 14, 50])
   append('图档对照', dwgSheet, [6, 60, 12, 34, 26])
   append('待办与待确认', todoSheet, [22, 100])
   let finalOut = OUT

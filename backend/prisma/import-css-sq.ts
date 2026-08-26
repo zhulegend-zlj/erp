@@ -16,7 +16,7 @@ const RAR = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/fi
 const UNRAR = 'C:/Program Files/WinRAR/UnRAR.exe'
 const TAR = 'C:/Windows/System32/tar.exe'
 const TMP = resolve(process.cwd(), 'tmp-css-sq-import')
-const PRODUCT_SKU = 'CSS-SQ'
+const PRODUCT_SKU = 'CSS_SQ'
 const PRODUCT_NAME = 'CSS_SQ 挂档器（黑色+USB）'
 const REAL_VENDORS = ['雄浩', '森逸（樟洋）', '伟升', '鑫中源', '金邦', '亚科', '信博', '玖丰', '林洲', '鹏飞']
 
@@ -233,7 +233,7 @@ async function main() {
     const ext = /\.png$/i.test(src) ? '.png' : '.jpeg'
     const tmpName = 'imgimp-css-' + part.id + ext
     copyFileSync(src, resolve(UPLOAD_DIR, tmpName))
-    const url = await placePartFile(tmpName, ['CSS-SQ'], partDirName(part.sku, part.name), 'image', ext)
+    const url = await placePartFile(tmpName, ['CSS_SQ'], partDirName(part.sku, part.name), 'image', ext)
     await prisma.part.update({ where: { id: part.id }, data: { imageUrl: url } })
     imgSet++
   }
@@ -257,7 +257,7 @@ async function main() {
     if (!found) { dwgMiss.push(sku + '（rar未找到）'); continue }
     const tmpName = 'dwgimp-css-' + part.id + '.pdf'
     copyFileSync(found, resolve(UPLOAD_DIR, tmpName))
-    const url = await placePartFile(tmpName, ['CSS-SQ'], partDirName(part.sku, part.name), 'drawing', '.pdf')
+    const url = await placePartFile(tmpName, ['CSS_SQ'], partDirName(part.sku, part.name), 'drawing', '.pdf')
     await prisma.part.update({ where: { id: part.id }, data: { drawingsUrl: url } })
     dwgSet++
   }
@@ -288,7 +288,7 @@ async function main() {
       console.log('  ⚠ 文件夹被占用，保持原位:', partDir, String(e).slice(0, 50))
     }
   }
-  // 共用零件（螺丝等）也要归位（它们挂在 V3/V3I + CSS-SQ）
+  // 共用零件（螺丝等）也要归位（它们挂在 V3/V3I + CSS_SQ）
   const sharedSkus = ['M4x10-平头', 'M4x10-杯头', 'M3x8-杯头', 'CSP-217', 'CSP-219', 'CSP-220', 'CSP-221', '49-002769']
   for (const sku of sharedSkus) {
     const part = await prisma.part.findUnique({ where: { sku } })
@@ -320,7 +320,7 @@ async function main() {
     prisma.bom.count({ where: { productId: product.id } }),
   ])
   console.log('--- 导入完成 ---')
-  console.log('库内零件总数:', partsTotal, '；CSS-SQ BOM 行数:', bomsTotal)
+  console.log('库内零件总数:', partsTotal, '；CSS_SQ BOM 行数:', bomsTotal)
   rmSync(TMP, { recursive: true, force: true })
   await prisma.$disconnect()
 }

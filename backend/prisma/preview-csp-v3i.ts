@@ -13,7 +13,7 @@ const RAR_V3I = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/ms
 const RAR_V3 = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3_2D PDF.rar'
 const UNRAR = 'C:/Program Files/WinRAR/UnRAR.exe'
 const TAR = 'C:/Windows/System32/tar.exe'
-const OUT = process.env.PREVIEW_OUT || 'D:/AI/erp-backups/CSP-V3I-SKU对照表.xlsx'
+const OUT = process.env.PREVIEW_OUT || 'D:/AI/erp-backups/CSP_V3I-SKU对照表.xlsx'
 const TMP = resolve(process.cwd(), 'tmp-v3i-xlsx')
 
 function clean(v: unknown): string {
@@ -248,7 +248,7 @@ async function main() {
   // 输出 exceljs：嵌入图片 + 表头样式 + 冻结 + 筛选
   const wbOut = new ExcelJS.Workbook()
   wbOut.creator = 'erp'
-  const ws = wbOut.addWorksheet('CSP-V3I对照', { views: [{ state: 'frozen', ySplit: 1 }] })
+  const ws = wbOut.addWorksheet('CSP_V3I对照', { views: [{ state: 'frozen', ySplit: 1 }] })
   const header = ['表内序号', '图片', '原表料号', '建议新SKU', 'V3I中文名称', '用量', '与V3关系', 'V3对应料号', '导入供应商', 'V3i图档', '图档是否与V3共用', '备注/颜色标注']
   ws.columns = header.map((h, i) => ({ header: h, key: 'c' + i, width: [8, 12, 18, 16, 30, 6, 22, 14, 14, 10, 26, 70][i] }))
   const hr = ws.getRow(1)

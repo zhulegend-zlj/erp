@@ -26,8 +26,8 @@ function formatDate(d: Date): string {
 }
 
 export function dashboardRoutes(app: FastifyInstance) {
-  // 老板看板：仅 boss
-  app.get('/api/dashboard/summary', { preHandler: requireRole('boss') }, async () => {
+  // 看板/首页摘要：老板 + 采购（采购用于「待采购」提醒）
+  app.get('/api/dashboard/summary', { preHandler: requireRole('boss', 'purchase') }, async () => {
     const orders = await prisma.salesOrder.findMany({
       orderBy: { id: 'desc' as const },
       include: {
@@ -78,6 +78,11 @@ export function dashboardRoutes(app: FastifyInstance) {
       }
     })
 
+    // 待采购：已确认且尚未生成任何采购单的订单数（采购页/首页提醒用）
+    const pendingPurchaseOrders = await prisma.salesOrder.count({
+      where: { status: 'confirmed', purchaseOrders: { none: {} } },
+    })
+
     // 应付余额：全部采购单金额 - 全部供应商付款（含未挂采购单的付款），下限 0
     const [purchaseOrders, supplierPaid] = await Promise.all([
       prisma.purchaseOrder.findMany({ include: { items: true } }),
@@ -91,6 +96,6 @@ export function dashboardRoutes(app: FastifyInstance) {
       ),
     )
 
-    return { orders: rows, receivableTotal, payableTotal, overdueReceivable }
+    return { orders: rows, receivableTotal, payableTotal, overdueReceivable, pendingPurchaseOrders }
   })
 }

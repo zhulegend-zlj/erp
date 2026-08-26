@@ -42,7 +42,7 @@ describe('purchasing', () => {
       data: {
         orderNo: 'SO-REQ-7',
         customerId: customer.id,
-        deliveryDate: new Date('2026-10-01'),
+        zrhDeliveryDate: new Date('2026-10-01'),
         status: 'confirmed',
         items: {
           create: [

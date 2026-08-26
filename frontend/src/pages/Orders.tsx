@@ -9,6 +9,7 @@ import type { Paged } from './common'
 interface Customer {
   id: number
   name: string
+  defaultPaymentTerms?: string | null
 }
 
 interface Product {
@@ -30,10 +31,16 @@ interface SalesOrder {
   id: number
   orderNo: string
   customerId: number
-  deliveryDate: string
+  customerPoNo: string | null
+  orderDate: string
+  customerDeliveryDate: string | null
+  zrhDeliveryDate: string
+  paymentTerms: string | null
   status: string
   purchasing?: boolean
   producing?: boolean
+  shippedQty?: number
+  totalQty?: number
   customer: { name: string }
   items: OrderItem[]
 }
@@ -46,8 +53,19 @@ interface OrderItemField {
 
 interface OrderFormValues {
   customerId?: number
-  deliveryDate?: string
+  customerPoNo?: string
+  orderDate?: string
+  customerDeliveryDate?: string
+  zrhDeliveryDate?: string
+  paymentTerms?: string
   items?: OrderItemField[]
+}
+
+function todayStr(): string {
+  const d = new Date()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return d.getFullYear() + '-' + m + '-' + day
 }
 
 export default function Orders() {
@@ -110,7 +128,11 @@ export default function Orders() {
     try {
       await api.post('/orders', {
         customerId: values.customerId,
-        deliveryDate: values.deliveryDate,
+        customerPoNo: values.customerPoNo,
+        orderDate: values.orderDate || todayStr(),
+        customerDeliveryDate: values.customerDeliveryDate,
+        zrhDeliveryDate: values.zrhDeliveryDate,
+        paymentTerms: values.paymentTerms || null,
         items: (values.items ?? []).map((it) => ({
           productId: Number(it.productId ?? 0),
           qty: Number(it.qty ?? 0),
@@ -149,7 +171,6 @@ export default function Orders() {
       message.success('订单已删除')
       setDeleteTarget(null)
       setDeleteText('')
-      // 删掉当前页最后一条时回退一页，避免停在空页
       if (orders.length === 1 && page > 1) {
         await load(page - 1)
       } else {
@@ -165,6 +186,7 @@ export default function Orders() {
   const columns = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
     { title: '订单号', dataIndex: 'orderNo', key: 'orderNo' },
+    { title: '客户PO', dataIndex: 'customerPoNo', key: 'customerPoNo', render: (v: string | null) => v || '-' },
     {
       title: '客户',
       key: 'customer',
@@ -176,7 +198,20 @@ export default function Orders() {
       key: 'status',
       render: (_: unknown, r: SalesOrder) => <Tag color={phaseTagColor(r)}>{orderPhaseLabel(r)}</Tag>,
     },
-    { title: '交期', dataIndex: 'deliveryDate', key: 'deliveryDate', render: dateStr },
+    {
+      title: '已出',
+      key: 'shipped',
+      width: 90,
+      render: (_: unknown, r: SalesOrder) => {
+        const shipped = r.shippedQty ?? 0
+        const totalQty = r.totalQty ?? 0
+        if (totalQty > 0 && shipped > 0 && shipped < totalQty) {
+          return <Tag color="blue">{shipped + '/' + totalQty}</Tag>
+        }
+        return shipped > 0 && shipped >= totalQty ? <Tag color="green">出满</Tag> : '-'
+      },
+    },
+    { title: 'ZRH交期', dataIndex: 'zrhDeliveryDate', key: 'zrhDeliveryDate', render: dateStr },
     {
       title: '明细',
       key: 'items',
@@ -188,7 +223,6 @@ export default function Orders() {
       key: 'action',
       render: (_: unknown, r: SalesOrder) => {
         if (!canAdvance) return null
-        // 新分工：销售/老板 草稿↔已确认、已出货→已完成；老板额外可强制回退运作中订单到已确认
         const nextMap: Record<string, string> = { draft: 'confirmed', shipped: 'completed' }
         const prevMap: Record<string, string> = { confirmed: 'draft' }
         const bossPrev: Record<string, string> = { in_production: 'confirmed', ready: 'confirmed' }
@@ -204,12 +238,7 @@ export default function Orders() {
                 cancelText="取消"
                 onConfirm={() => void handleStatusChange(r.id, next, 'advance')}
               >
-                <Button
-                  size="small"
-                  type="primary"
-                  ghost
-                  loading={advancingId === r.id}
-                >
+                <Button size="small" type="primary" ghost loading={advancingId === r.id}>
                   推进至「{statusLabel(next)}」
                 </Button>
               </Popconfirm>
@@ -258,6 +287,7 @@ export default function Orders() {
             icon={<PlusOutlined />}
             onClick={() => {
               form.resetFields()
+              form.setFieldsValue({ orderDate: todayStr() })
               setModalOpen(true)
             }}
           >
@@ -293,30 +323,39 @@ export default function Orders() {
         onCancel={() => setModalOpen(false)}
         onOk={() => form.submit()}
         confirmLoading={submitting}
-        width={720}
+        width={820}
         destroyOnClose
       >
         <Form form={form} layout="vertical" onFinish={handleCreate}>
-          <Space style={{ display: 'flex' }} align="start">
-            <Form.Item
-              name="customerId"
-              label="客户"
-              rules={[{ required: true, message: '请选择客户' }]}
-              style={{ width: 260 }}
-            >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px' }}>
+            <Form.Item name="customerId" label="客户" rules={[{ required: true, message: '请选择客户' }]}>
               <Select
                 placeholder="选择客户"
+                showSearch
+                optionFilterProp="label"
                 options={customers.map((c) => ({ value: c.id, label: c.name }))}
+                onChange={(v) => {
+                  const c = customers.find((x) => x.id === v)
+                  if (c?.defaultPaymentTerms) form.setFieldsValue({ paymentTerms: c.defaultPaymentTerms })
+                }}
               />
             </Form.Item>
-            <Form.Item
-              name="deliveryDate"
-              label="交货日期"
-              rules={[{ required: true, message: '请选择交货日期' }]}
-            >
+            <Form.Item name="customerPoNo" label="客户PO号" rules={[{ required: true, message: '请输入客户PO号' }]}>
+              <Input placeholder="如 265440" />
+            </Form.Item>
+            <Form.Item name="orderDate" label="订单日期" rules={[{ required: true, message: '请选择订单日期' }]}>
               <Input type="date" />
             </Form.Item>
-          </Space>
+            <Form.Item name="customerDeliveryDate" label="客户交期（客户要求到货日）" rules={[{ required: true, message: '请选择客户交期' }]}>
+              <Input type="date" />
+            </Form.Item>
+            <Form.Item name="zrhDeliveryDate" label="ZRH交货日期（承诺客户=车间完成目标）" rules={[{ required: true, message: '请选择ZRH交货日期' }]}>
+              <Input type="date" />
+            </Form.Item>
+            <Form.Item name="paymentTerms" label="付款条件">
+              <Input placeholder="如 NET 60（自动带客户默认）" />
+            </Form.Item>
+          </div>
           <Form.List name="items" initialValue={[{}]}>
             {(fields, { add, remove }) => (
               <>
@@ -325,10 +364,12 @@ export default function Orders() {
                     <Form.Item
                       name={[field.name, 'productId']}
                       rules={[{ required: true, message: '选择成品' }]}
-                      style={{ width: 260, marginBottom: 0 }}
+                      style={{ width: 280, marginBottom: 0 }}
                     >
                       <Select
                         placeholder="选择成品"
+                        showSearch
+                        optionFilterProp="label"
                         options={products.map((p) => ({
                           value: p.id,
                           label: p.name + '（' + p.sku + '）',

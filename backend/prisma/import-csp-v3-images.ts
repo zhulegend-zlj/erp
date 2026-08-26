@@ -2,7 +2,7 @@
 // 用法：cd backend && npx tsx --env-file=.env prisma/import-csp-v3-images.ts
 // 说明：
 // - 图片通过 drawing1.xml 的两格锚点（col=2 即「图片」列）按行号定位，行号对应表格物理行序；
-// - 行号 → SKU 用对照表 CSP-V3-SKU对照表.xlsx（与上次导入同一口径）映射；
+// - 行号 → SKU 用对照表 CSP_V3-SKU对照表.xlsx（与上次导入同一口径）映射；
 // - 同一零件两张图时只取第一张（其余记录跳过清单）；表格外游离图片（其他列/表外行）跳过；
 // - 已有 imageUrl 的零件不覆盖（尊重系统内手工上传）。
 import { PrismaClient } from '@prisma/client'
@@ -14,7 +14,7 @@ import { UPLOAD_DIR, partDirName, placePartFile } from '../src/uploads-store'
 
 const prisma = new PrismaClient()
 const FILE = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3清单_物料明细.xlsx'
-const MAPPING = 'D:/AI/erp-backups/CSP-V3-SKU对照表.xlsx'
+const MAPPING = 'D:/AI/erp-backups/CSP_V3-SKU对照表.xlsx'
 const TMP = resolve(process.cwd(), 'tmp-xlsx-img')
 const TAR = 'C:/Windows/System32/tar.exe'
 

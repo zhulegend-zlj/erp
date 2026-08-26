@@ -497,7 +497,7 @@ describe('masters 权限（工程/采购分工）', () => {
 
     const product = await app.inject({
       method: 'POST', url: '/api/products', headers: { cookie: engineerCookie },
-      payload: { sku: 'CSP-V3', name: 'CSP V3 挂档器', nameEn: 'CLUBSPORT PEDALE V3', hsCode: '9504 50 0000', unit: '件' }
+      payload: { sku: 'CSP_V3', name: 'CSP V3 挂档器', nameEn: 'CLUBSPORT PEDALE V3', hsCode: '9504 50 0000', unit: '件' }
     })
     expect(product.statusCode).toBe(200)
     expect(product.json().nameEn).toBe('CLUBSPORT PEDALE V3')

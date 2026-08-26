@@ -179,6 +179,10 @@ const RESOURCES: CrudResource[] = [
       { key: 'vatNo', label: 'VAT#', type: 'text' },
       { key: 'eori', label: 'EORI', type: 'text' },
       { key: 'notifyParty', label: '通知方', type: 'textarea' },
+      { key: 'defaultPaymentTerms', label: '默认付款条件', type: 'text' },
+      { key: 'defaultIncoterm', label: '默认贸易条款', type: 'text' },
+      { key: 'defaultMark', label: '默认唛头', type: 'text' },
+      { key: 'defaultTaxRate', label: '默认税率', type: 'text' },
     ],
   },
   {
@@ -342,7 +346,7 @@ function CrudTab({
         payload[f.key] = v === '' || v === null || v === undefined ? null : Number(v)
       } else if (
         f.type === 'image' ||
-        ['spec', 'drawingsUrl', 'tooling', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode'].includes(f.key)
+        ['spec', 'drawingsUrl', 'tooling', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode', 'defaultPaymentTerms', 'defaultIncoterm', 'defaultMark', 'defaultTaxRate'].includes(f.key)
       ) {
         if (payload[f.key] === '') payload[f.key] = null
       }
@@ -545,7 +549,7 @@ function CrudTab({
                 f.type === 'image' ||
                 f.type === 'number' ||
                 f.type === 'textarea' ||
-                ['spec', 'drawingsUrl', 'tooling', 'country', 'contact', 'unit', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode'].includes(f.key)
+                ['spec', 'drawingsUrl', 'tooling', 'country', 'contact', 'unit', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode', 'defaultPaymentTerms', 'defaultIncoterm', 'defaultMark', 'defaultTaxRate'].includes(f.key)
                   ? []
                   : [{ required: true, message: '请输入' + f.label }]
               }
@@ -939,16 +943,115 @@ function CompanyProfileTab({ canWrite }: { canWrite: boolean }) {
           保存
         </Button>
       ) : (
-        <p>公司资料由老板维护，其他角色仅可查看。</p>
+        <p>公司资料由老板/销售维护，其他角色仅可查看。</p>
       )}
     </Form>
+  )
+}
+
+// 到货仓字典：所有角色可看，销售/老板可增改删
+function HubTab({ canWrite }: { canWrite: boolean }) {
+  const [hubs, setHubs] = useState<{ id: number; name: string }[]>([])
+  const [name, setName] = useState('')
+  const [editing, setEditing] = useState<{ id: number; name: string } | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  async function load() {
+    try {
+      const { data } = await api.get<{ id: number; name: string }[]>('/hubs')
+      setHubs(data)
+    } catch (err) {
+      notifyError(err)
+    }
+  }
+  useEffect(() => {
+    void load()
+  }, [])
+
+  async function save() {
+    if (!name.trim()) {
+      message.warning('请输入到货仓名称')
+      return
+    }
+    setSaving(true)
+    try {
+      if (editing) {
+        await api.put('/hubs/' + editing.id, { name: name.trim() })
+      } else {
+        await api.post('/hubs', { name: name.trim() })
+      }
+      message.success('已保存')
+      setName('')
+      setEditing(null)
+      await load()
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function remove(id: number) {
+    try {
+      await api.delete('/hubs/' + id)
+      message.success('已删除')
+      await load()
+    } catch (err) {
+      notifyError(err)
+    }
+  }
+
+  const columns = [
+    { title: 'ID', dataIndex: 'id', key: 'id', width: 80 },
+    { title: '到货仓', dataIndex: 'name', key: 'name' },
+    ...(canWrite
+      ? [
+          {
+            title: '操作',
+            key: 'action',
+            width: 160,
+            render: (_: unknown, r: { id: number; name: string }) => (
+              <Space>
+                <Button size="small" onClick={() => { setEditing(r); setName(r.name) }}>编辑</Button>
+                <Popconfirm title="确认删除？" onConfirm={() => void remove(r.id)}>
+                  <Button size="small" danger>删除</Button>
+                </Popconfirm>
+              </Space>
+            ),
+          },
+        ]
+      : []),
+  ]
+
+  return (
+    <div>
+      {canWrite ? (
+        <Space style={{ marginBottom: 12 }}>
+          <Input
+            placeholder="到货仓名称（如 VPC-MEL.）"
+            style={{ width: 240 }}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onPressEnter={() => void save()}
+          />
+          <Button type="primary" loading={saving} onClick={() => void save()}>
+            {editing ? '保存修改' : '新增'}
+          </Button>
+          {editing ? <Button onClick={() => { setEditing(null); setName('') }}>取消编辑</Button> : null}
+        </Space>
+      ) : (
+        <p>到货仓由销售/老板维护。</p>
+      )}
+      <Table rowKey="id" columns={columns} dataSource={hubs} pagination={false} size="small" />
+    </div>
   )
 }
 
 export default function Masters() {
   const { user } = useAuth()
   const role = user?.role
-  // 客户/供应商：老板 + 采购
+  // 客户：老板 + 采购 + 销售（销售最熟客户）；供应商：老板 + 采购
+  const canWriteCustomer = role === 'boss' || role === 'purchase' || role === 'sales'
   const canWriteBusiness = role === 'boss' || role === 'purchase'
   // 成品/零件/BOM：老板 + 工程
   const canWriteEngineering = role === 'boss' || role === 'engineer'
@@ -966,7 +1069,7 @@ export default function Masters() {
           {
             key: 'customers',
             label: '客户',
-            children: <CrudTab resource={RESOURCES[0]!} canWrite={canWriteBusiness} />,
+            children: <CrudTab resource={RESOURCES[0]!} canWrite={canWriteCustomer} />,
           },
           {
             key: 'suppliers',
@@ -992,7 +1095,8 @@ export default function Masters() {
             ),
           },
           { key: 'bom', label: 'BOM 维护', children: <BomTab canWrite={canWriteEngineering} /> },
-          { key: 'company', label: '公司资料', children: <CompanyProfileTab canWrite={role === 'boss'} /> },
+          { key: 'company', label: '公司资料', children: <CompanyProfileTab canWrite={role === 'boss' || role === 'sales'} /> },
+          { key: 'hubs', label: '到货仓', children: <HubTab canWrite={role === 'boss' || role === 'sales'} /> },
         ]}
       />
     </Card>

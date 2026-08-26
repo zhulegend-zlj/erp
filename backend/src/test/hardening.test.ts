@@ -44,7 +44,7 @@ describe('hardening（加固回归）', () => {
       const product = await prisma.product.create({ data: { sku: 'F-H2', name: '成品H2' } })
       const order = await prisma.salesOrder.create({
         data: {
-          orderNo: 'SO-H2', customerId: customer.id, deliveryDate: new Date(), status: 'ready',
+          orderNo: 'SO-H2', customerId: customer.id, zrhDeliveryDate: new Date(), status: 'ready',
           items: { create: { productId: product.id, qty: 1, unitPrice: 1 } },
         },
       })
@@ -171,7 +171,7 @@ describe('hardening（加固回归）', () => {
       const customer = await prisma.customer.create({ data: { name: '客户-H5' } })
       const order = await prisma.salesOrder.create({
         data: {
-          orderNo: 'SO-H5', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          orderNo: 'SO-H5', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
           status: 'draft',
           items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
         },
@@ -201,7 +201,7 @@ describe('hardening（加固回归）', () => {
       const customer = await prisma.customer.create({ data: { name: '客户-H6' } })
       const order = await prisma.salesOrder.create({
         data: {
-          orderNo: 'SO-H6', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          orderNo: 'SO-H6', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
           status: 'in_production',
           items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
         },
@@ -236,7 +236,7 @@ describe('hardening（加固回归）', () => {
         method: 'POST', url: '/api/orders', headers: { cookie },
         payload: {
           customerId: customer.id,
-          deliveryDate: '2026-09-30',
+          zrhDeliveryDate: '2026-09-30',
           items: [{ productId: product.id, qty: 1, unitPrice: 1e12 }],
         },
       })
@@ -298,7 +298,7 @@ describe('hardening（加固回归）', () => {
       })
       const order = await prisma.salesOrder.create({
         data: {
-          orderNo: 'SO-H8', customerId: c1.id, deliveryDate: new Date('2026-09-30'),
+          orderNo: 'SO-H8', customerId: c1.id, zrhDeliveryDate: new Date('2026-09-30'),
           items: { create: { productId: product.id, qty: 1, unitPrice: 1 } },
         },
       })
@@ -450,7 +450,7 @@ describe('hardening（加固回归）', () => {
       await prisma.part.update({ where: { id: part.id }, data: { supplierId: supplier.id } })
       const order = await prisma.salesOrder.create({
         data: {
-          orderNo: 'SO-PH', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          orderNo: 'SO-PH', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
           status: 'confirmed',
           items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
         },
@@ -511,7 +511,7 @@ describe('hardening（加固回归）', () => {
       await prisma.part.update({ where: { id: part.id }, data: { supplierId: supplier.id } })
       const order = await prisma.salesOrder.create({
         data: {
-          orderNo: 'SO-UO1', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          orderNo: 'SO-UO1', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
           status: 'confirmed',
           items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
         },
@@ -554,7 +554,7 @@ describe('hardening（加固回归）', () => {
       await prisma.part.update({ where: { id: part.id }, data: { supplierId: supplier.id } })
       const order = await prisma.salesOrder.create({
         data: {
-          orderNo: 'SO-UO2', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          orderNo: 'SO-UO2', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
           status: 'confirmed',
           items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
         },
@@ -608,7 +608,7 @@ describe('hardening（加固回归）', () => {
       const product = await prisma.product.create({ data: { sku: 'F-PR', name: '成品PR' } })
       const order = await prisma.salesOrder.create({
         data: {
-          orderNo: 'SO-PR', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          orderNo: 'SO-PR', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
           status: 'in_production', purchasing: true,
           items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
         },
@@ -675,7 +675,7 @@ describe('hardening（加固回归）', () => {
       const product = await prisma.product.create({ data: { sku: 'F-PRC', name: '成品PRC' } })
       const order = await prisma.salesOrder.create({
         data: {
-          orderNo: 'SO-PRC', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          orderNo: 'SO-PRC', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
           status: 'confirmed',
           items: { create: { productId: product.id, qty: 2, unitPrice: 99.5 } },
         },
@@ -808,7 +808,7 @@ describe('hardening（加固回归）', () => {
       const customer = await prisma.customer.create({ data: { name: '客户-LS' } })
       const order = await prisma.salesOrder.create({
         data: {
-          orderNo: 'SO-LS', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          orderNo: 'SO-LS', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
           status: 'in_production',
           items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
         },
@@ -867,7 +867,7 @@ describe('hardening（加固回归）', () => {
       const customer = await prisma.customer.create({ data: { name: '客户-IC' } })
       const order = await prisma.salesOrder.create({
         data: {
-          orderNo: 'SO-IC', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+          orderNo: 'SO-IC', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
           status: 'in_production',
           items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
         },
@@ -908,7 +908,7 @@ describe('hardening（加固回归）', () => {
       const supplier = await prisma.supplier.create({ data: { name: '供应商-H11' } })
       const order = await prisma.salesOrder.create({
         data: {
-          orderNo: 'SO-H11', customerId: customer.id, deliveryDate: new Date(),
+          orderNo: 'SO-H11', customerId: customer.id, zrhDeliveryDate: new Date(),
           items: { create: { productId: product.id, qty: 3, unitPrice: 40 } },
         },
       })

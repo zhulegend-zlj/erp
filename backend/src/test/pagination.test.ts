@@ -12,7 +12,7 @@ describe('列表分页', () => {
     const customer = await prisma.customer.create({ data: { name: '客户分页' } })
     for (let i = 1; i <= n; i++) {
       await prisma.salesOrder.create({
-        data: { orderNo: 'SO-PAGE-' + i, customerId: customer.id, deliveryDate: new Date('2026-09-30') }
+        data: { orderNo: 'SO-PAGE-' + i, customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30') }
       })
     }
   }
@@ -93,7 +93,7 @@ describe('列表分页', () => {
     const customer = await prisma.customer.create({ data: { name: '客户LEDP' } })
     const order = await prisma.salesOrder.create({
       data: {
-        orderNo: 'SO-LEDP', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        orderNo: 'SO-LEDP', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
         status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
       }
@@ -125,7 +125,7 @@ describe('列表分页', () => {
     const customer = await prisma.customer.create({ data: { name: '客户WLP' } })
     const order = await prisma.salesOrder.create({
       data: {
-        orderNo: 'SO-WL-PAGE', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        orderNo: 'SO-WL-PAGE', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
         status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
       }
@@ -205,7 +205,7 @@ describe('列表分页', () => {
   it('出货单与退补货列表支持分页', async () => {
     const customer = await prisma.customer.create({ data: { name: '客户SH' } })
     const order = await prisma.salesOrder.create({
-      data: { orderNo: 'SO-SH-P', customerId: customer.id, deliveryDate: new Date('2026-09-30') }
+      data: { orderNo: 'SO-SH-P', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30') }
     })
     await prisma.shipment.createMany({
       data: [

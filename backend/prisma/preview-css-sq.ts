@@ -13,7 +13,7 @@ const RAR = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/fi
 const UNRAR = 'C:/Program Files/WinRAR/UnRAR.exe'
 const TAR = 'C:/Windows/System32/tar.exe'
 const TMP = resolve(process.cwd(), 'tmp-css-sq-xlsx')
-const OUT = process.env.PREVIEW_OUT || 'D:/AI/erp-backups/CSS-SQ-SKU对照表.xlsx'
+const OUT = process.env.PREVIEW_OUT || 'D:/AI/erp-backups/CSS_SQ-SKU对照表.xlsx'
 
 function clean(v: unknown): string {
   return String(v ?? '').replace(/\r/g, '').replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim()
@@ -198,7 +198,7 @@ async function main() {
   recs.sort((a, b) => sharedFirst(a) - sharedFirst(b) || idCmp(a.id, b.id) || Number(a.seq) - Number(b.seq))
 
   const wbOut = new ExcelJS.Workbook()
-  const ws = wbOut.addWorksheet('CSS-SQ对照', { views: [{ state: 'frozen', ySplit: 1 }] })
+  const ws = wbOut.addWorksheet('CSS_SQ对照', { views: [{ state: 'frozen', ySplit: 1 }] })
   const header = ['表内序号', '图片', '原表料号', '建议新SKU', '中文名称', '用量', '与已有零件关系', '共用已有料号', 'V3i图档', '备注']
   ws.columns = header.map((h, i) => ({ header: h, key: 'c' + i, width: [8, 12, 16, 16, 26, 6, 20, 14, 12, 60][i] }))
   const hr = ws.getRow(1)

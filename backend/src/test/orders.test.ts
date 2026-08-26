@@ -24,7 +24,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 100, unitPrice: 10 }]
       }
     })
@@ -41,7 +43,9 @@ describe('orders', () => {
       method: 'POST',
       url: '/api/orders',
       headers: { cookie },
-      payload: { customerId: customer.id, deliveryDate: '2026-09-30', items: [] }
+      payload: { customerId: customer.id, customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30', items: [] }
     })
     expect(res.statusCode).toBe(400)
   })
@@ -55,7 +59,7 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: 'not-a-date',
+        zrhDeliveryDate: 'not-a-date',
         items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
       }
     })
@@ -71,7 +75,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 0, unitPrice: 1 }]
       }
     })
@@ -83,7 +89,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: -1 }]
       }
     })
@@ -101,7 +109,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
       }
     })
@@ -117,7 +127,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 100, unitPrice: 10 }]
       }
     })
@@ -144,7 +156,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
       }
     })
@@ -171,7 +185,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
       }
     })
@@ -205,7 +221,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
       }
     })
@@ -227,7 +245,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
       }
     })
@@ -268,7 +288,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
       }
     })
@@ -300,7 +322,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 2, unitPrice: 10 }]
       }
     })
@@ -326,7 +350,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
       }
     })
@@ -347,7 +373,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
       }
     })
@@ -369,7 +397,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
       }
     })
@@ -394,7 +424,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
       }
     })
@@ -411,7 +443,9 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        deliveryDate: '2026-09-30',
+        customerPoNo: 'PO-TEST-1',
+        customerDeliveryDate: '2026-09-30',
+        zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
       }
     })

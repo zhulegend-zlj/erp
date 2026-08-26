@@ -5,7 +5,7 @@ import { prisma } from '../db'
 
 async function seedReadyOrder() {
   const product = await prisma.product.create({
-    data: { sku: 'CSP-V3', name: 'CSP V3 挂档器', nameEn: 'CLUBSPORT PEDALE V3', hsCode: '9504 50 0000' },
+    data: { sku: 'CSP_V3', name: 'CSP V3 挂档器', nameEn: 'CLUBSPORT PEDALE V3', hsCode: '9504 50 0000' },
   })
   await prisma.stock.create({ data: { itemType: 'product', itemId: product.id, qtyOnHand: 100 } })
   const customer = await prisma.customer.create({
@@ -22,7 +22,7 @@ async function seedReadyOrder() {
     data: {
       orderNo: 'SO-DOC-001',
       customerId: customer.id,
-      deliveryDate: new Date(),
+      zrhDeliveryDate: new Date(),
       status: 'ready',
       items: { create: { productId: product.id, qty: 100, unitPrice: 56.97 } },
     },
@@ -92,7 +92,7 @@ describe('shipment docs（出货明细行/单证导出/公司资料）', () => {
     expect(res.json().lines[0]).toMatchObject({ productId: product.id, qty: 100 })
   })
 
-  it('出货明细行数量合计与订单不符返回 400', async () => {
+  it('部分出货：90/100 出货成功，订单保持待出货并显示已出，超量出货拒绝', async () => {
     const app = buildApp()
     const { product, order } = await seedReadyOrder()
     const cookie = await loginCookie(app, 'sales')
@@ -105,12 +105,44 @@ describe('shipment docs（出货明细行/单证导出/公司资料）', () => {
         lines: [{ productId: product.id, qty: 90, unitPrice: 56.97 }],
       },
     })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().error).toContain('数量')
+    expect(res.statusCode).toBe(200)
+    expect(res.json().lines[0].qty).toBe(90)
     const stock = await prisma.stock.findUnique({
       where: { itemType_itemId: { itemType: 'product', itemId: product.id } },
     })
-    expect(stock?.qtyOnHand).toBe(100)
+    expect(stock?.qtyOnHand).toBe(10)
+    // 未出满：订单保持 ready，出货单列表能查到 90 台
+    const updated = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+    expect(updated?.status).toBe('ready')
+    const detail = await app.inject({ method: 'GET', url: '/api/orders/' + order.id, headers: { cookie } })
+    expect(detail.json().shippedQty).toBe(90)
+
+    // 超出订单数量的出货拒绝
+    const over = await app.inject({
+      method: 'POST',
+      url: '/api/shipments',
+      headers: { cookie },
+      payload: {
+        salesOrderId: order.id,
+        lines: [{ productId: product.id, qty: 20, unitPrice: 56.97 }],
+      },
+    })
+    expect(over.statusCode).toBe(400)
+    expect(over.json().error).toContain('超过订单数量')
+
+    // 出完剩余 10 台 → 订单自动已出货
+    const rest = await app.inject({
+      method: 'POST',
+      url: '/api/shipments',
+      headers: { cookie },
+      payload: {
+        salesOrderId: order.id,
+        lines: [{ productId: product.id, qty: 10, unitPrice: 56.97 }],
+      },
+    })
+    expect(rest.statusCode).toBe(200)
+    const done = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+    expect(done?.status).toBe('shipped')
   })
 
   it('PATCH 出货单更新单证字段与明细行（不动库存），仅 sales 可改', async () => {
@@ -205,7 +237,7 @@ describe('shipment docs（出货明细行/单证导出/公司资料）', () => {
     expect(forbidden.statusCode).toBe(403)
   })
 
-  it('公司资料：默认可读，老板可改，销售改返回 403', async () => {
+  it('公司资料：默认可读，老板与销售都可改', async () => {
     const app = buildApp()
     const boss = await loginCookie(app, 'boss')
     const sales = await loginCookie(app, 'sales')
@@ -235,12 +267,12 @@ describe('shipment docs（出货明细行/单证导出/公司资料）', () => {
     const get2 = await app.inject({ method: 'GET', url: '/api/company-profile', headers: { cookie: sales } })
     expect(get2.json().swift).toBe('CMBCCNBS195')
 
-    const forbidden = await app.inject({
+    const salesPut = await app.inject({
       method: 'PUT',
       url: '/api/company-profile',
       headers: { cookie: sales },
-      payload: { name: 'hack' },
+      payload: { taxRate: '0', mark: undefined },
     })
-    expect(forbidden.statusCode).toBe(403)
+    expect(salesPut.statusCode).toBe(200)
   })
 })

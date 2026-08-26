@@ -16,7 +16,7 @@ describe('inventory', () => {
     const customer = await prisma.customer.create({ data: { name: '客户8' } })
     const order = await prisma.salesOrder.create({
       data: {
-        orderNo: 'SO-ISS-1', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        orderNo: 'SO-ISS-1', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
         status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
       }
@@ -48,7 +48,7 @@ describe('inventory', () => {
     const customer = await prisma.customer.create({ data: { name: '客户8' } })
     const order = await prisma.salesOrder.create({
       data: {
-        orderNo: 'SO-ISS-2', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        orderNo: 'SO-ISS-2', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
         status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
       }
@@ -70,7 +70,7 @@ describe('inventory', () => {
     const customer = await prisma.customer.create({ data: { name: '客户8' } })
     const order = await prisma.salesOrder.create({
       data: {
-        orderNo: 'SO-PROD-1', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        orderNo: 'SO-PROD-1', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
         status: 'in_production',
         items: { create: { productId: product.id, qty: 20, unitPrice: 5 } },
       }
@@ -184,7 +184,7 @@ describe('inventory', () => {
     const customer = await prisma.customer.create({ data: { name: '客户8' } })
     const order = await prisma.salesOrder.create({
       data: {
-        orderNo: 'SO-ISS-1', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        orderNo: 'SO-ISS-1', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
         status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
       }
@@ -232,7 +232,7 @@ describe('inventory', () => {
       data: {
         orderNo: 'SO-MAT',
         customerId: customer.id,
-        deliveryDate: new Date('2026-09-30'),
+        zrhDeliveryDate: new Date('2026-09-30'),
         status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } }
       }
@@ -273,7 +273,7 @@ describe('inventory', () => {
     const customer = await prisma.customer.create({ data: { name: '客户LED' } })
     const order = await prisma.salesOrder.create({
       data: {
-        orderNo: 'SO-LED', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        orderNo: 'SO-LED', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
         status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
       }
@@ -349,7 +349,7 @@ describe('inventory', () => {
       data: {
         orderNo: 'SO-OLB',
         customerId: customer.id,
-        deliveryDate: new Date('2026-09-30'),
+        zrhDeliveryDate: new Date('2026-09-30'),
         status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } }
       }
@@ -398,7 +398,7 @@ describe('inventory', () => {
   it('订单流水绑定查询参数不合法返回 400', async () => {
     const customer = await prisma.customer.create({ data: { name: '客户OLB2' } })
     const order = await prisma.salesOrder.create({
-      data: { orderNo: 'SO-OLB2', customerId: customer.id, deliveryDate: new Date('2026-09-30') }
+      data: { orderNo: 'SO-OLB2', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30') }
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'warehouse')
@@ -456,7 +456,7 @@ describe('inventory', () => {
     const customer = await prisma.customer.create({ data: { name: '客户VOID-I' } })
     const order = await prisma.salesOrder.create({
       data: {
-        orderNo: 'SO-VOID-I', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        orderNo: 'SO-VOID-I', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
         status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
       },
@@ -485,7 +485,7 @@ describe('inventory', () => {
     const customer = await prisma.customer.create({ data: { name: '客户VOID-P' } })
     const order = await prisma.salesOrder.create({
       data: {
-        orderNo: 'SO-VOID-P', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        orderNo: 'SO-VOID-P', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
         status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
       },
@@ -540,7 +540,7 @@ describe('inventory', () => {
     const customer = await prisma.customer.create({ data: { name: '客户VOID-B' } })
     const order = await prisma.salesOrder.create({
       data: {
-        orderNo: 'SO-VOID-B', customerId: customer.id, deliveryDate: new Date('2026-09-30'),
+        orderNo: 'SO-VOID-B', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
         status: 'in_production',
         items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
       },

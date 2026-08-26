@@ -39,7 +39,8 @@ export function companyProfileRoutes(app: FastifyInstance) {
     return getOrCreateProfile()
   })
 
-  app.put('/api/company-profile', { preHandler: requireRole('boss') }, async (req, reply) => {
+  // 销售与老板可维护公司资料（出单资料销售最常用）
+  app.put('/api/company-profile', { preHandler: requireRole('boss', 'sales') }, async (req, reply) => {
     const data = parseBody(profileSchema, req.body, reply)
     if (data === null) return
     const profile = await getOrCreateProfile()

@@ -20,7 +20,7 @@ describe('finance', () => {
       data: {
         orderNo: 'SO-FIN',
         customerId: customer.id,
-        deliveryDate: new Date(),
+        zrhDeliveryDate: new Date(),
         otherCost: 100,
         items: { create: { productId: product.id, qty: 10, unitPrice: 20 } }
       }
@@ -56,7 +56,7 @@ describe('finance', () => {
       data: {
         orderNo: 'SO-FIN2',
         customerId: customer.id,
-        deliveryDate: new Date(),
+        zrhDeliveryDate: new Date(),
         otherCost: 0,
         items: { create: { productId: product.id, qty: 1, unitPrice: 100 } }
       }
@@ -163,7 +163,7 @@ describe('finance', () => {
       data: {
         orderNo: 'SO-FIN',
         customerId: customer.id,
-        deliveryDate: new Date(),
+        zrhDeliveryDate: new Date(),
         items: { create: { productId: product.id, qty: 3, unitPrice: 40 } }
       }
     })
@@ -176,7 +176,7 @@ describe('finance', () => {
       data: {
         orderNo: 'SO-FIN2',
         customerId: customer.id,
-        deliveryDate: new Date(),
+        zrhDeliveryDate: new Date(),
         items: { create: { productId: product.id, qty: 1, unitPrice: 9 } }
       }
     })

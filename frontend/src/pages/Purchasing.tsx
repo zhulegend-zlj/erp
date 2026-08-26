@@ -95,6 +95,8 @@ export default function Purchasing() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [orders, setOrders] = useState<SalesOrder[]>([])
+  const [pendingOrders, setPendingOrders] = useState<SalesOrder[]>([])
+  const [pendingOnly, setPendingOnly] = useState(false)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   // 关键上下文进会话缓存：切换页面回来继续操作（已选订单/明细/生成弹窗草稿）
   const [orderId, setOrderId] = useKeepAliveState<number | undefined>('po.orderId', undefined)
@@ -141,11 +143,13 @@ export default function Purchasing() {
   useEffect(() => {
     void Promise.all([
       api.get<SalesOrder[]>('/orders'),
+      api.get<SalesOrder[]>('/orders', { params: { pendingPurchase: 'true' } }),
       api.get<Supplier[]>('/suppliers'),
       loadPos(1),
     ])
-      .then(([o, s]) => {
+      .then(([o, p, s]) => {
         setOrders(o.data)
+        setPendingOrders(p.data)
         setSuppliers(s.data)
       })
       .catch(notifyError)
@@ -309,13 +313,26 @@ export default function Purchasing() {
             }
           />
         ) : null}
+        {pendingOrders.length > 0 ? (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={'有 ' + pendingOrders.length + ' 个已确认订单待生成采购单'}
+            action={
+              <Button size="small" type={pendingOnly ? 'primary' : 'default'} onClick={() => setPendingOnly((v) => !v)}>
+                {pendingOnly ? '显示全部订单' : '只看待采购'}
+              </Button>
+            }
+          />
+        ) : null}
         <Space style={{ marginBottom: 16 }}>
           <Select
-            placeholder="选择销售订单"
+            placeholder={pendingOnly ? '选择待采购订单' : '选择销售订单'}
             style={{ width: 360 }}
             value={orderId}
             onChange={(v) => setOrderId(v)}
-            options={orders.map((o) => ({
+            options={(pendingOnly ? pendingOrders : orders).map((o) => ({
               value: o.id,
               label: o.orderNo + '（' + (o.customer?.name ?? '') + ' / ' + orderPhaseLabel(o) + '）',
             }))}

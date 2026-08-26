@@ -13,13 +13,13 @@ import { UPLOAD_DIR, findPartFolder, partDirName, partTargetRelDir, placePartFil
 
 const prisma = new PrismaClient()
 const FILE = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3I清单-螺丝物料表.xlsx'
-const TABLE = 'D:/AI/erp-backups/CSP-V3I-SKU对照表.xlsx'
+const TABLE = 'D:/AI/erp-backups/CSP_V3I-SKU对照表.xlsx'
 const RAR_V3I = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3i_2D PDF.rar'
 const RAR_V3 = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3_2D PDF.rar'
 const UNRAR = 'C:/Program Files/WinRAR/UnRAR.exe'
 const TAR = 'C:/Windows/System32/tar.exe'
 const TMP = resolve(process.cwd(), 'tmp-v3i-import')
-const PRODUCT_SKU = 'CSP-V3I'
+const PRODUCT_SKU = 'CSP_V3I'
 const PRODUCT_NAME = 'CSP V3I 挂档器'
 
 function clean(v: unknown): string {
@@ -49,7 +49,7 @@ async function main() {
 
   // 2) 复核后对照表（口径）
   const wbT = XLSX.read(readFileSync(TABLE), { type: 'buffer' })
-  const tableRows = XLSX.utils.sheet_to_json(wbT.Sheets['CSP-V3I对照'], { header: 1, defval: '', raw: false }) as unknown[][]
+  const tableRows = XLSX.utils.sheet_to_json(wbT.Sheets['CSP_V3I对照'], { header: 1, defval: '', raw: false }) as unknown[][]
   const recs: { seq: string; id: string; sku: string; name: string; qty: number; rel: string; vendor: string; note: string }[] = []
   for (const r of tableRows.slice(1)) {
     const sku = clean(r[3])
@@ -192,7 +192,7 @@ async function main() {
     const ext = /\.png$/i.test(src) ? '.png' : '.jpeg'
     const tmpName = 'imgimp-v3i-' + partId + ext
     copyFileSync(src, resolve(UPLOAD_DIR, tmpName))
-    const productSkus = ['CSP-V3I']
+    const productSkus = ['CSP_V3I']
     const url = await placePartFile(tmpName, productSkus, partDirName(part.sku, part.name), 'image', ext)
     await prisma.part.update({ where: { id: part.id }, data: { imageUrl: url } })
     imgSet++
@@ -223,7 +223,7 @@ async function main() {
     const part = await prisma.part.findUnique({ where: { sku: r.sku } })
     if (!part) continue
     // 共用判定（幂等）：该零件挂在 V3 成品 BOM 上 = V3共用零件
-    const wasShared = (await prisma.bom.count({ where: { partId: part.id, product: { sku: 'CSP-V3' } } })) > 0
+    const wasShared = (await prisma.bom.count({ where: { partId: part.id, product: { sku: 'CSP_V3' } } })) > 0
     // 原表料号从源表行取
     const d = detailByKey.get(r.seq + '|' + r.name)
     const srcId = d ? clean(sheetRows[d.rowIdx][1]).replace(/^['"]+/, '').trim() : r.id
@@ -239,7 +239,7 @@ async function main() {
       if (!found) { drawingSkipped.push(r.sku + '（rar 文件未找到: ' + f + '）'); continue }
       const tmpName = 'dwgimp-v3i-' + part.id + '.pdf'
       copyFileSync(found, resolve(UPLOAD_DIR, tmpName))
-      const url = await placePartFile(tmpName, ['CSP-V3I'], partDirName(part.sku, part.name), 'drawing', '.pdf')
+      const url = await placePartFile(tmpName, ['CSP_V3I'], partDirName(part.sku, part.name), 'drawing', '.pdf')
       await prisma.part.update({ where: { id: part.id }, data: { drawingsUrl: url } })
       drawingNew++
     } else {
@@ -249,7 +249,7 @@ async function main() {
       const v3iRev = Math.max(0, ...files.map(revOf))
       if (v3iRev > v3Rev && part.drawingsUrl) {
         const partDir = partDirName(part.sku, part.name)
-        const folderAbs = (await findPartFolder(partDir)) ?? resolve(UPLOAD_DIR, partTargetRelDir(['CSP-V3', 'CSP-V3I'], partDir))
+        const folderAbs = (await findPartFolder(partDir)) ?? resolve(UPLOAD_DIR, partTargetRelDir(['CSP_V3', 'CSP_V3I'], partDir))
         const absDir = folderAbs
         const relDir = folderAbs.slice(UPLOAD_DIR.length + 1).replace(/\\/g, '/')
         const oldMain = resolve(absDir, partDir + '-图档.pdf')
@@ -315,7 +315,7 @@ async function main() {
     prisma.part.count({ where: { drawingsUrl: { not: null } } }),
   ])
   console.log('--- 导入完成 ---')
-  console.log('库内零件总数:', partsTotal, '；CSP-V3I BOM 行数:', bomsTotal, '；有图片零件:', withImg, '；有图档零件:', withDwg)
+  console.log('库内零件总数:', partsTotal, '；CSP_V3I BOM 行数:', bomsTotal, '；有图片零件:', withImg, '；有图档零件:', withDwg)
   rmSync(TMP, { recursive: true, force: true })
   await prisma.$disconnect()
 }

@@ -7,7 +7,7 @@ import * as XLSX from 'xlsx'
 
 const prisma = new PrismaClient()
 const FILE = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3清单_物料明细.xlsx'
-const PRODUCT_SKU = 'CSP-V3'
+const PRODUCT_SKU = 'CSP_V3'
 
 function clean(v: unknown): string {
   return String(v ?? '').replace(/\r/g, '').replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim()

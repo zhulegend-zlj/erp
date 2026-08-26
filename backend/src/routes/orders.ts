@@ -37,9 +37,21 @@ const orderItemSchema = z.object({
     .max(9999999999.99, { error: '单价超出允许范围' }),
 })
 
+const dateSchema = (label: string) =>
+  z
+    .string({ error: label + '必填' })
+    .refine((v) => !Number.isNaN(Date.parse(v)), label + '必须为合法日期')
+
 const createOrderSchema = z.object({
   customerId: z.number({ error: '客户必填' }).int({ error: '客户必须为整数' }).positive({ error: '客户必须为正整数' }),
-  deliveryDate: z.string({ error: '交货日期必填' }).refine((v) => !Number.isNaN(Date.parse(v)), '交货日期必须为合法日期'),
+  customerPoNo: z.string({ error: '客户PO号必填' }).min(1, '客户PO号必填').max(60, '客户PO号过长'),
+  orderDate: z
+    .string({ error: '订单日期必须为字符串' })
+    .refine((v) => !Number.isNaN(Date.parse(v)), '订单日期必须为合法日期')
+    .optional(),
+  customerDeliveryDate: dateSchema('客户交期'),
+  zrhDeliveryDate: dateSchema('ZRH交货日期'),
+  paymentTerms: z.string().nullable().optional(),
   items: z
     .array(orderItemSchema, { error: '明细必填' })
     .min(1, '订单至少包含一个明细')
@@ -106,7 +118,11 @@ export function ordersRoutes(app: FastifyInstance) {
         data: {
           orderNo,
           customerId: data.customerId,
-          deliveryDate: new Date(data.deliveryDate),
+          customerPoNo: data.customerPoNo,
+          orderDate: data.orderDate ? new Date(data.orderDate) : new Date(),
+          customerDeliveryDate: new Date(data.customerDeliveryDate),
+          zrhDeliveryDate: new Date(data.zrhDeliveryDate),
+          paymentTerms: data.paymentTerms || null,
           status: 'draft',
         },
       })
@@ -126,29 +142,50 @@ export function ordersRoutes(app: FastifyInstance) {
     return reply.code(200).send(order)
   })
 
-  // 5 角色均可查看列表；可选 page/pageSize 分页；purchase/warehouse/engineer 隐藏销售单价
+  // 5 角色均可查看列表；可选 page/pageSize 分页；purchase/warehouse/engineer 隐藏销售单价；
+  // 可选 pendingPurchase=true：只返回已确认且未生成采购单的订单（采购提醒用）；每行附带 已出/总量
   app.get('/api/orders', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
     const pagination = parsePagination(req.query as Record<string, unknown>)
     if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
     const role = (req as { user?: { role?: string } }).user?.role ?? ''
+    const pendingPurchase = (req.query as Record<string, unknown>).pendingPurchase === 'true'
+    const where: Prisma.SalesOrderWhereInput = pendingPurchase
+      ? { status: 'confirmed', purchaseOrders: { none: {} } }
+      : {}
     const orderBy = { id: 'desc' as const }
-    const toRow = (order: Prisma.SalesOrderGetPayload<{ include: typeof ITEMS_INCLUDE }>) =>
-      sanitizeOrderForRole(order, role)
+    // 已出数量：按出货明细行（行级订单）汇总
+    const withShipped = async (
+      rows: Prisma.SalesOrderGetPayload<{ include: typeof ITEMS_INCLUDE }>[],
+    ) => {
+      const ids = rows.map((o) => o.id)
+      const grouped = await prisma.shipmentLine.groupBy({
+        by: ['salesOrderId'],
+        where: { salesOrderId: { in: ids } },
+        _sum: { qty: true },
+      })
+      const shippedMap = new Map(grouped.map((g) => [g.salesOrderId, g._sum.qty ?? 0]))
+      return rows.map((o) => ({
+        ...sanitizeOrderForRole(o, role),
+        shippedQty: shippedMap.get(o.id) ?? 0,
+        totalQty: o.items.reduce((s, it) => s + it.qty, 0),
+      }))
+    }
     if (pagination.kind === 'none') {
-      const rows = await prisma.salesOrder.findMany({ orderBy, include: ITEMS_INCLUDE })
-      return rows.map(toRow)
+      const rows = await prisma.salesOrder.findMany({ where, orderBy, include: ITEMS_INCLUDE })
+      return withShipped(rows)
     }
     const page = pagination.page
     const [rows, total] = await Promise.all([
       prisma.salesOrder.findMany({
+        where,
         orderBy,
         include: ITEMS_INCLUDE,
         skip: (page.page - 1) * page.pageSize,
         take: page.pageSize,
       }),
-      prisma.salesOrder.count(),
+      prisma.salesOrder.count({ where }),
     ])
-    return pagedResult(rows.map(toRow), total, page)
+    return pagedResult(await withShipped(rows), total, page)
   })
 
   // 5 角色均可查看详情（含 items 与 product 名称）；附带生产进度；purchase/warehouse/engineer 隐藏销售单价
@@ -162,10 +199,15 @@ export function ordersRoutes(app: FastifyInstance) {
       where: { salesOrderId: id },
       _sum: { qty: true },
     })
+    const shipped = await prisma.shipmentLine.aggregate({
+      where: { salesOrderId: id },
+      _sum: { qty: true },
+    })
     const totalQty = order.items.reduce((sum, it) => sum + it.qty, 0)
     return {
       ...sanitizeOrderForRole(order, role),
       producedQty: produced._sum.qty ?? 0,
+      shippedQty: shipped._sum.qty ?? 0,
       totalQty,
     }
   })
@@ -219,9 +261,10 @@ export function ordersRoutes(app: FastifyInstance) {
       const order = await tx.salesOrder.findUnique({ where: { id } })
       if (!order) throw new Error('订单不存在')
 
-      const [purchaseOrders, shipments, issues, productionEntries, payments, ledgers] = await Promise.all([
+      const [purchaseOrders, shipments, schedules, issues, productionEntries, payments, ledgers] = await Promise.all([
         tx.purchaseOrder.count({ where: { salesOrderId: id } }),
         tx.shipment.count({ where: { salesOrderId: id } }),
+        tx.shipmentSchedule.count({ where: { salesOrderId: id, status: { not: 'cancelled' } } }),
         tx.issue.count({ where: { salesOrderId: id } }),
         tx.productionEntry.count({ where: { salesOrderId: id } }),
         tx.customerPayment.count({ where: { salesOrderId: id } }),
@@ -230,6 +273,7 @@ export function ordersRoutes(app: FastifyInstance) {
       const blockers: string[] = []
       if (purchaseOrders > 0) blockers.push(`${purchaseOrders} 张采购单`)
       if (shipments > 0) blockers.push(`${shipments} 张出货单`)
+      if (schedules > 0) blockers.push(`${schedules} 条出货排程`)
       if (issues > 0) blockers.push(`${issues} 条领料`)
       if (productionEntries > 0) blockers.push(`${productionEntries} 条成品入库`)
       if (payments > 0) blockers.push(`${payments} 笔收款`)

@@ -8,7 +8,7 @@
 // Description-EN、用在何处、生产工艺 三列不导入（数据库字段暂存不使用）。
 // 导入方式：先清空该成品的 BOM 与其专属零件（无其他 BOM/业务引用的零件），再按表重新导入；
 // 供应商按名称复用，不删除。可重复执行（幂等）。
-// 每次导入生成对照表：D:/AI/erp-backups/CSP-V3-SKU对照表.xlsx
+// 每次导入生成对照表：D:/AI/erp-backups/CSP_V3-SKU对照表.xlsx
 // 用法：cd backend && npx tsx --env-file=.env prisma/import-csp-v3.ts
 import { PrismaClient } from '@prisma/client'
 import { readFileSync } from 'node:fs'
@@ -17,7 +17,7 @@ import * as XLSX from 'xlsx'
 const prisma = new PrismaClient()
 const FILE = 'C:/Users/zhulianghong/xwechat_files/wxid_cfbx0uckwvyn22_cf17/msg/file/2026-08/CSP_V3清单_物料明细.xlsx'
 
-const PRODUCT_SKU = 'CSP-V3'
+const PRODUCT_SKU = 'CSP_V3'
 const PRODUCT_NAME = 'CSP V3 挂档器'
 
 function clean(v: unknown): string {
@@ -54,7 +54,7 @@ async function main() {
     (await prisma.product.findUnique({ where: { sku: PRODUCT_SKU } })) ??
     (await prisma.product.create({ data: { sku: PRODUCT_SKU, name: PRODUCT_NAME, unit: '件' } }))
 
-  // —— 清空该成品旧数据（按老板确认的口径：清空 CSP-V3 零件和 BOM 后全新导入）——
+  // —— 清空该成品旧数据（按老板确认的口径：清空 CSP_V3 零件和 BOM 后全新导入）——
   const oldBoms = await prisma.bom.findMany({ where: { productId: product.id } })
   await prisma.bom.deleteMany({ where: { productId: product.id } })
   let deletedParts = 0
@@ -205,7 +205,7 @@ async function main() {
   console.log('--- 需老板/工程复核的假设 ---')
   for (const a of assumptions) console.log(' *', a)
   // 导出对照表供工程核对
-  const outFile = 'D:/AI/erp-backups/CSP-V3-SKU对照表.xlsx'
+  const outFile = 'D:/AI/erp-backups/CSP_V3-SKU对照表.xlsx'
   const outWs = XLSX.utils.aoa_to_sheet(mapping)
   outWs['!cols'] = [{ wch: 8 }, { wch: 22 }, { wch: 14 }, { wch: 40 }, { wch: 6 }]
   const wbOut = XLSX.utils.book_new()

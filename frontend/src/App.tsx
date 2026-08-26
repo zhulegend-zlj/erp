@@ -1,6 +1,7 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
+  Alert,
   Avatar,
   Button,
   Card,
@@ -39,6 +40,7 @@ import MastersPage from './pages/Masters'
 import PurchasingPage from './pages/Purchasing'
 import InventoryPage from './pages/Inventory'
 import FinancePage from './pages/Finance'
+import SchedulesPage from './pages/Schedules'
 import FeedbackWidget from './components/FeedbackWidget'
 import { notifyError } from './pages/common'
 
@@ -82,10 +84,17 @@ const navItems: NavItem[] = [
     icon: <SendOutlined />,
   },
   {
+    key: '/schedules',
+    label: '出货排程',
+    path: '/schedules',
+    roles: ['sales', 'warehouse', 'boss'],
+    icon: <ShoppingOutlined />,
+  },
+  {
     key: '/masters',
     label: '基础资料',
     path: '/masters',
-    roles: ['purchase', 'boss', 'engineer'],
+    roles: ['purchase', 'boss', 'engineer', 'sales'],
     icon: <DatabaseOutlined />,
   },
   {
@@ -173,15 +182,16 @@ const HOME_GUIDES: Record<Role, string[]> = {
     '意见反馈：点击右下角「意见反馈」提交问题或建议。',
   ],
   warehouse: [
-    '库存：收货入库（选择采购单，收齐后采购中自动消失）、领料出库、成品入库（显示已完成 X/Y 台，收满自动待出货）。',
+    '库存：收货入库、领料出库、成品入库（显示已完成 X/Y 台）、退补货。',
+    '出货排程：销售按客户 OPO 表录排程后，对「待备货」行点「已备好」（备货码放好）；出货由销售在出货页操作。',
     '查询：查看库存和出入库流水；订单下拉会显示当前阶段（采购中/生产中）。',
     '意见反馈：点击右下角「意见反馈」提交问题或建议。',
   ],
   sales: [
-    '订单：新建订单（客户/交货日期/成品明细与单价）→ 确认订单（可回退草稿）；出货完成后推进到「已完成」。',
+    '订单：新建订单（客户/客户PO号/订单日期/客户交期/ZRH交货日期/成品明细与单价）→ 确认订单；出货完成后推进到「已完成」。',
     '删除订单：仅无任何业务痕迹（无采购/出货/收款/流水）的订单可删，删除需完整输入订单号确认。',
-    '出货（单证中心）：选「待出货」订单自动带出明细行，同一成品可「拆行」按柜/批次拆分；填 客户PO/Lot/箱数/毛净重/CBM/柜号/封条/HBL 与 发票号/付款条件/贸易条款/唛头/海关编码/船名航次/ETD/ETA；明细数量合计须等于订单。',
-    '出货后：可「编辑单证」补录船务信息，可「添加节点」记录 备货/装柜/开船/到港/清关。',
+    '出货排程：按客户 OPO 表录排程（订单→成品→数量→到货仓→客户要求日+承诺日），仓库备好后在出货页勾选拼票出货（可跨订单、部分出货）。',
+    '出货（单证中心）：同一到货仓的已备好排程可拼一票；出货后「编辑单证」补录船务信息、填发票号/柜号/HBL 等；「添加节点」记录运输节点；一键导出三份单证。',
     '导出单证：一键导出 收款发票/商业发票/装箱单（收款发票自动带收款记录与英文大写金额；公司抬头在 基础资料→公司资料 由老板维护）。',
     '前提：客户（含收货地址/VAT/EORI/通知方）由采购/老板维护，成品英文品名/海关编码由工程维护。',
     '意见反馈：点击右下角「意见反馈」提交问题或建议。',
@@ -195,9 +205,36 @@ const HOME_GUIDES: Record<Role, string[]> = {
 
 function Home() {
   const { user } = useAuth()
+  const navigate = useNavigate()
+  const [pendingPurchase, setPendingPurchase] = useState(0)
   const guides = user ? HOME_GUIDES[user.role] : []
+
+  // 采购提醒：首页显示待采购订单数（老板/采购可见）
+  useEffect(() => {
+    if (!user || (user.role !== 'purchase' && user.role !== 'boss')) return
+    void api
+      .get<{ pendingPurchaseOrders?: number }>('/dashboard/summary')
+      .then(({ data }) => setPendingPurchase(data.pendingPurchaseOrders ?? 0))
+      .catch(notifyError)
+  }, [user])
+
   return (
     <Card>
+      {pendingPurchase > 0 ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={'有 ' + pendingPurchase + ' 个已确认订单待生成采购单'}
+          action={
+            user?.role === 'purchase' || user?.role === 'boss' ? (
+              <Button size="small" onClick={() => navigate('/purchasing')}>
+                去采购页
+              </Button>
+            ) : null
+          }
+        />
+      ) : null}
       <Typography.Title level={4} style={{ marginTop: 0 }}>
         欢迎，{user?.name}
         {user ? '（' + roleLabels[user.role] + '）' : ''}
@@ -412,9 +449,17 @@ export default function App() {
           }
         />
         <Route
+          path="/schedules"
+          element={
+            <RequireRole roles={['sales', 'warehouse', 'boss']}>
+              <SchedulesPage />
+            </RequireRole>
+          }
+        />
+        <Route
           path="/masters"
           element={
-            <RequireRole roles={['purchase', 'boss', 'engineer']}>
+            <RequireRole roles={['purchase', 'boss', 'engineer', 'sales']}>
               <MastersPage />
             </RequireRole>
           }
