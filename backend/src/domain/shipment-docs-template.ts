@@ -100,11 +100,6 @@ function setNumFmt(ws: ExcelJS.Worksheet, addr: string, fmt: string) {
   cell.style = { ...cell.style, numFmt: fmt }
 }
 
-function setWrap(ws: ExcelJS.Worksheet, addr: string) {
-  const cell = ws.getCell(addr)
-  cell.alignment = { wrapText: true, vertical: 'top' }
-}
-
 /** 运输说明：出货时未填则按明细自动生成（SKU 数量 pcs, ...） */
 function shippingInstructionsText(d: ShipmentDocData): string {
   if (d.shipment.shippingInstructions) return d.shipment.shippingInstructions
@@ -120,7 +115,6 @@ function fillNotify(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   const lines = (d.customer.notifyParty || '').split('\n').filter(Boolean).slice(0, 7)
   for (let i = 0; i < 7; i++) {
     setVal(ws, addr('A', labelRow + 1 + i), lines[i] ?? '')
-    setWrap(ws, addr('A', labelRow + 1 + i))
   }
 }
 
@@ -129,17 +123,12 @@ function fillShipperConsignee(ws: ExcelJS.Worksheet, d: ShipmentDocData, consign
   setVal(ws, 'A6', d.company.name)
   setVal(ws, 'A7', (d.company.address || '').replace(/\n/g, ' '))
   setVal(ws, 'A8', contactMode === 'email' ? 'Email: ' + d.company.email : 'Contact: ' + (d.company.contact || '') + (d.company.email ? ';' + d.company.email : ''))
-  setWrap(ws, 'A6')
-  setWrap(ws, 'A7')
-  setWrap(ws, 'A8')
   // 收货人块：标签行 +1 名称、+2 地址、+3 国家、+4 VAT、+5 EORI
   setVal(ws, addr('A', consigneeLabelRow + 1), d.customer.name)
   setVal(ws, addr('A', consigneeLabelRow + 2), d.customer.address ?? '')
   setVal(ws, addr('A', consigneeLabelRow + 3), d.customer.country ?? '')
   setVal(ws, addr('A', consigneeLabelRow + 4), 'VAT#: ' + (d.customer.vatNo ?? ''))
   setVal(ws, addr('A', consigneeLabelRow + 5), 'EORI: ' + (d.customer.eori ?? ''))
-  setWrap(ws, addr('A', consigneeLabelRow + 1))
-  setWrap(ws, addr('A', consigneeLabelRow + 2))
   fillNotify(ws, d)
 }
 
@@ -165,7 +154,6 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   setVal(ws, 'D7', issuerAddr[2] ?? '')
   setVal(ws, 'D8', 'Contact: ' + (d.company.contact || ''))
   setVal(ws, 'D9', d.company.email)
-  for (const a of ['D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'K4', 'K5', 'K6', 'K7', 'K8']) setWrap(ws, a)
 
   // 客户（TO）：模板在 K 列（K4 名称、K5-7 地址、K8 联系方式）
   const custAddr = (d.customer.address || '').split('\n')
