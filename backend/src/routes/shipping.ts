@@ -5,6 +5,7 @@ import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
 import { prismaErrorInfo, parsePositiveInt } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
+import { buildFromTemplate } from '../domain/shipment-docs-template'
 import {
   buildCommercialInvoice,
   buildOfficialInvoice,
@@ -578,13 +579,19 @@ export function shippingRoutes(app: FastifyInstance) {
       payments: payments.map((p) => ({ amount: p.amount.toString(), paidAt: p.receivedAt }) satisfies DocPayment),
     }
 
-    const builders = {
-      official: buildOfficialInvoice,
-      commercial: buildCommercialInvoice,
-      packing: buildPackingList,
-    } as const
-    const wb = builders[typeRaw](doc)
-    const buf = await wb.xlsx.writeBuffer()
+    // 优先：以微信原始模板为基础填写（样式/合并/列宽 100% 保真）；模板缺失时回退生成器
+    const templateBuf = await buildFromTemplate(typeRaw, doc)
+    let buf: Buffer
+    if (templateBuf) {
+      buf = templateBuf
+    } else {
+      const builders = {
+        official: buildOfficialInvoice,
+        commercial: buildCommercialInvoice,
+        packing: buildPackingList,
+      } as const
+      buf = Buffer.from(await builders[typeRaw](doc).xlsx.writeBuffer())
+    }
 
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     const userId = (req as { user?: { userId?: number; role?: string } }).user?.userId
@@ -597,6 +604,6 @@ export function shippingRoutes(app: FastifyInstance) {
     const fileName = 'erp-' + base + '-' + typeName + '-' + date + '-' + exporter + '.xlsx'
     reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     reply.header('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(fileName) + '; filename="erp-shipment-doc.xlsx"')
-    reply.send(Buffer.from(buf))
+    reply.send(buf)
   })
 }
