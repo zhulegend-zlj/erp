@@ -108,7 +108,6 @@ export default function Purchasing() {
   const [modalOpen, setModalOpen] = useKeepAliveState<boolean>('po.modalOpen', false)
   const [draftItems, setDraftItems] = useKeepAliveState<PoItemField[] | undefined>('po.draftItems', undefined)
   const [submitting, setSubmitting] = useState(false)
-  const [lastPos, setLastPos] = useKeepAliveState<PurchaseOrder[]>('po.lastPos', [])
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderRow[]>([])
   const [poLoading, setPoLoading] = useState(false)
   const [poPage, setPoPage] = useState(1)
@@ -272,7 +271,6 @@ export default function Purchasing() {
           supplierId: r.supplierId ?? undefined,
         })),
       })
-      setLastPos(data)
       message.success('已按供应商生成 ' + data.length + ' 张采购单：' + data.map((o) => o.orderNo).join('、'))
       setModalOpen(false)
       setDraftItems(undefined)
@@ -391,17 +389,6 @@ export default function Purchasing() {
             },
           ]}
         />
-        {lastPos.length > 0 ? (
-          <Alert
-            style={{ marginTop: 16 }}
-            type="success"
-            showIcon
-            closable
-            message="最近生成的采购单（点右侧 × 可关闭）"
-            description={lastPos.map((po) => po.orderNo).join('、')}
-            onClose={() => setLastPos([])}
-          />
-        ) : null}
       </Card>
 
       <Card title="采购单列表" style={{ marginBottom: 16 }}>
