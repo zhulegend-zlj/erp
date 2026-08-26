@@ -67,6 +67,8 @@
 > 
 > **2026-08-26 交期下放到订单明细行（老板反馈：同一张订单不同成品交期不同）**：**迁移 `20260826_item_delivery_dates`**（SalesOrderItem 新增 customerDeliveryDate/zrhDeliveryDate；SalesOrder 旧订单级两列保留但改可空、不再使用；**家里电脑拉代码后跑 `npx prisma migrate deploy`**）。①建订单表单去掉表头两个交期，明细每行加「客户交期」+「ZRH交期」两个必填日期（同一订单不同成品可不同交期）；②订单列表「ZRH交期」列改为显示本单最早的一行交期（后端 withShipped 附 earliestZrhDate）；③出货排程选完成品后自动带出该行 客户交期→客户要求日、ZRH交期→承诺日（可改，替代原订单级预填）；④销售操作手册（md/html）同步更新。后端 **163/163** 通过、typecheck 干净、前端 build 通过、后端已重启。
 > 
+> **2026-08-26 回家开发资料包（老板回家继续开发）**：代码已全部推送到 main（HEAD `a5bbe78`）。测试数据两种拿法：①恢复整库快照 `backups/erp-home-20260826.dump`（约 93KB，含可赛尔客户资料/公司抬头/6 个到货仓/271 零件/345 BOM/TEST-P100+TEST-P200 测试成品与 20 个测试零件 BOM；交易数据已清空）——本机 PG 执行 `dropdb erp && createdb erp && pg_restore -d erp backups/erp-home-20260826.dump` 即可；②或拉代码后跑 `npx tsx prisma/seed-sales-test.ts`（幂等）重新生成测试资料。注意：backend/uploads（约 45MB 图片/图档）不在 git 里，家里没有图片属正常，需要时让工厂电脑打包。恢复后先 `npx prisma migrate deploy`（幂等）再按第 6 节启动。
+> 
 > **下一阶段（2026-08-26 起）**：①老板导出三份单证验收效果并反馈微调；②采购拆单（5000 套拆多单）等与采购对接后落实；③工程补备件后销售即可对备件下单；④另两条 [待处理] 中优反馈暂不动：成品图片地址改成图片（中）、流水/收发台账功能重合评估（中）。
 >
 > **在别处继续开发**：直接 `git pull origin main` 后按第 6 节启动；首次记得 `npx prisma migrate deploy` 与重建账号（见第 3 节）。
