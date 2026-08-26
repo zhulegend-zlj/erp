@@ -350,19 +350,16 @@ export default function Orders() {
             <Form.Item name="paymentTerms" label="付款条件">
               <Input placeholder="如 NET 60（自动带客户默认）" />
             </Form.Item>
-            <Form.Item label="交期说明" style={{ color: '#888', marginBottom: 0 }}>
-              <span style={{ fontSize: 12, color: '#888' }}>交期按明细行填写：同一张订单里不同成品可以有各自的「客户交期」和「ZRH交货日期」</span>
-            </Form.Item>
           </div>
           <Form.List name="items" initialValue={[{}]}>
             {(fields, { add, remove }) => (
               <>
                 {fields.map((field) => (
-                  <Space key={field.key} align="start" wrap style={{ display: 'flex', marginBottom: 8 }}>
+                  <Space key={field.key} align="center" size={6} wrap style={{ display: 'flex', marginBottom: 8 }}>
                     <Form.Item
                       name={[field.name, 'productId']}
                       rules={[{ required: true, message: '选择成品' }]}
-                      style={{ width: 220, marginBottom: 0 }}
+                      style={{ width: 165, marginBottom: 0 }}
                     >
                       <Select
                         placeholder="选择成品"
@@ -377,32 +374,32 @@ export default function Orders() {
                     <Form.Item
                       name={[field.name, 'qty']}
                       rules={[{ required: true, message: '数量' }]}
-                      style={{ marginBottom: 0 }}
+                      style={{ width: 80, marginBottom: 0 }}
                     >
-                      <InputNumber min={1} precision={0} step={1} placeholder="数量" />
+                      <InputNumber min={1} precision={0} step={1} placeholder="数量" style={{ width: 80 }} />
                     </Form.Item>
                     <Form.Item
                       name={[field.name, 'unitPrice']}
                       rules={[{ required: true, message: '单价' }]}
-                      style={{ marginBottom: 0 }}
+                      style={{ width: 90, marginBottom: 0 }}
                     >
-                      <InputNumber min={0} placeholder="单价" style={{ width: 110 }} />
+                      <InputNumber min={0} placeholder="单价" style={{ width: 90 }} />
                     </Form.Item>
+                    <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>客户交期</span>
                     <Form.Item
                       name={[field.name, 'customerDeliveryDate']}
-                      label="客户交期"
                       rules={[{ required: true, message: '客户交期' }]}
                       style={{ marginBottom: 0 }}
                     >
-                      <Input type="date" style={{ width: 150 }} />
+                      <Input type="date" style={{ width: 135 }} />
                     </Form.Item>
+                    <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>ZRH交期</span>
                     <Form.Item
                       name={[field.name, 'zrhDeliveryDate']}
-                      label="ZRH交期"
                       rules={[{ required: true, message: 'ZRH交期' }]}
                       style={{ marginBottom: 0 }}
                     >
-                      <Input type="date" style={{ width: 150 }} />
+                      <Input type="date" style={{ width: 135 }} />
                     </Form.Item>
                     <Button
                       type="text"
