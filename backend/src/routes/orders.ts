@@ -74,15 +74,7 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown, reply: FastifyReply):
   return result.data
 }
 
-function utcDateStamp(): string {
-  return new Date().toISOString().slice(0, 10).replace(/-/g, '')
-}
-
-async function generateOrderNo(): Promise<string> {
-  const prefix = `SO-${utcDateStamp()}-`
-  const count = await prisma.salesOrder.count({ where: { orderNo: { startsWith: prefix } } })
-  return `${prefix}${String(count + 1).padStart(3, '0')}`
-}
+// 订单号 = 客户PO号：全厂生产流程直接沿用客户采购订单号，不再自动生成编号
 
 const ITEMS_INCLUDE = {
   customer: { select: { name: true } },
@@ -112,11 +104,15 @@ export function ordersRoutes(app: FastifyInstance) {
     const data = parseBody(createOrderSchema, req.body, reply)
     if (data === null) return
 
-    const orderNo = await generateOrderNo()
+    // 订单号直接取客户PO号；重复PO号先拦截给出明确提示
+    const duplicate = await prisma.salesOrder.findUnique({ where: { orderNo: data.customerPoNo } })
+    if (duplicate) {
+      return reply.code(400).send({ error: `客户PO号「${data.customerPoNo}」已被使用，请核对（同一PO号重复录入会被拦截）` })
+    }
     const order = await prisma.$transaction(async (tx) => {
       const created = await tx.salesOrder.create({
         data: {
-          orderNo,
+          orderNo: data.customerPoNo,
           customerId: data.customerId,
           customerPoNo: data.customerPoNo,
           orderDate: data.orderDate ? new Date(data.orderDate) : new Date(),

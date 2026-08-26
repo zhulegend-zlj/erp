@@ -340,8 +340,8 @@ export default function Orders() {
                 }}
               />
             </Form.Item>
-            <Form.Item name="customerPoNo" label="客户PO号" rules={[{ required: true, message: '请输入客户PO号' }]}>
-              <Input placeholder="如 265440" />
+            <Form.Item name="customerPoNo" label="客户PO号（即订单号）" rules={[{ required: true, message: '请输入客户PO号' }]}>
+              <Input placeholder="如 265440545874390（订单号直接使用客户PO号，不再自动生成）" />
             </Form.Item>
             <Form.Item name="orderDate" label="订单日期" rules={[{ required: true, message: '请选择订单日期' }]}>
               <Input type="date" />

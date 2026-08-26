@@ -504,7 +504,7 @@ export default function Purchasing() {
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
-            message={'预计生成 ' + supplierGroups.length + ' 张采购单'}
+            message={'预计生成 ' + supplierGroups.length + ' 张采购单，单号 = 订单号-Z001/-Z002…'}
             description={
               supplierGroups.length > 0
                 ? supplierGroups.map(([name, count]) => name + '：' + count + ' 项').join('；')

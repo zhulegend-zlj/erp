@@ -15,7 +15,7 @@ describe('orders', () => {
     await resetDb()
   })
 
-  it('sales 可创建订单，自动生成 orderNo', async () => {
+  it('sales 可创建订单，订单号直接使用客户PO号', async () => {
     const app = buildApp()
     const { customer, product, cookie } = await seedOrder(app)
     const res = await app.inject({
@@ -31,9 +31,26 @@ describe('orders', () => {
       }
     })
     expect(res.statusCode).toBe(200)
-    expect(res.json().orderNo).toMatch(/^SO-\d{8}-\d{3}$/)
+    expect(res.json().orderNo).toBe('PO-TEST-1')
     expect(res.json().status).toBe('draft')
     expect(res.json().items).toHaveLength(1)
+  })
+
+  it('重复的客户PO号创建订单返回 400', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const payload = {
+      customerId: customer.id,
+      customerPoNo: 'PO-DUP-1',
+      customerDeliveryDate: '2026-09-30',
+      zrhDeliveryDate: '2026-09-30',
+      items: [{ productId: product.id, qty: 10, unitPrice: 10 }]
+    }
+    const first = await app.inject({ method: 'POST', url: '/api/orders', headers: { cookie }, payload })
+    expect(first.statusCode).toBe(200)
+    const second = await app.inject({ method: 'POST', url: '/api/orders', headers: { cookie }, payload })
+    expect(second.statusCode).toBe(400)
+    expect(second.json().error).toContain('已被使用')
   })
 
   it('创建订单时 items 为空返回 400', async () => {
@@ -443,7 +460,7 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        customerPoNo: 'PO-TEST-1',
+        customerPoNo: 'PO-TEST-2',
         customerDeliveryDate: '2026-09-30',
         zrhDeliveryDate: '2026-09-30',
         items: [{ productId: product.id, qty: 1, unitPrice: 10 }]

@@ -87,16 +87,26 @@ function utcDateStamp(): string {
   return new Date().toISOString().slice(0, 10).replace(/-/g, '')
 }
 
-async function generatePurchaseOrderNo(): Promise<string> {
-  const prefix = `PO-${utcDateStamp()}-`
-  const count = await prisma.purchaseOrder.count({ where: { orderNo: { startsWith: prefix } } })
-  return `${prefix}${String(count + 1).padStart(3, '0')}`
+// 采购单号规则：
+// 1) 挂销售订单：订单号（=客户PO号）+ -Z001/-Z002…（同一订单内按创建顺序递增，一次批量按供应商分组的 N 张自动排 Z001..Z00N）
+// 2) 自购（无销售订单）：保留旧规则 PO-YYYYMMDD-NNN
+function zrhPoSuffix(seq: number): string {
+  return `-Z${String(seq).padStart(3, '0')}`
 }
 
-async function generatePurchaseOrderNoFor(tx: Prisma.TransactionClient): Promise<string> {
-  const prefix = `PO-${utcDateStamp()}-`
-  const count = await tx.purchaseOrder.count({ where: { orderNo: { startsWith: prefix } } })
-  return `${prefix}${String(count + 1).padStart(3, '0')}`
+async function nextPurchaseOrderNo(salesOrderId: number | null, tx: Prisma.TransactionClient): Promise<string> {
+  if (salesOrderId === null) {
+    const prefix = `PO-${utcDateStamp()}-`
+    const count = await tx.purchaseOrder.count({ where: { orderNo: { startsWith: prefix } } })
+    return `${prefix}${String(count + 1).padStart(3, '0')}`
+  }
+  const salesOrder = await tx.salesOrder.findUniqueOrThrow({
+    where: { id: salesOrderId },
+    select: { orderNo: true },
+  })
+  const base = salesOrder.orderNo
+  const count = await tx.purchaseOrder.count({ where: { salesOrderId, orderNo: { startsWith: base + '-Z' } } })
+  return `${base}${zrhPoSuffix(count + 1)}`
 }
 
 export function purchasingRoutes(app: FastifyInstance) {
@@ -248,7 +258,7 @@ export function purchasingRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: '零件「' + names + '」的供应商不是所选供应商，请先在零件资料中挂好供应商' })
     }
 
-    const orderNo = await generatePurchaseOrderNo()
+    const orderNo = await nextPurchaseOrderNo(data.salesOrderId ?? null, prisma)
     const order = await prisma.$transaction(async (tx) => {
       const created = await tx.purchaseOrder.create({
         data: { orderNo, supplierId: data.supplierId, salesOrderId: data.salesOrderId ?? null },
@@ -312,7 +322,7 @@ export function purchasingRoutes(app: FastifyInstance) {
     const orders = await prisma.$transaction(async (tx) => {
       const createdOrders: any[] = []
       for (const [supplierId, items] of groups.entries()) {
-        const orderNo = await generatePurchaseOrderNoFor(tx)
+        const orderNo = await nextPurchaseOrderNo(data.salesOrderId ?? null, tx)
         const created = await tx.purchaseOrder.create({
           data: { orderNo, supplierId, salesOrderId: data.salesOrderId ?? null },
         })
