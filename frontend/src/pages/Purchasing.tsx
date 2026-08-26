@@ -53,7 +53,8 @@ interface Requirement {
   supplierId: number | null
   supplierName: string
   price: number | null
-  usage: number
+  usage: number | null
+  usageText?: string
   requiredQty: number
   onHand: number
   gapQty: number
@@ -377,9 +378,8 @@ export default function Purchasing() {
             },
             {
               title: '用量/台',
-              dataIndex: 'usage',
               key: 'usage',
-              render: (v: number) => (v === 0 ? '-' : v),
+              render: (_: unknown, r: Requirement) => r.usageText ?? (r.usage === 0 || r.usage == null ? '-' : r.usage),
             },
             { title: '需求数量', dataIndex: 'requiredQty', key: 'requiredQty' },
             { title: '现有库存', dataIndex: 'onHand', key: 'onHand' },
@@ -579,7 +579,7 @@ export default function Purchasing() {
                       ) : null}
                       <div style={{ lineHeight: '32px', color: '#8c8c8c', fontSize: 12 }}>
                         {req
-                          ? '用量 ' + req.usage + ' ｜需求 ' + req.requiredQty + ' ｜库存 ' + req.onHand + ' ｜需采购 ' + req.gapQty
+                          ? '用量 ' + (req.usageText ?? req.usage ?? '-') + ' ｜需求 ' + req.requiredQty + ' ｜库存 ' + req.onHand + ' ｜需采购 ' + req.gapQty
                           : ''}
                       </div>
                       <Button

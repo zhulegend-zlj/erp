@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
+import { usageDisplay } from '../domain/bom'
 import { refreshProducingPhase, refreshProducingPhaseAfterUndo } from '../domain/order-phase'
 import { parsePositiveInt, prismaErrorInfo } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
@@ -424,7 +425,15 @@ export function inventoryRoutes(app: FastifyInstance) {
     }
     const partIds = [...requiredMap.keys()]
 
-    const [parts, issueGroups] = await Promise.all([
+    // 零件 → 各成品 BOM 用量明细（「用量/台」列：单一用量显示整数，多成品不同用量显示明细）
+    const usageByPart = new Map<number, Map<number, number>>()
+    for (const b of boms) {
+      const m = usageByPart.get(b.partId) ?? new Map<number, number>()
+      m.set(b.productId, (m.get(b.productId) ?? 0) + b.qty)
+      usageByPart.set(b.partId, m)
+    }
+
+    const [parts, issueGroups, products] = await Promise.all([
       prisma.part.findMany({
         where: { id: { in: partIds } },
         include: { supplier: { select: { name: true } } },
@@ -434,7 +443,9 @@ export function inventoryRoutes(app: FastifyInstance) {
         where: { salesOrderId: order.id, partId: { in: partIds } },
         _sum: { qty: true },
       }),
+      prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true, sku: true } }),
     ])
+    const productSkuMap = new Map(products.map((p) => [p.id, p.sku]))
 
     const issueMap = new Map(issueGroups.map((g) => [g.partId, g._sum.qty ?? 0]))
     const items = parts.map((part, index) => {
@@ -449,7 +460,7 @@ export function inventoryRoutes(app: FastifyInstance) {
         supplierName: part.supplier?.name ?? '',
         spec: part.spec ?? '',
         unit: part.unit,
-        usage: totalOrderQty > 0 ? requiredQty / totalOrderQty : 0,
+        ...usageDisplay(usageByPart.get(part.id), productSkuMap),
         requiredQty,
         issuedQty,
         variance: issuedQty - requiredQty,

@@ -263,6 +263,9 @@ describe('inventory', () => {
       issuedQty: 12,
       variance: -8
     })
+    // 用量口径：单一成品 BOM 用量 2 → 整数 2（旧逻辑 20/10 也是 2，此处防回归）
+    expect(body.items[0].usage).toBe(2)
+    expect(Number.isInteger(body.items[0].usage)).toBe(true)
   })
 
   it('订单流水查询返回流水并汇总出库', async () => {

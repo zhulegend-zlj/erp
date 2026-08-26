@@ -65,6 +65,54 @@ describe('purchasing', () => {
     const b = rows.find((r: any) => r.partId === partB.id)
     expect(a).toMatchObject({ partId: partA.id, partName: '螺丝A', requiredQty: 10, onHand: 3, gapQty: 7 })
     expect(b).toMatchObject({ partId: partB.id, partName: '螺丝B', requiredQty: 20, onHand: 0, gapQty: 20 })
+    // 用量口径：partA 在两个成品用量不同（2/1）→ usageText 明细；partB 只在一个成品 → 整数 5
+    expect(a.usage).toBeNull()
+    expect(a.usageText).toBe('F7-1×2、F7-2×1')
+    expect(b.usage).toBe(5)
+    expect(b.usageText).toBeUndefined()
+  })
+
+  it('用量/台不再出现小数：零件只在订单内一个成品时显示 BOM 整数用量', async () => {
+    const partX = await prisma.part.create({ data: { sku: 'P8-X', name: '单成品零件' } })
+    const pa = await prisma.product.create({ data: { sku: 'F8-A', name: '成品A' } })
+    const pb = await prisma.product.create({ data: { sku: 'F8-B', name: '成品B' } })
+    const pc = await prisma.product.create({ data: { sku: 'F8-C', name: '成品C' } })
+    // partX 只在成品A 的 BOM 里用量 1；B/C 不含该零件
+    await prisma.bom.createMany({
+      data: [
+        { productId: pa.id, partId: partX.id, qty: 1 },
+        { productId: pb.id, partId: (await prisma.part.create({ data: { sku: 'P8-Y', name: 'B用零件' } })).id, qty: 1 },
+      ],
+    })
+    const customer = await prisma.customer.create({ data: { name: '客户8' } })
+    const order = await prisma.salesOrder.create({
+      data: {
+        orderNo: 'SO-REQ-8',
+        customerId: customer.id,
+        zrhDeliveryDate: new Date('2026-10-01'),
+        status: 'confirmed',
+        items: {
+          create: [
+            { productId: pa.id, qty: 1, unitPrice: 10 },
+            { productId: pb.id, qty: 1, unitPrice: 20 },
+            { productId: pc.id, qty: 1, unitPrice: 30 },
+          ],
+        },
+      },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    const res = await app.inject({
+      method: 'GET', url: `/api/purchasing/requirements?orderId=${order.id}`, headers: { cookie },
+    })
+    expect(res.statusCode).toBe(200)
+    const row = (res.json() as Array<{ partId: number; usage: number | null; usageText?: string; requiredQty: number }>).find(
+      (r) => r.partId === partX.id,
+    )
+    // 旧逻辑会算出 1/3 = 0.3333…；新口径 = BOM 整数 1
+    expect(row).toMatchObject({ requiredQty: 1, usage: 1 })
+    expect(row?.usageText).toBeUndefined()
+    expect(Number.isInteger(row?.usage)).toBe(true)
   })
 
   it('自购（无销售订单）采购单自动生成 PO 单号', async () => {

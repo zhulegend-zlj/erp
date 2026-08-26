@@ -1408,7 +1408,8 @@ interface OrderMaterialRow {
   supplierName: string
   spec: string
   unit: string
-  usage: number
+  usage: number | null
+  usageText?: string
   requiredQty: number
   issuedQty: number
   variance: number
@@ -1500,7 +1501,7 @@ function OrderMaterialsTab({ orders }: { orders: SalesOrder[] }) {
           },
           { title: '供应商', dataIndex: 'supplierName', key: 'supplierName' },
           { title: '规格', dataIndex: 'spec', key: 'spec', render: (v: string) => v || '-' },
-          { title: '用量', dataIndex: 'usage', key: 'usage' },
+          { title: '用量', key: 'usage', render: (_: unknown, r: OrderMaterialRow) => r.usageText ?? r.usage ?? '-' },
           { title: '已出库 (PCS)', dataIndex: 'issuedQty', key: 'issuedQty' },
           {
             title: '差值',

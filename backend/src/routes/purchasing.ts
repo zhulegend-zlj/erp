@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
-import { bomExplode, computePurchaseGap } from '../domain/bom'
+import { bomExplode, computePurchaseGap, usageDisplay } from '../domain/bom'
 import { applyStockChange } from '../domain/inventory'
 import { markPurchasingStarted, refreshPurchasingPhase, refreshPurchasingPhaseAfterUndo } from '../domain/order-phase'
 import { parsePositiveInt, prismaErrorInfo } from '../errors'
@@ -133,15 +133,24 @@ export function purchasingRoutes(app: FastifyInstance) {
     }
     const requirements = [...requiredMap.entries()].map(([partId, requiredQty]) => ({ partId, requiredQty }))
     const partIds = requirements.map((r) => r.partId)
-    const totalOrderQty = order.items.reduce((sum, it) => sum + it.qty, 0)
 
-    const [parts, stocks] = await Promise.all([
+    // 零件 → 各成品 BOM 用量明细（用于「用量/台」显示：单一用量显示整数，多成品不同用量显示明细）
+    const usageByPart = new Map<number, Map<number, number>>()
+    for (const b of boms) {
+      const m = usageByPart.get(b.partId) ?? new Map<number, number>()
+      m.set(b.productId, (m.get(b.productId) ?? 0) + b.qty)
+      usageByPart.set(b.partId, m)
+    }
+
+    const [parts, stocks, products] = await Promise.all([
       prisma.part.findMany({
         where: { id: { in: partIds } },
         include: { supplier: { select: { id: true, name: true } } },
       }),
       prisma.stock.findMany({ where: { itemType: 'part', itemId: { in: partIds } } }),
+      prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true, sku: true } }),
     ])
+    const productSkuMap = new Map(products.map((p) => [p.id, p.sku]))
     const partMap = new Map(parts.map((p) => [p.id, p]))
     const stockMap = new Map(stocks.map((s) => [s.itemId, s.qtyOnHand]))
     const gapMap = new Map(computePurchaseGap(requirements, stockMap).map((g) => [g.partId, g.gapQty]))
@@ -149,6 +158,7 @@ export function purchasingRoutes(app: FastifyInstance) {
     return requirements.map((r) => {
       const part = partMap.get(r.partId)
       const onHand = stockMap.get(r.partId) ?? 0
+      const usage = usageDisplay(usageByPart.get(r.partId), productSkuMap)
       return {
         partId: r.partId,
         sku: part?.sku ?? '',
@@ -156,7 +166,7 @@ export function purchasingRoutes(app: FastifyInstance) {
         supplierId: part?.supplierId ?? null,
         supplierName: part?.supplier?.name ?? '',
         price: part?.price != null ? part.price.toNumber() : null,
-        usage: totalOrderQty > 0 ? r.requiredQty / totalOrderQty : 0,
+        ...usage,
         requiredQty: r.requiredQty,
         onHand,
         gapQty: gapMap.get(r.partId) ?? 0,
