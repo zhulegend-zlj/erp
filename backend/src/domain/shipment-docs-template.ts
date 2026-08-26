@@ -95,6 +95,11 @@ function excelSerial(d: Date): number {
   return Math.round((excelDate(d).getTime() - Date.UTC(1899, 11, 30)) / 86400000)
 }
 
+function setNumFmt(ws: ExcelJS.Worksheet, addr: string, fmt: string) {
+  const cell = ws.getCell(addr)
+  cell.style = { ...cell.style, numFmt: fmt }
+}
+
 function setWrap(ws: ExcelJS.Worksheet, addr: string) {
   const cell = ws.getCell(addr)
   cell.alignment = { wrapText: true, vertical: 'top' }
@@ -119,12 +124,11 @@ function fillNotify(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   }
 }
 
-function fillShipperConsignee(ws: ExcelJS.Worksheet, d: ShipmentDocData, consigneeLabelRow: number) {
-  void consigneeLabelRow
+function fillShipperConsignee(ws: ExcelJS.Worksheet, d: ShipmentDocData, consigneeLabelRow: number, contactMode: 'contact' | 'email' = 'contact') {
   // 发货人块（两张表一致：A5 标签，名称 A6、地址 A7、联系方式 A8）
   setVal(ws, 'A6', d.company.name)
-  setVal(ws, 'A7', d.company.address)
-  setVal(ws, 'A8', 'Contact: ' + (d.company.contact || '') + (d.company.email ? ';' + d.company.email : ''))
+  setVal(ws, 'A7', (d.company.address || '').replace(/\n/g, ' '))
+  setVal(ws, 'A8', contactMode === 'email' ? 'Email: ' + d.company.email : 'Contact: ' + (d.company.contact || '') + (d.company.email ? ';' + d.company.email : ''))
   setWrap(ws, 'A6')
   setWrap(ws, 'A7')
   setWrap(ws, 'A8')
@@ -150,7 +154,7 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   // 右上角日期与发票号
   const d2 = ws.getCell('M2')
   d2.value = excelDate(d.shipment.shippedAt)
-  d2.numFmt = 'm/d/yy' // 与 Due Date 同款美式日期（如 8/14/26）
+  setNumFmt(ws, 'M2', 'm/d/yy') // 与 Due Date 同款美式日期（如 8/14/26）
   setVal(ws, 'M3', d.shipment.invoiceNo ?? '')
 
   // 抬头（Issuer）
@@ -169,7 +173,7 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   setVal(ws, 'K5', custAddr[0] ?? '')
   setVal(ws, 'K6', custAddr[1] ?? '')
   setVal(ws, 'K7', custAddr[2] ?? '')
-  setVal(ws, 'K8', 'Contact: ' + (d.customer.contact || ''))
+  setVal(ws, 'K8', d.customer.contact ?? '')
 
   // 明细：表头 A13 起，模板明细区 6 行（14-19）
   const headerRow = findRowByText(ws, 'Line#', 'A') ?? 13
@@ -191,8 +195,10 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
     setVal(ws, addr('D', row), descriptionOf(l))
     setVal(ws, addr('H', row), l.qty)
     setVal(ws, addr('I', row), num(l.unitPrice) ?? '')
-    setVal(ws, addr('J', row), ext)
-    setVal(ws, addr('K', row), ext)
+    const jCell = ws.getCell(addr('J', row))
+    jCell.value = { formula: 'I' + row + '*H' + row, result: ext } as ExcelJS.CellFormulaValue
+    const kCell = ws.getCell(addr('K', row))
+    kCell.value = { formula: 'J' + row, result: ext } as ExcelJS.CellFormulaValue
     // Due Date 与原表一致：公式 =M2+账期天数（保留模板 m/d/yy 显示格式）
     const days = paymentDays(d.shipment.paymentTerms)
     const dueCell = ws.getCell(addr('L', row))
@@ -221,7 +227,7 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
       setVal(ws, addr('A', row), num(d.payments[i]!.amount) ?? '')
       const bc = ws.getCell(addr('B', row))
       bc.value = excelDate(d.payments[i]!.paidAt)
-      bc.numFmt = 'yyyy.mm.dd'
+      setNumFmt(ws, addr('B', row), 'yyyy.mm.dd')
       setVal(ws, addr('C', row), '')
     }
     for (let i = d.payments.length; i < payCapacity; i++) {
@@ -232,8 +238,13 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   // 合计 + 大写
   const totalRow = findRow(ws, (c) => c.address === 'G' + c.row && c.value === 'Total:')
   if (totalRow !== null) {
-    setVal(ws, addr('H', totalRow), d.lines.reduce((s, l) => s + l.qty, 0))
-    setVal(ws, addr('K', totalRow), Math.round(totalAmount(d) * 100) / 100)
+    const sumQty = d.lines.reduce((s, l) => s + l.qty, 0)
+    const sumAmt = Math.round(totalAmount(d) * 100) / 100
+    const endRow = dataStart + Math.max(k, capacity) // 含尾随空行（原表 SUM(H14:H20) 口径）
+    const hCell = ws.getCell(addr('H', totalRow))
+    hCell.value = { formula: 'SUM(H' + dataStart + ':H' + endRow + ')', result: sumQty } as ExcelJS.CellFormulaValue
+    const kCell = ws.getCell(addr('K', totalRow))
+    kCell.value = { formula: 'SUM(K' + dataStart + ':K' + endRow + ')', result: sumAmt } as ExcelJS.CellFormulaValue
   }
   const sayRow = findRow(ws, (c) => typeof c.value === 'string' && c.value.startsWith('SAY'))
   if (sayRow !== null) {
@@ -254,21 +265,22 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
     if (label === '1.Shipping Date:') {
       const c = ws.getCell(addr('D', r))
       c.value = excelDate(d.shipment.shippedAt)
-      c.numFmt = 'yyyy.mm.dd'
+      setNumFmt(ws, addr('D', r), 'yyyy.mm.dd')
     } else {
       const c = ws.getCell(addr('D', r))
       c.value = value ?? ''
-      if (label === '2.Shipping instructions:') c.numFmt = 'General'
+      if (label === '2.Shipping instructions:') setNumFmt(ws, addr('D', r), 'General')
     }
   }
   const bankRow = findRowByText(ws, '6.Collecting bank:', 'A')
   if (bankRow !== null) {
-    setVal(ws, addr('D', bankRow), d.company.bankName)
-    setVal(ws, addr('D', bankRow + 1), d.company.bankPhone)
-    setVal(ws, addr('D', bankRow + 2), d.company.bankAddress)
-    setVal(ws, addr('D', bankRow + 4), 'SWIFT: ' + d.company.swift)
-    setVal(ws, addr('D', bankRow + 5), 'Account Name: ' + d.company.accountName)
-    setVal(ws, addr('D', bankRow + 6), 'Account Number: ' + d.company.accountNo)
+    const NBSP = '\u00A0'
+    setVal(ws, addr('D', bankRow), 'Bank' + NBSP + 'Name:' + NBSP + d.company.bankName)
+    setVal(ws, addr('D', bankRow + 1), 'Bank' + NBSP + 'Telphone' + NBSP + 'number:' + NBSP + d.company.bankPhone)
+    setVal(ws, addr('D', bankRow + 2), 'Bank' + NBSP + 'Address:' + NBSP + d.company.bankAddress)
+    setVal(ws, addr('D', bankRow + 4), 'SWIFT:' + NBSP + d.company.swift)
+    setVal(ws, addr('D', bankRow + 5), 'Account' + NBSP + 'Name:' + NBSP + d.company.accountName)
+    setVal(ws, addr('D', bankRow + 6), 'Account' + NBSP + 'Number:' + NBSP + d.company.accountNo)
   }
   const incotermRow = findRowByText(ws, '7.Incoterm', 'A')
   if (incotermRow !== null) {
@@ -281,7 +293,6 @@ function fillCommercialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   setVal(ws, 'F3', d.shipment.invoiceNo ?? '')
   const f4 = ws.getCell('F4')
   f4.value = excelDate(d.shipment.shippedAt)
-  f4.numFmt = 'yyyy.mm.dd'
   fillShipperConsignee(ws, d, 12)
 
   const headerRow = findRowByText(ws, 'Line#', 'A')
@@ -304,7 +315,8 @@ function fillCommercialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
     setVal(ws, addr('D', row), l.customerPoNo ?? '')
     setVal(ws, addr('E', row), l.qty)
     setVal(ws, addr('F', row), num(l.unitPrice) ?? '')
-    setVal(ws, addr('G', row), extOf(l))
+    const gCell = ws.getCell(addr('G', row))
+    gCell.value = { formula: 'F' + row + '*E' + row, result: extOf(l) } as ExcelJS.CellFormulaValue
     setVal(ws, addr('H', row), l.lotNo ?? '')
   }
   for (let i = k; i < capacity; i++) {
@@ -314,16 +326,15 @@ function fillCommercialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   const markRow2 = findRow(ws, (c) => typeof c.value === 'string' && c.value.startsWith('MARK:'))
   if (markRow2 !== null) {
     setVal(ws, addr('C', markRow2), 'MARK:' + (d.shipment.mark ?? ''))
-    setVal(ws, addr('G', markRow2 + 2), Math.round(totalAmount(d) * 100) / 100) // Total amount 行
+    const gTotal = ws.getCell(addr('G', markRow2 + 2))
+    gTotal.value = { formula: 'SUM(G' + dataStart + ':G' + (markRow2 - 1) + ')', result: Math.round(totalAmount(d) * 100) / 100 } as ExcelJS.CellFormulaValue
     setVal(ws, addr('A', markRow2 + 4), 'SAY CNY ' + amountInWords(Math.round(totalAmount(d) * 100) / 100) + ' ONLY.')
     setVal(ws, addr('C', markRow2 + 7), d.shipment.incoterm ?? '') // Incoterm
     setVal(ws, addr('E', markRow2 + 8), d.shipment.vesselVoyage ?? '') // Vessel
     const etd = ws.getCell(addr('E', markRow2 + 9))
     etd.value = d.shipment.etd ? excelDate(d.shipment.etd) : null
-    if (d.shipment.etd) etd.numFmt = 'yyyy.mm.dd'
     const eta = ws.getCell(addr('G', markRow2 + 9))
     eta.value = d.shipment.eta ? excelDate(d.shipment.eta) : null
-    if (d.shipment.eta) eta.numFmt = 'yyyy.mm.dd'
     setVal(ws, addr('C', markRow2 + 10), d.shipment.origin ?? '') // Land of origin
     setVal(ws, addr('A', markRow2 + 11), 'customs tariff number: ' + (d.shipment.hsCode ?? ''))
     setVal(ws, addr('A', markRow2 + 12), 'description of goods: ')
@@ -334,8 +345,7 @@ function fillPackingSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   setVal(ws, 'H3', d.shipment.invoiceNo ?? '')
   const h4 = ws.getCell('H4')
   h4.value = excelDate(d.shipment.shippedAt)
-  h4.numFmt = 'yyyy.mm.dd'
-  fillShipperConsignee(ws, d, 11)
+  fillShipperConsignee(ws, d, 11, 'email')
 
   const headerRow = findRowByText(ws, 'Line#', 'A')
   if (headerRow === null) return
@@ -376,21 +386,26 @@ function fillPackingSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
 
   const totalLabelRow2 = findRow(ws, (c) => c.value === 'Total amount:')
   if (totalLabelRow2 !== null) {
-    setVal(ws, addr('E', totalLabelRow2), d.lines.reduce((s, l) => s + l.qty, 0))
-    setVal(ws, addr('F', totalLabelRow2), d.lines.reduce((s, l) => s + (l.cartons ?? 0), 0))
-    setVal(ws, addr('G', totalLabelRow2), Math.round(d.lines.reduce((s, l) => s + (num(l.netWeight) ?? 0), 0) * 100) / 100)
-    setVal(ws, addr('H', totalLabelRow2), Math.round(d.lines.reduce((s, l) => s + (num(l.grossWeight) ?? 0), 0) * 100) / 100)
-    setVal(ws, addr('I', totalLabelRow2), Math.round(d.lines.reduce((s, l) => s + (num(l.cbm) ?? 0), 0) * 1000000) / 1000000)
+    const lastRow = totalLabelRow2 - 1
+    const sums: Array<[string, number]> = [
+      ['E', d.lines.reduce((s, l) => s + l.qty, 0)],
+      ['F', d.lines.reduce((s, l) => s + (l.cartons ?? 0), 0)],
+      ['G', Math.round(d.lines.reduce((s, l) => s + (num(l.netWeight) ?? 0), 0) * 100) / 100],
+      ['H', Math.round(d.lines.reduce((s, l) => s + (num(l.grossWeight) ?? 0), 0) * 100) / 100],
+      ['I', Math.round(d.lines.reduce((s, l) => s + (num(l.cbm) ?? 0), 0) * 1000000) / 1000000],
+    ]
+    for (const [col, val] of sums) {
+      const c = ws.getCell(addr(col, totalLabelRow2))
+      c.value = { formula: 'SUM(' + col + dataStart + ':' + col + lastRow + ')', result: val } as ExcelJS.CellFormulaValue
+    }
     const cartons = d.lines.reduce((s, l) => s + (l.cartons ?? 0), 0)
     setVal(ws, addr('A', totalLabelRow2 + 2), 'SAY TOTAL ' + cartonsInWords(cartons) + ' CARTONS ONLY')
     setVal(ws, addr('C', totalLabelRow2 + 5), d.shipment.incoterm ?? '') // Incoterm（模板 A44 行）
     setVal(ws, addr('G', totalLabelRow2 + 6), d.shipment.vesselVoyage ?? '') // Transport Details
     const etd = ws.getCell(addr('G', totalLabelRow2 + 7))
     etd.value = d.shipment.etd ? excelDate(d.shipment.etd) : null
-    if (d.shipment.etd) etd.numFmt = 'yyyy.mm.dd'
     const eta = ws.getCell(addr('I', totalLabelRow2 + 7))
     eta.value = d.shipment.eta ? excelDate(d.shipment.eta) : null
-    if (d.shipment.eta) eta.numFmt = 'yyyy.mm.dd'
     setVal(ws, addr('C', totalLabelRow2 + 8), d.shipment.origin ?? '') // Land of origin
     setVal(ws, addr('A', totalLabelRow2 + 9), 'customs tariff number: ' + (d.shipment.hsCode ?? ''))
     setVal(ws, addr('A', totalLabelRow2 + 10), 'description of goods: ')

@@ -5,14 +5,14 @@ const prisma = new PrismaClient()
 
 const PROFILE = {
   name: 'Dongguan Zhiruiheng Electronic Co., Ltd',
-  address: 'Room 201, No.239 Changhuang Road, Changping Town, Dongguan Guangdong Province 528536 China',
+  address: 'Room 201, No.239 Changhuang Road,\nChangping Town,Dongguan\nGuangdong Province ,528536 China',
   contact: 'bl@jmc-metal.com',
   email: 'BUSINESS@JMC-METAL.COM',
   vatNo: '91441900MAG11BDD14',
   taxRate: '0',
   bankName: 'CHINA MERCHANTS BANK DONGGUAN CHANGPING SUB-BRANCH',
   bankPhone: '+86 0769-81089991',
-  bankAddress: 'Room 101, Jun Hong Plaza, 19 Changping Avenue, Changping Town, Dongguan, Guangdong Province, China',
+  bankAddress: 'Room 101, Jun Hong Plaza, 19 Changping Avenue, Changping Town, Dongguan,Guangdong Province, China',
   swift: 'CMBCCNBS195',
   accountName: 'Dongguan Zhiruiheng Electronic Co., Ltd',
   accountNo: '769914313710066',
