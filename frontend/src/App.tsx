@@ -252,7 +252,7 @@ function Home() {
           type="warning"
           showIcon
           style={{ marginBottom: 12 }}
-          message={'有 ' + pendingPurchase + ' 个已确认订单待生成采购单'}
+          message={'有 ' + pendingPurchase + ' 个订单待生成采购单'}
           action={
             user?.role === 'purchase' || user?.role === 'boss' ? (
               <Button size="small" onClick={() => navigate('/purchasing')}>

@@ -78,9 +78,9 @@ export function dashboardRoutes(app: FastifyInstance) {
       }
     })
 
-    // 待采购：已确认且尚未生成任何采购单的订单数（采购页/首页提醒用）
+    // 待采购：草稿/已确认且尚未生成任何采购单的订单数（采购页/首页提醒用，草稿也可采购）
     const pendingPurchaseOrders = await prisma.salesOrder.count({
-      where: { status: 'confirmed', purchaseOrders: { none: {} } },
+      where: { status: { in: ['draft', 'confirmed'] }, purchaseOrders: { none: {} } },
     })
 
     // 应付余额：全部采购单金额 - 全部供应商付款（含未挂采购单的付款），下限 0

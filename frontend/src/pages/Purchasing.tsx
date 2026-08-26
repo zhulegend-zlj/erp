@@ -353,7 +353,7 @@ export default function Purchasing() {
             type="warning"
             showIcon
             style={{ marginBottom: 12 }}
-            message={'有 ' + pendingOrders.length + ' 个订单待生成采购单（含草稿）'}
+            message={'有 ' + pendingOrders.length + ' 个订单待生成采购单'}
             action={
               <Button size="small" type={pendingOnly ? 'primary' : 'default'} onClick={() => setPendingOnly((v) => !v)}>
                 {pendingOnly ? '显示全部订单' : '只看待采购'}
