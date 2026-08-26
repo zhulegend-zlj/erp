@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, message } from 'antd'
-import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
+import { PlusOutlined, MinusCircleOutlined, DeleteOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { dateStr, notifyError, orderPhaseLabel, phaseTagColor, statusLabel } from './common'
@@ -63,6 +63,9 @@ export default function Orders() {
   const [total, setTotal] = useState(0)
   const [form] = Form.useForm<OrderFormValues>()
   const [pageSize, setPageSize] = useState(10)
+  const [deleteTarget, setDeleteTarget] = useState<SalesOrder | null>(null)
+  const [deleteText, setDeleteText] = useState('')
+  const [deletingId, setDeletingId] = useState<number | null>(null)
 
   const canCreate = user?.role === 'sales'
   const canAdvance = user?.role === 'sales' || user?.role === 'boss'
@@ -138,6 +141,27 @@ export default function Orders() {
     }
   }
 
+  async function handleDelete() {
+    if (!deleteTarget || deleteText !== deleteTarget.orderNo) return
+    setDeletingId(deleteTarget.id)
+    try {
+      await api.delete('/orders/' + deleteTarget.id)
+      message.success('订单已删除')
+      setDeleteTarget(null)
+      setDeleteText('')
+      // 删掉当前页最后一条时回退一页，避免停在空页
+      if (orders.length === 1 && page > 1) {
+        await load(page - 1)
+      } else {
+        await load()
+      }
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const columns = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
     { title: '订单号', dataIndex: 'orderNo', key: 'orderNo' },
@@ -206,7 +230,18 @@ export default function Orders() {
                 </Button>
               </Popconfirm>
             ) : null}
-            {!next && !prev ? <span>-</span> : null}
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              loading={deletingId === r.id}
+              onClick={() => {
+                setDeleteTarget(r)
+                setDeleteText('')
+              }}
+            >
+              删除
+            </Button>
           </Space>
         )
       },
@@ -329,6 +364,30 @@ export default function Orders() {
             )}
           </Form.List>
         </Form>
+      </Modal>
+      <Modal
+        title="删除订单"
+        open={deleteTarget !== null}
+        onCancel={() => {
+          setDeleteTarget(null)
+          setDeleteText('')
+        }}
+        onOk={() => void handleDelete()}
+        confirmLoading={deletingId !== null}
+        okText="确认删除"
+        cancelText="取消"
+        okButtonProps={{ danger: true, disabled: deleteText !== deleteTarget?.orderNo }}
+      >
+        <p>
+          即将删除订单 <b>{deleteTarget?.orderNo}</b>（客户：{deleteTarget?.customer?.name ?? '-'}）。
+          删除后不可恢复；已有采购/仓库/出货/财务记录的单据将被系统拒绝删除。
+        </p>
+        <p>请输入完整订单号以确认：</p>
+        <Input
+          value={deleteText}
+          onChange={(e) => setDeleteText(e.target.value)}
+          placeholder={deleteTarget?.orderNo ?? ''}
+        />
       </Modal>
     </Card>
   )

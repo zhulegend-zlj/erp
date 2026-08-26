@@ -290,4 +290,146 @@ describe('orders', () => {
     expect(refreshed?.purchasing).toBe(false)
     expect(refreshed?.producing).toBe(false)
   })
+
+  it('销售可删除无业务痕迹的草稿订单（明细一并删除）', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/orders',
+      headers: { cookie },
+      payload: {
+        customerId: customer.id,
+        deliveryDate: '2026-09-30',
+        items: [{ productId: product.id, qty: 2, unitPrice: 10 }]
+      }
+    })
+    const orderId = createRes.json().id
+
+    const del = await app.inject({ method: 'DELETE', url: `/api/orders/${orderId}`, headers: { cookie } })
+    expect(del.statusCode).toBe(200)
+    const gone = await prisma.salesOrder.findUnique({ where: { id: orderId } })
+    expect(gone).toBeNull()
+    const items = await prisma.salesOrderItem.findMany({ where: { orderId } })
+    expect(items).toHaveLength(0)
+    const detail = await app.inject({ method: 'GET', url: `/api/orders/${orderId}`, headers: { cookie } })
+    expect(detail.statusCode).toBe(404)
+  })
+
+  it('老板可删除无业务痕迹的已确认订单', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const bossCookie = await loginCookie(app, 'boss')
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/orders',
+      headers: { cookie },
+      payload: {
+        customerId: customer.id,
+        deliveryDate: '2026-09-30',
+        items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
+      }
+    })
+    const orderId = createRes.json().id
+    await prisma.salesOrder.update({ where: { id: orderId }, data: { status: 'confirmed' } })
+
+    const del = await app.inject({ method: 'DELETE', url: `/api/orders/${orderId}`, headers: { cookie: bossCookie } })
+    expect(del.statusCode).toBe(200)
+    expect(await prisma.salesOrder.findUnique({ where: { id: orderId } })).toBeNull()
+  })
+
+  it('非销售/老板角色删除订单返回 403', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/orders',
+      headers: { cookie },
+      payload: {
+        customerId: customer.id,
+        deliveryDate: '2026-09-30',
+        items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
+      }
+    })
+    const warehouseCookie = await loginCookie(app, 'warehouse')
+    const del = await app.inject({
+      method: 'DELETE',
+      url: `/api/orders/${createRes.json().id}`,
+      headers: { cookie: warehouseCookie }
+    })
+    expect(del.statusCode).toBe(403)
+  })
+
+  it('订单已有采购单时删除返回 400 并提示原因', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/orders',
+      headers: { cookie },
+      payload: {
+        customerId: customer.id,
+        deliveryDate: '2026-09-30',
+        items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
+      }
+    })
+    const orderId = createRes.json().id
+    const supplier = await prisma.supplier.create({ data: { name: '供A' } })
+    await prisma.purchaseOrder.create({
+      data: { orderNo: 'PO-20260826-001', supplierId: supplier.id, salesOrderId: orderId }
+    })
+
+    const del = await app.inject({ method: 'DELETE', url: `/api/orders/${orderId}`, headers: { cookie } })
+    expect(del.statusCode).toBe(400)
+    expect(del.json().error).toContain('采购单')
+    expect(await prisma.salesOrder.findUnique({ where: { id: orderId } })).not.toBeNull()
+  })
+
+  it('订单已有出货单或收款时删除返回 400 并提示原因', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/orders',
+      headers: { cookie },
+      payload: {
+        customerId: customer.id,
+        deliveryDate: '2026-09-30',
+        items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
+      }
+    })
+    const orderId = createRes.json().id
+    await prisma.shipment.create({ data: { salesOrderId: orderId } })
+
+    const del1 = await app.inject({ method: 'DELETE', url: `/api/orders/${orderId}`, headers: { cookie } })
+    expect(del1.statusCode).toBe(400)
+    expect(del1.json().error).toContain('出货单')
+
+    const createRes2 = await app.inject({
+      method: 'POST',
+      url: '/api/orders',
+      headers: { cookie },
+      payload: {
+        customerId: customer.id,
+        deliveryDate: '2026-09-30',
+        items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
+      }
+    })
+    const orderId2 = createRes2.json().id
+    await prisma.customerPayment.create({
+      data: { customerId: customer.id, salesOrderId: orderId2, amount: 100 }
+    })
+    const del2 = await app.inject({ method: 'DELETE', url: `/api/orders/${orderId2}`, headers: { cookie } })
+    expect(del2.statusCode).toBe(400)
+    expect(del2.json().error).toContain('收款')
+  })
+
+  it('删除不存在的订单返回 404，非法 id 返回 400', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'sales')
+    const missing = await app.inject({ method: 'DELETE', url: '/api/orders/999999', headers: { cookie } })
+    expect(missing.statusCode).toBe(404)
+    const bad = await app.inject({ method: 'DELETE', url: '/api/orders/abc', headers: { cookie } })
+    expect(bad.statusCode).toBe(400)
+  })
 })

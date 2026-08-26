@@ -208,4 +208,45 @@ export function ordersRoutes(app: FastifyInstance) {
     const refreshed = await prisma.salesOrder.findUnique({ where: { id }, include: ITEMS_INCLUDE })
     return reply.code(200).send(refreshed)
   })
+
+  // 删除订单：仅 sales/boss。只允许删除没有任何业务痕迹的订单
+  // （无采购单/出货单/领料/成品入库/收款/库存流水），防止把运作中的单据、库存与账务删烂。
+  app.delete('/api/orders/:id', { preHandler: requireRole('sales', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '订单 ID 必须为正整数' })
+
+    await prisma.$transaction(async (tx) => {
+      const order = await tx.salesOrder.findUnique({ where: { id } })
+      if (!order) throw new Error('订单不存在')
+
+      const [purchaseOrders, shipments, issues, productionEntries, payments, ledgers] = await Promise.all([
+        tx.purchaseOrder.count({ where: { salesOrderId: id } }),
+        tx.shipment.count({ where: { salesOrderId: id } }),
+        tx.issue.count({ where: { salesOrderId: id } }),
+        tx.productionEntry.count({ where: { salesOrderId: id } }),
+        tx.customerPayment.count({ where: { salesOrderId: id } }),
+        tx.inventoryLedger.count({ where: { salesOrderId: id } }),
+      ])
+      const blockers: string[] = []
+      if (purchaseOrders > 0) blockers.push(`${purchaseOrders} 张采购单`)
+      if (shipments > 0) blockers.push(`${shipments} 张出货单`)
+      if (issues > 0) blockers.push(`${issues} 条领料`)
+      if (productionEntries > 0) blockers.push(`${productionEntries} 条成品入库`)
+      if (payments > 0) blockers.push(`${payments} 笔收款`)
+      if (ledgers > 0) blockers.push(`${ledgers} 条库存流水`)
+      if (blockers.length > 0) {
+        throw new Error(`订单已有业务记录，不能删除：${blockers.join('、')}`)
+      }
+
+      await tx.salesOrderItem.deleteMany({ where: { orderId: id } })
+      await tx.salesOrder.delete({ where: { id } })
+    })
+      .then(() => reply.code(200).send({ ok: true }))
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : '删除失败'
+        if (message === '订单不存在') return reply.code(404).send({ error: message })
+        if (message.startsWith('订单已有业务记录')) return reply.code(400).send({ error: message })
+        return reply.code(500).send({ error: '删除失败，请稍后重试' })
+      })
+  })
 }
