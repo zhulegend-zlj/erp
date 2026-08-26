@@ -202,7 +202,7 @@ const RESOURCES: CrudResource[] = [
       { key: 'nameEn', label: '英文品名', type: 'text' },
       { key: 'hsCode', label: '海关编码', type: 'text' },
       { key: 'unit', label: '单位' },
-      { key: 'imageUrl', label: '图片地址', type: 'image' },
+      { key: 'imageUrl', label: '图片', type: 'image' },
     ],
   },
   {

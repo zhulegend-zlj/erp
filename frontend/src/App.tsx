@@ -77,18 +77,18 @@ const navItems: NavItem[] = [
     icon: <ShoppingCartOutlined />,
   },
   {
-    key: '/shipping',
-    label: '出货',
-    path: '/shipping',
-    roles: ['sales', 'boss'],
-    icon: <SendOutlined />,
-  },
-  {
     key: '/schedules',
     label: '出货排程',
     path: '/schedules',
     roles: ['sales', 'warehouse', 'boss'],
     icon: <ShoppingOutlined />,
+  },
+  {
+    key: '/shipping',
+    label: '出货',
+    path: '/shipping',
+    roles: ['sales', 'boss'],
+    icon: <SendOutlined />,
   },
   {
     key: '/masters',
@@ -188,7 +188,7 @@ const HOME_GUIDES: Record<Role, string[]> = {
     '意见反馈：点击右下角「意见反馈」提交问题或建议。',
   ],
   sales: [
-    '订单：新建订单（客户/客户PO号/订单日期/客户交期/ZRH交货日期/成品明细与单价）→ 确认订单；出货完成后推进到「已完成」。',
+    '订单：新建订单（客户/客户PO号/订单日期/付款条件；明细每行填 成品/数量/单价/客户交期/ZRH交期，不同成品交期可不同）→ 确认订单；出货完成后推进到「已完成」。',
     '删除订单：仅无任何业务痕迹（无采购/出货/收款/流水）的订单可删，删除需完整输入订单号确认。',
     '出货排程：按客户 OPO 表录排程（订单→成品→数量→到货仓→客户要求日+承诺日），仓库备好后在出货页勾选拼票出货（可跨订单、部分出货）。',
     '出货（单证中心）：同一到货仓的已备好排程可拼一票；出货后「编辑单证」补录船务信息、填发票号/柜号/HBL 等；「添加节点」记录运输节点；一键导出三份单证。',

@@ -16,25 +16,8 @@ import {
 import { CopyOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { dateTimeStr, notifyError, statusLabel } from './common'
+import { dateTimeStr, notifyError } from './common'
 import type { Paged } from './common'
-
-interface SalesOrder {
-  id: number
-  orderNo: string
-  status: string
-  customerPoNo?: string | null
-  customer?: { name: string }
-  items?: OrderItem[]
-}
-
-interface OrderItem {
-  id: number
-  productId: number
-  qty: number
-  unitPrice?: string
-  product: { id: number; sku: string; name: string; nameEn?: string | null }
-}
 
 interface ProductOption {
   id: number
@@ -258,7 +241,6 @@ export default function Shipping() {
   const canOperate = role === 'sales'
   const canExport = role === 'sales' || role === 'boss'
 
-  const [orders, setOrders] = useState<SalesOrder[]>([])
   const [products, setProducts] = useState<ProductOption[]>([])
   const [hubs, setHubs] = useState<Hub[]>([])
   const [schedules, setSchedules] = useState<ScheduleRow[]>([])
@@ -274,11 +256,6 @@ export default function Shipping() {
   const [picked, setPicked] = useState<Record<number, number>>({}) // scheduleId -> qty
   const [shipping, setShipping] = useState(false)
 
-  // 手工出货（无排程）
-  const [shipForm] = Form.useForm<Record<string, string | number>>()
-  const [lines, setLines] = useState<LineRow[]>([])
-  const [selectedOrder, setSelectedOrder] = useState<SalesOrder | null>(null)
-
   const [editTarget, setEditTarget] = useState<Shipment | null>(null)
   const [editForm] = Form.useForm<Record<string, string | number>>()
   const [editLines, setEditLines] = useState<LineRow[]>([])
@@ -292,14 +269,12 @@ export default function Shipping() {
     setLoading(true)
     try {
       const ps = size ?? pageSize
-      const [o, p, h, s, sh] = await Promise.all([
-        api.get<SalesOrder[]>('/orders'),
+      const [p, h, s, sh] = await Promise.all([
         api.get<ProductOption[]>('/products'),
         api.get<Hub[]>('/hubs'),
         api.get<ScheduleRow[]>('/schedules', { params: { status: 'picked' } }),
         api.get<Paged<Shipment>>('/shipments', { params: { page: targetPage, pageSize: ps } }),
       ])
-      setOrders(o.data)
       setProducts(p.data)
       setHubs(h.data)
       setSchedules(s.data)
@@ -371,66 +346,6 @@ export default function Shipping() {
       scheduleForm.resetFields()
       setHubId(undefined)
       setPicked({})
-      await load()
-    } catch (err) {
-      notifyError(err)
-    } finally {
-      setShipping(false)
-    }
-  }
-
-  async function handleOrderSelect(orderId: number) {
-    try {
-      const { data } = await api.get<SalesOrder>('/orders/' + orderId)
-      setSelectedOrder(data)
-      setLines(
-        (data.items ?? []).map((it) => ({
-          key: newRowKey(),
-          productId: it.productId,
-          qty: it.qty,
-          unitPrice: it.unitPrice !== undefined ? Number(it.unitPrice) : undefined,
-        })),
-      )
-    } catch (err) {
-      notifyError(err)
-    }
-  }
-
-  async function handleShipManual(values: Record<string, string | number>) {
-    if (!values.salesOrderId) {
-      message.warning('请选择订单')
-      return
-    }
-    const bad = lines.filter((l) => !l.productId || !l.qty || l.qty <= 0 || l.unitPrice === undefined || l.unitPrice === null)
-    if (lines.length === 0 || bad.length > 0) {
-      message.warning('明细行不完整：每行需选择成品并填写数量与单价')
-      return
-    }
-    setShipping(true)
-    try {
-      await api.post('/shipments', {
-        salesOrderId: values.salesOrderId,
-        shippedAt: values.shippedAt || undefined,
-        deliveryNote: values.deliveryNote || null,
-        signer: values.signer || null,
-        remark: values.remark || null,
-        invoiceNo: values.invoiceNo || null,
-        paymentTerms: values.paymentTerms || null,
-        incoterm: values.incoterm || null,
-        mark: values.mark || null,
-        origin: values.origin || null,
-        hsCode: values.hsCode || null,
-        taxRate: values.taxRate || null,
-        vesselVoyage: values.vesselVoyage || null,
-        etd: values.etd || undefined,
-        eta: values.eta || undefined,
-        shippingInstructions: values.shippingInstructions || null,
-        lines: linePayload(lines),
-      })
-      message.success('出货成功')
-      shipForm.resetFields()
-      setLines([])
-      setSelectedOrder(null)
       await load()
     } catch (err) {
       notifyError(err)
@@ -597,7 +512,7 @@ export default function Shipping() {
   return (
     <div>
       {canOperate ? (
-        <Card title="① 从排程出货（推荐：按客户 OPO 排程拼票）" style={{ marginBottom: 16 }}>
+        <Card title="从排程出货（按客户 OPO 排程拼票）" style={{ marginBottom: 16 }}>
           <Form form={scheduleForm} layout="vertical" onFinish={shipFromSchedules}>
             <div style={META_GRID}>
               <Form.Item label="到货仓" required>
@@ -642,50 +557,6 @@ export default function Shipping() {
               </Button>
             </>
           ) : null}
-        </Card>
-      ) : null}
-
-      {canOperate ? (
-        <Card title="② 无排程直接出货（整单/部分，从订单选）" style={{ marginBottom: 16 }}>
-          <Form form={shipForm} layout="vertical" onFinish={handleShipManual}>
-            <div style={META_GRID}>
-              <Form.Item name="salesOrderId" label="订单" rules={[{ required: true, message: '选择订单' }]}>
-                <Select
-                  showSearch optionFilterProp="label" placeholder="选择订单（已确认）"
-                  onChange={(v) => void handleOrderSelect(v)}
-                  options={orders
-                    .filter((o) => ['confirmed', 'in_production', 'ready'].includes(o.status))
-                    .map((o) => ({ value: o.id, label: o.orderNo + '（' + statusLabel(o.status) + '）' }))}
-                />
-              </Form.Item>
-              <Form.Item name="shippedAt" label="出货时间"><Input type="date" /></Form.Item>
-              <Form.Item name="invoiceNo" label="发票号"><Input placeholder="如 ZRH20260814006" /></Form.Item>
-              <Form.Item name="deliveryNote" label="送货单号"><Input placeholder="送货单号" /></Form.Item>
-              <Form.Item name="paymentTerms" label="付款条件"><Input placeholder="如 NET 60" /></Form.Item>
-              <Form.Item name="incoterm" label="贸易条款"><Select allowClear placeholder="如 FCA" options={INCOTERM_OPTIONS} /></Form.Item>
-              <Form.Item name="mark" label="唛头"><Input placeholder="如 FANATEC" /></Form.Item>
-              <Form.Item name="signer" label="签收人"><Input placeholder="签收人" /></Form.Item>
-              <Form.Item name="origin" label="原产地" initialValue="China"><Input placeholder="China" /></Form.Item>
-              <Form.Item name="hsCode" label="海关编码"><Input placeholder="如 9504 50 0000" /></Form.Item>
-              <Form.Item name="taxRate" label="税率" initialValue="0"><Input placeholder="0" /></Form.Item>
-              <Form.Item name="vesselVoyage" label="船名/航次"><Input placeholder="如 CMA CGM ZHENG HE / 0FMMMW1MA" /></Form.Item>
-              <Form.Item name="etd" label="ETD"><Input type="date" /></Form.Item>
-              <Form.Item name="eta" label="ETA"><Input type="date" /></Form.Item>
-              <Form.Item name="shippingInstructions" label="运费说明"><Input placeholder="如 ALU 1264 pcs" /></Form.Item>
-              <Form.Item name="remark" label="备注"><Input placeholder="备注" /></Form.Item>
-            </div>
-          </Form>
-          {selectedOrder ? (
-            <p style={{ marginBottom: 8 }}>
-              客户：<b>{selectedOrder.customer?.name ?? '-'}</b>　订单 {selectedOrder.orderNo}　共{' '}
-              {(selectedOrder.items ?? []).reduce((s, it) => s + it.qty, 0)} 台（
-              {(selectedOrder.items ?? []).map((it) => it.product.name + '×' + it.qty).join('、')}）——可部分出货，同一成品可「拆行」
-            </p>
-          ) : null}
-          <LinesEditor lines={lines} setLines={setLines} products={products} />
-          <Button type="primary" onClick={() => shipForm.submit()} loading={shipping} style={{ marginTop: 12 }}>
-            出货
-          </Button>
         </Card>
       ) : (
         <p>当前账号为只读（{role === 'boss' ? '老板' : '非销售'}），仅可查看出货单、运输节点与导出单证。</p>
