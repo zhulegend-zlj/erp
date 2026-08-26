@@ -33,6 +33,11 @@ const customerSchema = z.object({
   name: z.string({ error: '名称必填' }).min(1, '名称必填'),
   country: z.string().optional(),
   contact: z.string().optional(),
+  // 单证字段：收货地址/VAT/EORI/通知方（发票/装箱单自动带出）
+  address: z.string().nullable().optional(),
+  vatNo: z.string().nullable().optional(),
+  eori: z.string().nullable().optional(),
+  notifyParty: z.string().nullable().optional(),
 })
 
 const supplierSchema = z.object({
@@ -43,6 +48,9 @@ const supplierSchema = z.object({
 const productSchema = z.object({
   sku: z.string({ error: 'SKU 必填' }).min(1, 'SKU 必填'),
   name: z.string({ error: '名称必填' }).min(1, '名称必填'),
+  // 单证字段：英文品名（发票 Description 列）、海关编码
+  nameEn: z.string().nullable().optional(),
+  hsCode: z.string().nullable().optional(),
   unit: z.string().optional(),
   imageUrl: z.string().nullable().optional(),
 })

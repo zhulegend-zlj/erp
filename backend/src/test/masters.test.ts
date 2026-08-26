@@ -474,4 +474,33 @@ describe('masters 权限（工程/采购分工）', () => {
     expect(del.statusCode).toBe(404)
     expect(del.json().error).toMatch(/不存在/)
   })
+
+  it('客户可保存单证字段（地址/VAT/EORI/通知方），成品可保存英文品名/海关编码', async () => {
+    const app = buildApp()
+    const purchaseCookie = await loginCookie(app, 'purchase')
+    const engineerCookie = await loginCookie(app, 'engineer')
+
+    const customer = await app.inject({
+      method: 'POST', url: '/api/customers', headers: { cookie: purchaseCookie },
+      payload: {
+        name: 'CORSAIR COMPONENTS LTD',
+        country: 'UNITED KINGDOM',
+        address: '1020 ESKDALE ROAD WINNERSH TRIANGLE',
+        vatNo: 'NL827571732B01',
+        eori: 'NL827571732',
+        notifyParty: 'Corsair Components, Ltd - BEM\nDHL Supply Chain Bemmel',
+      }
+    })
+    expect(customer.statusCode).toBe(200)
+    expect(customer.json().vatNo).toBe('NL827571732B01')
+    expect(customer.json().notifyParty).toContain('DHL')
+
+    const product = await app.inject({
+      method: 'POST', url: '/api/products', headers: { cookie: engineerCookie },
+      payload: { sku: 'CSP-V3', name: 'CSP V3 挂档器', nameEn: 'CLUBSPORT PEDALE V3', hsCode: '9504 50 0000', unit: '件' }
+    })
+    expect(product.statusCode).toBe(200)
+    expect(product.json().nameEn).toBe('CLUBSPORT PEDALE V3')
+    expect(product.json().hsCode).toBe('9504 50 0000')
+  })
 })

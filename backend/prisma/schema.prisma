@@ -30,6 +30,11 @@ model Customer {
   name      String
   country   String?
   contact   String?
+  // 单证字段：收货地址/增值税号/EORI/通知方（出单时自动带出）
+  address      String?
+  vatNo        String?
+  eori         String?
+  notifyParty  String?
   createdAt DateTime @default(now())
   orders    SalesOrder[]
   customerPayments CustomerPayment[]
@@ -51,11 +56,14 @@ model Product {
   id     Int    @id @default(autoincrement())
   sku    String @unique
   name   String
+  nameEn String? // 英文品名（发票/装箱单 Description 列）
+  hsCode String? // 海关编码
   unit   String @default("件")
   imageUrl String?
   boms   Bom[]
   orderItems SalesOrderItem[]
   productionEntries ProductionEntry[]
+  shipmentLines ShipmentLine[]
 }
 
 model Part {
@@ -201,7 +209,59 @@ model Shipment {
   deliveryNote String?
   signer       String?
   remark       String?
+  // 单证字段（发票/装箱单）：发票号手工填，其余按单填写
+  invoiceNo    String?
+  paymentTerms String?
+  incoterm     String?
+  mark         String? // 唛头（如 FANATEC）
+  origin       String? // 原产地
+  hsCode       String? // 海关编码（整单默认）
+  taxRate      String? // 税率
+  vesselVoyage String? // 船名/航次
+  etd          DateTime?
+  eta          DateTime?
+  shippingInstructions String? // 运费说明（如 ALU 1264 pcs）
   legs         ShipmentLeg[]
+  lines        ShipmentLine[]
+}
+
+// 出货明细行：支持同一成品按柜/批次拆多行，每行记录 客户PO/Lot/箱数/毛净重/CBM/柜号/封条/HBL
+model ShipmentLine {
+  id          Int      @id @default(autoincrement())
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  shipmentId  Int
+  product     Product  @relation(fields: [productId], references: [id])
+  productId   Int
+  qty         Int
+  unitPrice   Decimal  @db.Decimal(12,2)
+  customerPoNo String?
+  lotNo       String?
+  cartons     Int?
+  netWeight   Decimal? @db.Decimal(12,3)
+  grossWeight Decimal? @db.Decimal(12,3)
+  cbm         Decimal? @db.Decimal(12,4)
+  containerNo String?
+  sealNo      String?
+  hblNo       String?
+  remark      String?
+  sortOrder   Int      @default(0)
+}
+
+// 公司抬头/银行/VAT 等出单资料（单例配置，老板维护）
+model CompanyProfile {
+  id          Int    @id @default(autoincrement())
+  name        String @default("")
+  address     String @default("")
+  contact     String @default("")
+  email       String @default("")
+  vatNo       String @default("")
+  taxRate     String @default("0")
+  bankName    String @default("")
+  bankPhone   String @default("")
+  bankAddress String @default("")
+  swift       String @default("")
+  accountName String @default("")
+  accountNo   String @default("")
 }
 
 model ShipmentLeg {

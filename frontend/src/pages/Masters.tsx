@@ -25,7 +25,7 @@ import type { Paged } from './common'
 interface CrudField {
   key: string
   label: string
-  type?: 'text' | 'supplier' | 'image' | 'number' | 'drawing'
+  type?: 'text' | 'textarea' | 'supplier' | 'image' | 'number' | 'drawing'
   required?: boolean
 }
 
@@ -175,6 +175,10 @@ const RESOURCES: CrudResource[] = [
       { key: 'name', label: '名称' },
       { key: 'country', label: '国家' },
       { key: 'contact', label: '联系人' },
+      { key: 'address', label: '收货地址', type: 'textarea' },
+      { key: 'vatNo', label: 'VAT#', type: 'text' },
+      { key: 'eori', label: 'EORI', type: 'text' },
+      { key: 'notifyParty', label: '通知方', type: 'textarea' },
     ],
   },
   {
@@ -191,6 +195,8 @@ const RESOURCES: CrudResource[] = [
     fields: [
       { key: 'sku', label: 'SKU' },
       { key: 'name', label: '名称' },
+      { key: 'nameEn', label: '英文品名', type: 'text' },
+      { key: 'hsCode', label: '海关编码', type: 'text' },
       { key: 'unit', label: '单位' },
       { key: 'imageUrl', label: '图片地址', type: 'image' },
     ],
@@ -336,7 +342,7 @@ function CrudTab({
         payload[f.key] = v === '' || v === null || v === undefined ? null : Number(v)
       } else if (
         f.type === 'image' ||
-        ['spec', 'drawingsUrl', 'tooling', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId'].includes(f.key)
+        ['spec', 'drawingsUrl', 'tooling', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode'].includes(f.key)
       ) {
         if (payload[f.key] === '') payload[f.key] = null
       }
@@ -538,7 +544,8 @@ function CrudTab({
                 f.type === 'supplier' ||
                 f.type === 'image' ||
                 f.type === 'number' ||
-                ['spec', 'drawingsUrl', 'tooling', 'country', 'contact', 'unit', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId'].includes(f.key)
+                f.type === 'textarea' ||
+                ['spec', 'drawingsUrl', 'tooling', 'country', 'contact', 'unit', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode'].includes(f.key)
                   ? []
                   : [{ required: true, message: '请输入' + f.label }]
               }
@@ -559,6 +566,8 @@ function CrudTab({
                 ) : (
                   <InputNumber min={0} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
                 )
+              ) : f.type === 'textarea' ? (
+                <Input.TextArea rows={2} placeholder={'请输入' + f.label} />
               ) : (
                 <Input />
               )}
@@ -863,6 +872,79 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
   )
 }
 
+// 公司抬头/银行/VAT 等出单资料：所有角色可看，仅老板可改（发票/装箱单自动带出）
+function CompanyProfileTab({ canWrite }: { canWrite: boolean }) {
+  const [form] = Form.useForm<Record<string, string>>()
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    void api
+      .get<Record<string, string>>('/company-profile')
+      .then(({ data }) => form.setFieldsValue(data))
+      .catch(notifyError)
+  }, [form])
+
+  async function save(values: Record<string, string>) {
+    setSaving(true)
+    try {
+      await api.put('/company-profile', values)
+      message.success('公司资料已保存')
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Form form={form} layout="vertical" onFinish={save} disabled={!canWrite} style={{ maxWidth: 720 }}>
+      <Form.Item name="name" label="公司名称（发票 Issuer/Shipper）">
+        <Input placeholder="如 Dongguan Zhiruiheng Electronic Co., Ltd" />
+      </Form.Item>
+      <Form.Item name="address" label="公司地址">
+        <Input.TextArea rows={2} />
+      </Form.Item>
+      <Form.Item name="contact" label="联系人">
+        <Input />
+      </Form.Item>
+      <Form.Item name="email" label="邮箱">
+        <Input />
+      </Form.Item>
+      <Form.Item name="vatNo" label="VAT 税号">
+        <Input />
+      </Form.Item>
+      <Form.Item name="taxRate" label="税率">
+        <Input placeholder="如 0" />
+      </Form.Item>
+      <Form.Item name="bankName" label="收款银行">
+        <Input />
+      </Form.Item>
+      <Form.Item name="bankPhone" label="银行电话">
+        <Input />
+      </Form.Item>
+      <Form.Item name="bankAddress" label="银行地址">
+        <Input.TextArea rows={2} />
+      </Form.Item>
+      <Form.Item name="swift" label="SWIFT">
+        <Input />
+      </Form.Item>
+      <Form.Item name="accountName" label="账户名">
+        <Input />
+      </Form.Item>
+      <Form.Item name="accountNo" label="账号">
+        <Input />
+      </Form.Item>
+      {canWrite ? (
+        <Button type="primary" htmlType="submit" loading={saving}>
+          保存
+        </Button>
+      ) : (
+        <p>公司资料由老板维护，其他角色仅可查看。</p>
+      )}
+    </Form>
+  )
+}
+
 export default function Masters() {
   const { user } = useAuth()
   const role = user?.role
@@ -910,6 +992,7 @@ export default function Masters() {
             ),
           },
           { key: 'bom', label: 'BOM 维护', children: <BomTab canWrite={canWriteEngineering} /> },
+          { key: 'company', label: '公司资料', children: <CompanyProfileTab canWrite={role === 'boss'} /> },
         ]}
       />
     </Card>
