@@ -1,5 +1,9 @@
 # ERP 开发交接摘要（工厂 → 家里，最新）
 
+> **2026-08-26 晚 家里接收记录（家里 dsh）**：家里电脑已完整接手——拉代码 f07f761、npm install、prisma generate、起 PG/后端(3000)/前端(5173)、迁移修复（见下）、三个 seed 全跑（TEST测试客户 / TEST供应商A+B / TEST-P100+TEST-P200 各 10 个测试零件 BOM / 6 到货仓 / 公司资料）、后端 **163/163**、typecheck 干净、前端 build 通过。家里库原有 A/B/C 测试资料未动。
+>
+> **⚠️ 迁移顺序坑（重要，恢复旧库/建新库必看）**：三个 2026-08-26 迁移目录名字典序是 `item_delivery_dates` < `sales_workflow` < `shipment_documents`，与创建顺序（`shipment_documents` → `sales_workflow` → `item_delivery_dates`）相反。从旧迁移状态（≤20260822083931）的库直接 `npx prisma migrate deploy` 会先跑 item_delivery_dates 失败（报 zrhDeliveryDate 列不存在，P3018）。**修复方法**（erp 与 erp_test 都要做，已完成）：① psql 按创建顺序手动执行三个 migration.sql：`psql -U postgres -d erp -v ON_ERROR_STOP=1 --single-transaction -f prisma/migrations/<名>/migration.sql`；② `npx prisma migrate resolve --applied <迁移名>` ×3（erp_test 用 `DATABASE_URL='postgresql://postgres@localhost:5432/erp_test'` 前缀）；③ `prisma migrate status` 确认 up to date，再重新 `prisma generate`（客户端才认识新模型）。**注意**：不要重命名已应用的迁移目录（工厂库 _prisma_migrations 记录名会不匹配）；今后新增迁移请用带时间戳的目录名（如 `202608270001_xxx`）避免字母序再踩坑。
+>
 > 生成时间：2026-08-22 深夜（**本机 = 工厂电脑**，最新提交 `fc8490b`；本日全部工作=CSP_V3 按表格口径逐列重导 + 零件页布局/搜索 + 内嵌图片 106 张与 2D 图档 60 个零件入库 + 全量核对零差异，详见「当前阶段」与第 3 节；工厂电脑两库已部署全部迁移。**家里电脑**拉代码后先跑 `npx prisma migrate deploy` 再按第 6 节启动）
 >
 > **已完成的工作**：工程角色与权限分工（价格归采购）、大列表分页、流水联合查询、白屏修复、BOM 图片/新行置顶/列序、图档上传、零件排序、上传文件按 成品/零件 目录组织存放（文件名带零件名）、图片缩略图同比例显示、上传上下文修复、测试上传目录隔离、工程操作手册、备份脚本含 uploads。
