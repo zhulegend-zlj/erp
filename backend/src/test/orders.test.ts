@@ -25,9 +25,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 100, unitPrice: 10 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 100, unitPrice: 10 }]
       }
     })
     expect(res.statusCode).toBe(200)
@@ -42,9 +40,7 @@ describe('orders', () => {
     const payload = {
       customerId: customer.id,
       customerPoNo: 'PO-DUP-1',
-      customerDeliveryDate: '2026-09-30',
-      zrhDeliveryDate: '2026-09-30',
-      items: [{ productId: product.id, qty: 10, unitPrice: 10 }]
+      items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 10, unitPrice: 10 }]
     }
     const first = await app.inject({ method: 'POST', url: '/api/orders', headers: { cookie }, payload })
     expect(first.statusCode).toBe(200)
@@ -60,9 +56,7 @@ describe('orders', () => {
       method: 'POST',
       url: '/api/orders',
       headers: { cookie },
-      payload: { customerId: customer.id, customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30', items: [] }
+      payload: { customerId: customer.id, customerPoNo: 'PO-TEST-1', items: [] }
     })
     expect(res.statusCode).toBe(400)
   })
@@ -76,8 +70,7 @@ describe('orders', () => {
       headers: { cookie },
       payload: {
         customerId: customer.id,
-        zrhDeliveryDate: 'not-a-date',
-        items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: 'not-a-date', qty: 1, unitPrice: 1 }]
       }
     })
     expect(res.statusCode).toBe(400)
@@ -93,9 +86,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 0, unitPrice: 1 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 0, unitPrice: 1 }]
       }
     })
     expect(badQty.statusCode).toBe(400)
@@ -107,9 +98,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 1, unitPrice: -1 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: -1 }]
       }
     })
     expect(badPrice.statusCode).toBe(400)
@@ -127,9 +116,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 1 }]
       }
     })
     expect(res.statusCode).toBe(403)
@@ -145,9 +132,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 100, unitPrice: 10 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 100, unitPrice: 10 }]
       }
     })
     const orderId = createRes.json().id
@@ -174,9 +159,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 1 }]
       }
     })
     expect(createRes.statusCode).toBe(200)
@@ -203,9 +186,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 1 }]
       }
     })
     const orderId = createRes.json().id
@@ -239,9 +220,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 1 }]
       }
     })
     const bad = await app.inject({
@@ -263,9 +242,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 1 }]
       }
     })
     const orderId = createRes.json().id
@@ -306,9 +283,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 1, unitPrice: 1 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 1 }]
       }
     })
     const orderId = createRes.json().id
@@ -340,9 +315,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 2, unitPrice: 10 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 2, unitPrice: 10 }]
       }
     })
     const orderId = createRes.json().id
@@ -368,9 +341,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 10 }]
       }
     })
     const orderId = createRes.json().id
@@ -391,9 +362,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 10 }]
       }
     })
     const warehouseCookie = await loginCookie(app, 'warehouse')
@@ -415,9 +384,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 10 }]
       }
     })
     const orderId = createRes.json().id
@@ -442,9 +409,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 10 }]
       }
     })
     const orderId = createRes.json().id
@@ -461,9 +426,7 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-2',
-        customerDeliveryDate: '2026-09-30',
-        zrhDeliveryDate: '2026-09-30',
-        items: [{ productId: product.id, qty: 1, unitPrice: 10 }]
+        items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 10 }]
       }
     })
     const orderId2 = createRes2.json().id

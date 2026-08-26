@@ -15,9 +15,14 @@ interface OrderOption {
   orderNo: string
   customerPoNo: string | null
   status: string
-  zrhDeliveryDate?: string | null
   customer?: { name: string }
-  items?: Array<{ productId: number; qty: number; product: { id: number; sku: string; name: string } }>
+  items?: Array<{
+    productId: number
+    qty: number
+    customerDeliveryDate?: string | null
+    zrhDeliveryDate?: string | null
+    product: { id: number; sku: string; name: string }
+  }>
 }
 
 interface ScheduleRow {
@@ -87,7 +92,7 @@ export default function Schedules() {
     try {
       const { data } = await api.get<OrderOption>('/orders/' + orderId)
       setOrderDetail(data)
-      form.setFieldsValue({ productId: undefined, promisedDate: data.zrhDeliveryDate ? String(data.zrhDeliveryDate).slice(0, 10) : undefined })
+      form.setFieldsValue({ productId: undefined, needByDate: undefined, promisedDate: undefined })
     } catch (err) {
       notifyError(err)
     }
@@ -259,6 +264,14 @@ export default function Schedules() {
                 value: it.productId,
                 label: it.product.name + '（' + it.product.sku + '，订单 ' + it.qty + '）',
               }))}
+              onChange={(v) => {
+                // 交期已在订单明细行级：选完成品自动带出该行的客户要求日与承诺日（可改）
+                const it = (orderDetail?.items ?? []).find((x) => x.productId === v)
+                form.setFieldsValue({
+                  needByDate: it?.customerDeliveryDate ? String(it.customerDeliveryDate).slice(0, 10) : undefined,
+                  promisedDate: it?.zrhDeliveryDate ? String(it.zrhDeliveryDate).slice(0, 10) : undefined,
+                })
+              }}
             />
           </Form.Item>
           <Form.Item name="qty" rules={[{ required: true, message: '数量' }]}>

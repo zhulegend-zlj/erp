@@ -24,6 +24,11 @@ const BOSS_TRANSITIONS: Record<string, string[]> = {
   ready: ['confirmed'],
 }
 
+const dateSchema = (label: string) =>
+  z
+    .string({ error: label + '必填' })
+    .refine((v) => !Number.isNaN(Date.parse(v)), label + '必须为合法日期')
+
 const orderItemSchema = z.object({
   productId: z.number({ error: '商品必填' }).int({ error: '商品必须为整数' }).positive({ error: '商品必须为正整数' }),
   qty: z
@@ -35,12 +40,10 @@ const orderItemSchema = z.object({
     .number({ error: '单价必填' })
     .nonnegative({ error: '单价必须为非负数' })
     .max(9999999999.99, { error: '单价超出允许范围' }),
+  // 交期在明细行级：同一张订单里不同成品可以有不同的交期
+  customerDeliveryDate: dateSchema('客户交期'),
+  zrhDeliveryDate: dateSchema('ZRH交货日期'),
 })
-
-const dateSchema = (label: string) =>
-  z
-    .string({ error: label + '必填' })
-    .refine((v) => !Number.isNaN(Date.parse(v)), label + '必须为合法日期')
 
 const createOrderSchema = z.object({
   customerId: z.number({ error: '客户必填' }).int({ error: '客户必须为整数' }).positive({ error: '客户必须为正整数' }),
@@ -49,8 +52,6 @@ const createOrderSchema = z.object({
     .string({ error: '订单日期必须为字符串' })
     .refine((v) => !Number.isNaN(Date.parse(v)), '订单日期必须为合法日期')
     .optional(),
-  customerDeliveryDate: dateSchema('客户交期'),
-  zrhDeliveryDate: dateSchema('ZRH交货日期'),
   paymentTerms: z.string().nullable().optional(),
   items: z
     .array(orderItemSchema, { error: '明细必填' })
@@ -116,8 +117,6 @@ export function ordersRoutes(app: FastifyInstance) {
           customerId: data.customerId,
           customerPoNo: data.customerPoNo,
           orderDate: data.orderDate ? new Date(data.orderDate) : new Date(),
-          customerDeliveryDate: new Date(data.customerDeliveryDate),
-          zrhDeliveryDate: new Date(data.zrhDeliveryDate),
           paymentTerms: data.paymentTerms || null,
           status: 'draft',
         },
@@ -129,6 +128,8 @@ export function ordersRoutes(app: FastifyInstance) {
             productId: item.productId,
             qty: item.qty,
             unitPrice: item.unitPrice,
+            customerDeliveryDate: new Date(item.customerDeliveryDate),
+            zrhDeliveryDate: new Date(item.zrhDeliveryDate),
           },
         })
       }
@@ -164,6 +165,12 @@ export function ordersRoutes(app: FastifyInstance) {
         ...sanitizeOrderForRole(o, role),
         shippedQty: shippedMap.get(o.id) ?? 0,
         totalQty: o.items.reduce((s, it) => s + it.qty, 0),
+        // 列表展示用：本单最早的一行 ZRH交货日期（催货先看它）
+        earliestZrhDate: o.items.reduce(
+          (min: Date | null, it) =>
+            it.zrhDeliveryDate && (min === null || it.zrhDeliveryDate < min) ? it.zrhDeliveryDate : min,
+          null,
+        ),
       }))
     }
     if (pagination.kind === 'none') {

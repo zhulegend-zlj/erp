@@ -30,23 +30,33 @@ describe('sales workflow（订单字段/排程/部分出货/权限/提醒）', (
     const customer = await prisma.customer.create({ data: { name: 'C1' } })
     const product = await prisma.product.create({ data: { sku: 'F1', name: '成品1' } })
     const cookie = await loginCookie(app, 'sales')
-    const base = { customerId: customer.id, customerPoNo: 'PO-1', customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-20', items: [{ productId: product.id, qty: 10, unitPrice: 5 }] }
+    const base = {
+      customerId: customer.id,
+      customerPoNo: 'PO-1',
+      items: [{ productId: product.id, qty: 10, unitPrice: 5, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-20' }]
+    }
 
     const ok = await app.inject({ method: 'POST', url: '/api/orders', headers: { cookie }, payload: base })
     expect(ok.statusCode).toBe(200)
     expect(ok.json().customerPoNo).toBe('PO-1')
-    expect(ok.json().zrhDeliveryDate).toBeDefined()
+    expect(ok.json().items[0].zrhDeliveryDate).toBeDefined()
     expect(ok.json().orderDate).toBeDefined()
 
     const noPo = await app.inject({ method: 'POST', url: '/api/orders', headers: { cookie }, payload: { ...base, customerPoNo: '' } })
     expect(noPo.statusCode).toBe(400)
     expect(noPo.json().error).toContain('PO号')
 
-    const noNeed = await app.inject({ method: 'POST', url: '/api/orders', headers: { cookie }, payload: { ...base, customerDeliveryDate: undefined } })
+    const noNeed = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: { ...base, items: [{ ...base.items[0], customerDeliveryDate: undefined }] },
+    })
     expect(noNeed.statusCode).toBe(400)
     expect(noNeed.json().error).toContain('客户交期')
 
-    const noZrh = await app.inject({ method: 'POST', url: '/api/orders', headers: { cookie }, payload: { ...base, zrhDeliveryDate: undefined } })
+    const noZrh = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: { ...base, items: [{ ...base.items[0], zrhDeliveryDate: undefined }] },
+    })
     expect(noZrh.statusCode).toBe(400)
     expect(noZrh.json().error).toContain('ZRH')
   })

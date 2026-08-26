@@ -24,6 +24,8 @@ interface OrderItem {
   productId: number
   qty: number
   unitPrice: string
+  customerDeliveryDate?: string | null
+  zrhDeliveryDate?: string | null
   product: { id: number; sku: string; name: string }
 }
 
@@ -33,8 +35,7 @@ interface SalesOrder {
   customerId: number
   customerPoNo: string | null
   orderDate: string
-  customerDeliveryDate: string | null
-  zrhDeliveryDate: string
+  earliestZrhDate?: string | null
   paymentTerms: string | null
   status: string
   purchasing?: boolean
@@ -49,14 +50,14 @@ interface OrderItemField {
   productId?: number
   qty?: number | null
   unitPrice?: number | null
+  customerDeliveryDate?: string
+  zrhDeliveryDate?: string
 }
 
 interface OrderFormValues {
   customerId?: number
   customerPoNo?: string
   orderDate?: string
-  customerDeliveryDate?: string
-  zrhDeliveryDate?: string
   paymentTerms?: string
   items?: OrderItemField[]
 }
@@ -130,13 +131,13 @@ export default function Orders() {
         customerId: values.customerId,
         customerPoNo: values.customerPoNo,
         orderDate: values.orderDate || todayStr(),
-        customerDeliveryDate: values.customerDeliveryDate,
-        zrhDeliveryDate: values.zrhDeliveryDate,
         paymentTerms: values.paymentTerms || null,
         items: (values.items ?? []).map((it) => ({
           productId: Number(it.productId ?? 0),
           qty: Number(it.qty ?? 0),
           unitPrice: Number(it.unitPrice ?? 0),
+          customerDeliveryDate: it.customerDeliveryDate,
+          zrhDeliveryDate: it.zrhDeliveryDate,
         })),
       })
       message.success('订单创建成功')
@@ -211,7 +212,7 @@ export default function Orders() {
         return shipped > 0 && shipped >= totalQty ? <Tag color="green">出满</Tag> : '-'
       },
     },
-    { title: 'ZRH交期', dataIndex: 'zrhDeliveryDate', key: 'zrhDeliveryDate', render: dateStr },
+    { title: 'ZRH交期（最早）', dataIndex: 'earliestZrhDate', key: 'earliestZrhDate', render: dateStr },
     {
       title: '明细',
       key: 'items',
@@ -346,25 +347,22 @@ export default function Orders() {
             <Form.Item name="orderDate" label="订单日期" rules={[{ required: true, message: '请选择订单日期' }]}>
               <Input type="date" />
             </Form.Item>
-            <Form.Item name="customerDeliveryDate" label="客户交期（客户要求到货日）" rules={[{ required: true, message: '请选择客户交期' }]}>
-              <Input type="date" />
-            </Form.Item>
-            <Form.Item name="zrhDeliveryDate" label="ZRH交货日期（承诺客户=车间完成目标）" rules={[{ required: true, message: '请选择ZRH交货日期' }]}>
-              <Input type="date" />
-            </Form.Item>
             <Form.Item name="paymentTerms" label="付款条件">
               <Input placeholder="如 NET 60（自动带客户默认）" />
+            </Form.Item>
+            <Form.Item label="交期说明" style={{ color: '#888', marginBottom: 0 }}>
+              <span style={{ fontSize: 12, color: '#888' }}>交期按明细行填写：同一张订单里不同成品可以有各自的「客户交期」和「ZRH交货日期」</span>
             </Form.Item>
           </div>
           <Form.List name="items" initialValue={[{}]}>
             {(fields, { add, remove }) => (
               <>
                 {fields.map((field) => (
-                  <Space key={field.key} align="start" style={{ display: 'flex', marginBottom: 8 }}>
+                  <Space key={field.key} align="start" wrap style={{ display: 'flex', marginBottom: 8 }}>
                     <Form.Item
                       name={[field.name, 'productId']}
                       rules={[{ required: true, message: '选择成品' }]}
-                      style={{ width: 280, marginBottom: 0 }}
+                      style={{ width: 220, marginBottom: 0 }}
                     >
                       <Select
                         placeholder="选择成品"
@@ -388,7 +386,23 @@ export default function Orders() {
                       rules={[{ required: true, message: '单价' }]}
                       style={{ marginBottom: 0 }}
                     >
-                      <InputNumber min={0} placeholder="单价" style={{ width: 120 }} />
+                      <InputNumber min={0} placeholder="单价" style={{ width: 110 }} />
+                    </Form.Item>
+                    <Form.Item
+                      name={[field.name, 'customerDeliveryDate']}
+                      label="客户交期"
+                      rules={[{ required: true, message: '客户交期' }]}
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input type="date" style={{ width: 150 }} />
+                    </Form.Item>
+                    <Form.Item
+                      name={[field.name, 'zrhDeliveryDate']}
+                      label="ZRH交期"
+                      rules={[{ required: true, message: 'ZRH交期' }]}
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input type="date" style={{ width: 150 }} />
                     </Form.Item>
                     <Button
                       type="text"

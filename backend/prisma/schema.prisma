@@ -120,8 +120,8 @@ model SalesOrder {
   customerId           Int
   customerPoNo         String? // 客户采购订单号（必填录入，DB 可空兼容历史）
   orderDate            DateTime           @default(now()) // 订单日期（默认今天）
-  customerDeliveryDate DateTime? // 客户交期（客户要求到货日）
-  zrhDeliveryDate      DateTime // ZRH交货日期（承诺给客户的交货日期 = 车间完成生产目标）
+  customerDeliveryDate DateTime? // [旧] 订单级客户交期——已下放到明细行，本列不再使用（留空兼容历史）
+  zrhDeliveryDate      DateTime? // [旧] 订单级ZRH交货日期——已下放到明细行，本列不再使用（留空兼容历史）
   paymentTerms         String? // 付款条件（如 NET 60，默认取客户资料）
   status               String             @default("draft") // draft/confirmed/in_production/ready/shipped/completed
   // 双阶段标志（可同时为真）：采购中=存在未收齐的采购单；生产中=已开始成品入库但未收满
@@ -141,13 +141,16 @@ model SalesOrder {
 }
 
 model SalesOrderItem {
-  id        Int        @id @default(autoincrement())
-  order     SalesOrder @relation(fields: [orderId], references: [id])
-  orderId   Int
-  product   Product    @relation(fields: [productId], references: [id])
-  productId Int
-  qty       Int
-  unitPrice Decimal    @db.Decimal(12, 2)
+  id                   Int        @id @default(autoincrement())
+  order                SalesOrder @relation(fields: [orderId], references: [id])
+  orderId              Int
+  product              Product    @relation(fields: [productId], references: [id])
+  productId            Int
+  qty                  Int
+  unitPrice            Decimal    @db.Decimal(12, 2)
+  // 交期下放到明细行：同一张订单里不同成品可以有不同的交期
+  customerDeliveryDate DateTime? // 客户交期（该成品客户要求到货日）
+  zrhDeliveryDate      DateTime? // ZRH交货日期（承诺客户的交货日期 = 该成品生产完成目标）
 
   @@unique([orderId, productId])
 }

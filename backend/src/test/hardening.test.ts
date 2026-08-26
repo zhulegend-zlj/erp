@@ -236,8 +236,7 @@ describe('hardening（加固回归）', () => {
         method: 'POST', url: '/api/orders', headers: { cookie },
         payload: {
           customerId: customer.id,
-          zrhDeliveryDate: '2026-09-30',
-          items: [{ productId: product.id, qty: 1, unitPrice: 1e12 }],
+          items: [{ productId: product.id, qty: 1, unitPrice: 1e12, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30' }],
         },
       })
       expect(res.statusCode).toBe(400)
