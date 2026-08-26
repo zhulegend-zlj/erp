@@ -504,3 +504,99 @@ describe('masters 权限（工程/采购分工）', () => {
     expect(product.json().hsCode).toBe('9504 50 0000')
   })
 })
+
+describe('masters 删除防关联（被单据引用不可删，提示明确）', () => {
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  it('客户被销售订单引用时删除返回 400，提示包含阻碍单据', async () => {
+    const app = buildApp()
+    const sales = await loginCookie(app, 'sales')
+    const cust = await prisma.customer.create({ data: { name: '被引用客户' } })
+    const prod = await prisma.product.create({ data: { sku: 'DEL-P1', name: '删除测试成品' } })
+    await prisma.salesOrder.create({
+      data: {
+        orderNo: 'PO-DEL-001', customerId: cust.id, status: 'draft',
+        items: { create: { productId: prod.id, qty: 1, unitPrice: 100 } },
+      },
+    })
+    const res = await app.inject({ method: 'DELETE', url: '/api/customers/' + cust.id, headers: { cookie: sales } })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('不能删除')
+    expect(res.json().error).toContain('销售订单')
+    expect(await prisma.customer.count({ where: { id: cust.id } })).toBe(1)
+  })
+
+  it('客户被收款记录引用时删除返回 400', async () => {
+    const app = buildApp()
+    const sales = await loginCookie(app, 'sales')
+    const cust = await prisma.customer.create({ data: { name: '有收款客户' } })
+    await prisma.customerPayment.create({ data: { customerId: cust.id, amount: 100 } })
+    const res = await app.inject({ method: 'DELETE', url: '/api/customers/' + cust.id, headers: { cookie: sales } })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('收款记录')
+  })
+
+  it('无任何引用的客户可以删除', async () => {
+    const app = buildApp()
+    const sales = await loginCookie(app, 'sales')
+    const cust = await prisma.customer.create({ data: { name: '待删客户' } })
+    const res = await app.inject({ method: 'DELETE', url: '/api/customers/' + cust.id, headers: { cookie: sales } })
+    expect(res.statusCode).toBe(200)
+    expect(await prisma.customer.count({ where: { id: cust.id } })).toBe(0)
+  })
+
+  it('供应商被零件归属/采购单引用时删除返回 400', async () => {
+    const app = buildApp()
+    const purchase = await loginCookie(app, 'purchase')
+    const sup = await prisma.supplier.create({ data: { name: '被引用供应商' } })
+    await prisma.part.create({ data: { sku: 'DEL-SP1', name: '挂供应商零件', supplierId: sup.id } })
+    const res = await app.inject({ method: 'DELETE', url: '/api/suppliers/' + sup.id, headers: { cookie: purchase } })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('零件')
+  })
+
+  it('成品被 BOM 引用时删除返回 400', async () => {
+    const app = buildApp()
+    const engineer = await loginCookie(app, 'engineer')
+    const prod = await prisma.product.create({ data: { sku: 'DEL-P2', name: '被引用成品' } })
+    const part = await prisma.part.create({ data: { sku: 'DEL-PT2', name: '零件2' } })
+    await prisma.bom.create({ data: { productId: prod.id, partId: part.id, qty: 1 } })
+    const res = await app.inject({ method: 'DELETE', url: '/api/products/' + prod.id, headers: { cookie: engineer } })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('BOM')
+  })
+
+  it('零件被 BOM/收货记录引用时删除返回 400', async () => {
+    const app = buildApp()
+    const engineer = await loginCookie(app, 'engineer')
+    const prod = await prisma.product.create({ data: { sku: 'DEL-P3', name: '成品3' } })
+    const part = await prisma.part.create({ data: { sku: 'DEL-PT3', name: '被引用零件' } })
+    await prisma.bom.create({ data: { productId: prod.id, partId: part.id, qty: 1 } })
+    await prisma.receipt.create({ data: { partId: part.id, qty: 5 } })
+    const res = await app.inject({ method: 'DELETE', url: '/api/parts/' + part.id, headers: { cookie: engineer } })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('BOM')
+    expect(res.json().error).toContain('收货')
+  })
+
+  it('无引用的供应商/成品/零件可正常删除', async () => {
+    const app = buildApp()
+    const purchase = await loginCookie(app, 'purchase')
+    const engineer = await loginCookie(app, 'engineer')
+    const sup = await prisma.supplier.create({ data: { name: '待删供应商' } })
+    const prod = await prisma.product.create({ data: { sku: 'DEL-P4', name: '待删成品' } })
+    const part = await prisma.part.create({ data: { sku: 'DEL-PT4', name: '待删零件' } })
+
+    const r1 = await app.inject({ method: 'DELETE', url: '/api/suppliers/' + sup.id, headers: { cookie: purchase } })
+    expect(r1.statusCode).toBe(200)
+    const r2 = await app.inject({ method: 'DELETE', url: '/api/products/' + prod.id, headers: { cookie: engineer } })
+    expect(r2.statusCode).toBe(200)
+    const r3 = await app.inject({ method: 'DELETE', url: '/api/parts/' + part.id, headers: { cookie: engineer } })
+    expect(r3.statusCode).toBe(200)
+    expect(await prisma.supplier.count()).toBe(0)
+    expect(await prisma.product.count()).toBe(0)
+    expect(await prisma.part.count()).toBe(0)
+  })
+})

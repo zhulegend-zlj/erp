@@ -190,6 +190,69 @@ interface CrudSpec {
   writeRoles: readonly string[]
 }
 
+const RESOURCE_NAMES: Record<CrudSpec['resource'], string> = {
+  customer: '客户',
+  supplier: '供应商',
+  product: '成品',
+  part: '零件',
+}
+
+/** 删除前检查关联单据：返回阻碍描述列表（空 = 无引用可删）。参照订单删除口径。 */
+async function deletionBlockers(resource: CrudSpec['resource'], id: number): Promise<string[]> {
+  const blockers: string[] = []
+  const push = (label: string, n: number) => {
+    if (n > 0) blockers.push(`${n} ${label}`)
+  }
+  if (resource === 'customer') {
+    const [orders, payments] = await Promise.all([
+      prisma.salesOrder.count({ where: { customerId: id } }),
+      prisma.customerPayment.count({ where: { customerId: id } }),
+    ])
+    push('张销售订单', orders)
+    push('笔收款记录', payments)
+  } else if (resource === 'supplier') {
+    const [pos, payments, parts, rr, receipts] = await Promise.all([
+      prisma.purchaseOrder.count({ where: { supplierId: id } }),
+      prisma.supplierPayment.count({ where: { supplierId: id } }),
+      prisma.part.count({ where: { supplierId: id } }),
+      prisma.returnReplenish.count({ where: { supplierId: id } }),
+      prisma.receipt.count({ where: { supplierId: id } }),
+    ])
+    push('张采购单', pos)
+    push('笔付款记录', payments)
+    push('个零件（供应商归属）', parts)
+    push('条退补货记录', rr)
+    push('条收货记录', receipts)
+  } else if (resource === 'product') {
+    const [boms, items, entries, lines, schedules] = await Promise.all([
+      prisma.bom.count({ where: { productId: id } }),
+      prisma.salesOrderItem.count({ where: { productId: id } }),
+      prisma.productionEntry.count({ where: { productId: id } }),
+      prisma.shipmentLine.count({ where: { productId: id } }),
+      prisma.shipmentSchedule.count({ where: { productId: id } }),
+    ])
+    push('条 BOM 记录', boms)
+    push('条订单明细', items)
+    push('条成品入库', entries)
+    push('条出货明细', lines)
+    push('条出货排程', schedules)
+  } else {
+    const [boms, items, receipts, issues, rr] = await Promise.all([
+      prisma.bom.count({ where: { partId: id } }),
+      prisma.purchaseOrderItem.count({ where: { partId: id } }),
+      prisma.receipt.count({ where: { partId: id } }),
+      prisma.issue.count({ where: { partId: id } }),
+      prisma.returnReplenish.count({ where: { partId: id } }),
+    ])
+    push('条 BOM 记录', boms)
+    push('条采购明细', items)
+    push('条收货记录', receipts)
+    push('条领料记录', issues)
+    push('条退补货记录', rr)
+  }
+  return blockers
+}
+
 function registerCrud(app: FastifyInstance, spec: CrudSpec) {
   const delegate = (prisma as any)[spec.resource]
   const read = requireRole(...READ_ROLES)
@@ -373,6 +436,12 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
   app.delete(`${base}/:id`, { preHandler: write }, async (req, reply) => {
     const id = parseId(req as { params: { id: string } }, reply)
     if (id === null) return
+    const blockers = await deletionBlockers(spec.resource, id)
+    if (blockers.length > 0) {
+      return reply
+        .code(400)
+        .send({ error: `该${RESOURCE_NAMES[spec.resource]}已被关联单据引用，不能删除：${blockers.join('、')}（请先处理这些单据）` })
+    }
     if (spec.resource === 'part') {
       const before = await delegate.findUnique({ where: { id } }).catch(() => null)
       await delegate.delete({ where: { id } })

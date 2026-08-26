@@ -9,6 +9,34 @@ export interface ErrorInfo {
   message: string
 }
 
+// Prisma 表名 → 业务中文名（用于 P2003 外键提示，让老板能看懂）
+const MODEL_LABELS: Record<string, string> = {
+  SalesOrder: '销售订单',
+  SalesOrderItem: '订单明细',
+  PurchaseOrder: '采购单',
+  PurchaseOrderItem: '采购明细',
+  Customer: '客户',
+  CustomerPayment: '收款记录',
+  Supplier: '供应商',
+  SupplierPayment: '付款记录',
+  Product: '成品',
+  Part: '零件',
+  Bom: 'BOM 记录',
+  Receipt: '收货记录',
+  Issue: '领料记录',
+  ProductionEntry: '成品入库',
+  Shipment: '出货单',
+  ShipmentLine: '出货明细',
+  ShipmentSchedule: '出货排程',
+  ShipmentLeg: '运输节点',
+  ReturnReplenish: '退补货记录',
+  InventoryLedger: '库存流水',
+  Stock: '库存',
+  ShipToHub: '到货仓',
+  CompanyProfile: '公司资料',
+  User: '账号',
+}
+
 export function prismaErrorInfo(err: unknown): ErrorInfo | null {
   if (err === null || typeof err !== 'object') return null
   const e = err as { code?: unknown; meta?: { target?: unknown } }
@@ -21,7 +49,13 @@ export function prismaErrorInfo(err: unknown): ErrorInfo | null {
     return { status: 400, message: field + ' 已存在，不能重复' }
   }
   if (code === 'P2003') {
-    return { status: 400, message: '关联的数据不存在，请检查客户/供应商/零件/成品/订单等 ID' }
+    // 两种方向：①新增/修改时引用了不存在的记录（ID 不存在）；②删除/修改时被关联单据引用而受阻。
+    const modelName = (e.meta as { modelName?: string } | undefined)?.modelName
+    const label = modelName ? MODEL_LABELS[modelName] ?? modelName : '其他单据'
+    return {
+      status: 400,
+      message: `关联数据阻止了操作：引用的记录不存在，或该记录已被单据引用无法删除（涉及：${label}）`,
+    }
   }
   if (code === 'P2025') {
     return { status: 404, message: '记录不存在或已被删除' }
