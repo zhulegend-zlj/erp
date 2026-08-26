@@ -208,6 +208,28 @@ export default function Purchasing() {
 
   // 已生成过采购单的订单仍可继续生成（增补/补损），先确认再继续；新单会自动关联同一销售订单
   function openCreatePoWithCheck() {
+    const selected = orders.find((o) => o.id === orderId)
+    // 草稿订单：销售还未确认，不能生成采购单——可一键提醒销售确认
+    if (selected?.status === 'draft') {
+      Modal.confirm({
+        title: '销售还未确认该订单',
+        content:
+          '订单 ' +
+          selected.orderNo +
+          ' 仍是草稿状态（销售未确认），暂不能生成采购单。是否提醒销售确认？',
+        okText: '提醒销售确认',
+        cancelText: '取消',
+        onOk: async () => {
+          try {
+            await api.patch('/orders/' + selected.id + '/remind-confirm')
+            message.success('已提醒销售确认，请等销售确认后再生成采购单')
+          } catch (err) {
+            notifyError(err)
+          }
+        },
+      })
+      return
+    }
     const orderPos = purchaseOrders.filter((po) => po.salesOrderId === orderId)
     if (orderPos.length === 0) {
       openCreatePo()

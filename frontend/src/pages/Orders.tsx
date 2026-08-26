@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, message } from 'antd'
+import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, message } from 'antd'
 import { PlusOutlined, MinusCircleOutlined, DeleteOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
@@ -42,6 +42,8 @@ interface SalesOrder {
   producing?: boolean
   shippedQty?: number
   totalQty?: number
+  confirmReminderAt?: string | null
+  confirmReminderBy?: string | null
   customer: { name: string }
   items: OrderItem[]
 }
@@ -197,7 +199,16 @@ export default function Orders() {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      render: (_: unknown, r: SalesOrder) => <Tag color={phaseTagColor(r)}>{orderPhaseLabel(r)}</Tag>,
+      render: (_: unknown, r: SalesOrder) => (
+        <span>
+          <Tag color={phaseTagColor(r)}>{orderPhaseLabel(r)}</Tag>
+          {r.status === 'draft' && r.confirmReminderAt ? (
+            <Tooltip title={r.confirmReminderBy ? r.confirmReminderBy + ' 催你确认' : '采购催你确认'}>
+              <Tag color="orange">采购催确认</Tag>
+            </Tooltip>
+          ) : null}
+        </span>
+      ),
     },
     {
       title: '已出',

@@ -207,6 +207,7 @@ function Home() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [pendingPurchase, setPendingPurchase] = useState(0)
+  const [confirmReminders, setConfirmReminders] = useState(0)
   const guides = user ? HOME_GUIDES[user.role] : []
 
   // 采购提醒：首页显示待采购订单数（老板/采购可见）
@@ -218,8 +219,34 @@ function Home() {
       .catch(notifyError)
   }, [user])
 
+  // 被采购催确认：首页显示被催确认的草稿订单数（销售可见）
+  useEffect(() => {
+    if (!user || user.role !== 'sales') return
+    void api
+      .get<Array<{ status: string; confirmReminderAt?: string | null }>>('/orders', {
+        params: { pendingPurchase: 'true' },
+      })
+      .then(({ data }) => {
+        setConfirmReminders(data.filter((o) => o.status === 'draft' && o.confirmReminderAt).length)
+      })
+      .catch(notifyError)
+  }, [user])
+
   return (
     <Card>
+      {user?.role === 'sales' && confirmReminders > 0 ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={'有 ' + confirmReminders + ' 张草稿订单被采购催确认'}
+          action={
+            <Button size="small" onClick={() => navigate('/orders')}>
+              去订单页确认
+            </Button>
+          }
+        />
+      ) : null}
       {pendingPurchase > 0 ? (
         <Alert
           type="warning"

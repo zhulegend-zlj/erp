@@ -127,6 +127,9 @@ model SalesOrder {
   // 双阶段标志（可同时为真）：采购中=存在未收齐的采购单；生产中=已开始成品入库但未收满
   purchasing           Boolean            @default(false)
   producing            Boolean            @default(false)
+  // 采购催销售确认：草稿订单无法生成采购单时一键提醒（销售确认订单后清空）
+  confirmReminderAt    DateTime?
+  confirmReminderBy    String?
   otherCost            Decimal            @default(0) @db.Decimal(12, 2)
   createdAt            DateTime           @default(now())
   items                SalesOrderItem[]

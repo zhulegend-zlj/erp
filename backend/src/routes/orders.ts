@@ -215,6 +215,24 @@ export function ordersRoutes(app: FastifyInstance) {
     }
   })
 
+  // 采购催销售确认：草稿订单无法生成采购单时，采购/老板一键提醒销售（销售确认订单后自动清空）
+  app.patch('/api/orders/:id/remind-confirm', { preHandler: requireRole('purchase', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '订单 ID 必须为正整数' })
+    const order = await prisma.salesOrder.findUnique({ where: { id } })
+    if (!order) return reply.code(404).send({ error: '订单不存在' })
+    if (order.status !== 'draft') {
+      return reply.code(400).send({ error: '订单已确认，无需提醒' })
+    }
+    const userId = (req as { user?: { userId: number } }).user?.userId ?? 0
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } })
+    await prisma.salesOrder.update({
+      where: { id },
+      data: { confirmReminderAt: new Date(), confirmReminderBy: user?.name ?? '采购' },
+    })
+    return reply.code(200).send({ ok: true, orderNo: order.orderNo })
+  })
+
   // 状态推进：sales / boss。销售只允许 草稿↔已确认 与 已出货→已完成；老板额外可把运作中订单强制回退到已确认
   app.patch('/api/orders/:id/status', { preHandler: requireRole('sales', 'boss') }, async (req, reply) => {
     const id = parsePositiveInt((req.params as { id: string }).id)
@@ -236,9 +254,13 @@ export function ordersRoutes(app: FastifyInstance) {
     }
 
     // 条件更新（要求当前状态仍为 order.status），并发下只有一个请求能命中，防止重复推进/回退
+    // 确认订单（draft→confirmed）时顺带清空采购催办标记
     const updated = await prisma.salesOrder.updateMany({
       where: { id, status: order.status },
-      data: { status: data.status },
+      data: {
+        status: data.status,
+        ...(data.status === 'confirmed' ? { confirmReminderAt: null, confirmReminderBy: null } : {}),
+      },
     })
     if (updated.count === 0) {
       return reply.code(400).send({ error: '订单状态已变化，请刷新后重试' })

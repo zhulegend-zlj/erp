@@ -129,7 +129,7 @@ describe('purchasing', () => {
     expect(res.json().items).toHaveLength(1)
   })
 
-  it('草稿订单也可以生成采购单，并自动推进为已确认+采购中', async () => {
+  it('草稿订单不能生成采购单：提示销售未确认，可提醒销售；确认后可正常生成', async () => {
     const customer = await prisma.customer.create({ data: { name: '客户D' } })
     const supplier = await prisma.supplier.create({ data: { name: '供应商D' } })
     const part = await prisma.part.create({ data: { sku: 'P-D', name: '零件D', supplierId: supplier.id } })
@@ -137,34 +137,62 @@ describe('purchasing', () => {
       data: { orderNo: 'PO-DRAFT-1', customerId: customer.id, customerPoNo: 'PO-DRAFT-1', status: 'draft' },
     })
     const app = buildApp()
-    const cookie = await loginCookie(app, 'purchase')
-    // 待采购列表应包含草稿订单
+    const purchase = await loginCookie(app, 'purchase')
+    const sales = await loginCookie(app, 'sales')
+    // 待采购列表应包含草稿订单（采购可见）
     const pending = await app.inject({
-      method: 'GET', url: '/api/orders?pendingPurchase=true', headers: { cookie },
+      method: 'GET', url: '/api/orders?pendingPurchase=true', headers: { cookie: purchase },
     })
     expect(pending.statusCode).toBe(200)
     expect((pending.json() as Array<{ id: number }>).some((o) => o.id === order.id)).toBe(true)
-    // 对草稿订单生成采购单
+
+    // 草稿订单生成采购单 → 400 销售还未确认
+    const blocked = await app.inject({
+      method: 'POST', url: '/api/purchase-orders', headers: { cookie: purchase },
+      payload: { supplierId: supplier.id, salesOrderId: order.id, items: [{ partId: part.id, qty: 10, unitPrice: 1 }] },
+    })
+    expect(blocked.statusCode).toBe(400)
+    expect(blocked.json().error).toContain('销售还未确认')
+
+    // 采购一键提醒销售确认
+    const remind = await app.inject({
+      method: 'PATCH', url: '/api/orders/' + order.id + '/remind-confirm', headers: { cookie: purchase },
+    })
+    expect(remind.statusCode).toBe(200)
+    const reminded = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+    expect(reminded?.confirmReminderAt).not.toBeNull()
+    expect(reminded?.confirmReminderBy).toBe('purchase') // 测试账号 name=role，生产环境为中文名
+
+    // 订单列表带出催办标记（销售可见）
+    const listForSales = await app.inject({
+      method: 'GET', url: '/api/orders', headers: { cookie: sales },
+    })
+    const row = (listForSales.json() as Array<{ id: number; confirmReminderAt?: string | null }>).find((o) => o.id === order.id)
+    expect(row?.confirmReminderAt).toBeTruthy()
+
+    // 销售确认订单 → 催办标记清空
+    const confirm = await app.inject({
+      method: 'PATCH', url: '/api/orders/' + order.id + '/status', headers: { cookie: sales },
+      payload: { status: 'confirmed' },
+    })
+    expect(confirm.statusCode).toBe(200)
+    const afterConfirm = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+    expect(afterConfirm?.status).toBe('confirmed')
+    expect(afterConfirm?.confirmReminderAt).toBeNull()
+
+    // 确认后采购可以正常生成采购单
     const res = await app.inject({
-      method: 'POST', url: '/api/purchase-orders', headers: { cookie },
+      method: 'POST', url: '/api/purchase-orders', headers: { cookie: purchase },
       payload: { supplierId: supplier.id, salesOrderId: order.id, items: [{ partId: part.id, qty: 10, unitPrice: 1 }] },
     })
     expect(res.statusCode).toBe(200)
     expect(res.json().orderNo).toBe('PO-DRAFT-1-Z001')
-    const after = await prisma.salesOrder.findUnique({ where: { id: order.id } })
-    expect(after?.status).toBe('confirmed')
-    expect(after?.purchasing).toBe(true)
-    // 已有采购单的草稿/已确认订单不再出现在待采购列表
-    const pending2 = await app.inject({
-      method: 'GET', url: '/api/orders?pendingPurchase=true', headers: { cookie },
-    })
-    expect((pending2.json() as Array<{ id: number }>).some((o) => o.id === order.id)).toBe(false)
   })
 
   it('挂销售订单的采购单号 = 订单PO号 + -Z001/-Z002 递增', async () => {
     const customer = await prisma.customer.create({ data: { name: '客户Z' } })
     const order = await prisma.salesOrder.create({
-      data: { orderNo: '265440545874390', customerId: customer.id, customerPoNo: '265440545874390', zrhDeliveryDate: new Date('2026-09-30') },
+      data: { orderNo: '265440545874390', customerId: customer.id, customerPoNo: '265440545874390', zrhDeliveryDate: new Date('2026-09-30'), status: 'confirmed' },
     })
     const supplier = await prisma.supplier.create({ data: { name: '供应商Z' } })
     const part = await prisma.part.create({ data: { sku: 'P-Z', name: '零件Z', supplierId: supplier.id } })
@@ -182,7 +210,7 @@ describe('purchasing', () => {
   it('批量生成：同一订单按供应商分组自动排 Z001/Z002', async () => {
     const customer = await prisma.customer.create({ data: { name: '客户B' } })
     const order = await prisma.salesOrder.create({
-      data: { orderNo: 'PO-BATCH-9', customerId: customer.id, customerPoNo: 'PO-BATCH-9', zrhDeliveryDate: new Date('2026-09-30') },
+      data: { orderNo: 'PO-BATCH-9', customerId: customer.id, customerPoNo: 'PO-BATCH-9', zrhDeliveryDate: new Date('2026-09-30'), status: 'confirmed' },
     })
     const s1 = await prisma.supplier.create({ data: { name: '供应商Z1' } })
     const s2 = await prisma.supplier.create({ data: { name: '供应商Z2' } })

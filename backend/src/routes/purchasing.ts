@@ -268,6 +268,14 @@ export function purchasingRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: '零件「' + names + '」的供应商不是所选供应商，请先在零件资料中挂好供应商' })
     }
 
+    // 草稿订单不能生成采购单：需先提醒销售确认（老板口径 2026-08-26）
+    if (data.salesOrderId != null) {
+      const so = await prisma.salesOrder.findUnique({ where: { id: data.salesOrderId }, select: { status: true } })
+      if (so && so.status === 'draft') {
+        return reply.code(400).send({ error: '销售还未确认该订单（草稿状态），请提醒销售确认后再生成采购单' })
+      }
+    }
+
     const orderNo = await nextPurchaseOrderNo(data.salesOrderId ?? null, prisma)
     const order = await prisma.$transaction(async (tx) => {
       const created = await tx.purchaseOrder.create({
@@ -298,6 +306,14 @@ export function purchasingRoutes(app: FastifyInstance) {
   app.post('/api/purchase-orders/batch', { preHandler: requireRole('purchase') }, async (req, reply) => {
     const data = parseBody(batchPurchaseOrderSchema, req.body, reply)
     if (data === null) return
+
+    // 草稿订单不能生成采购单：需先提醒销售确认（老板口径 2026-08-26）
+    if (data.salesOrderId != null) {
+      const so = await prisma.salesOrder.findUnique({ where: { id: data.salesOrderId }, select: { status: true } })
+      if (so && so.status === 'draft') {
+        return reply.code(400).send({ error: '销售还未确认该订单（草稿状态），请提醒销售确认后再生成采购单' })
+      }
+    }
 
     const partIds = [...new Set(data.items.map((item) => item.partId))]
     if (partIds.length !== data.items.length) {

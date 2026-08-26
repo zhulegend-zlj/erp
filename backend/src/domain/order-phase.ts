@@ -19,12 +19,7 @@ export async function markPurchasingStarted(
   })
   if (!order) return
   const data: { purchasing: boolean; status?: string } = { purchasing: true }
-  if (order.status === 'draft') {
-    // 草稿订单被采购生成采购单 = 已进入运作，自动推进为已确认（老板口径：草稿也可采购）
-    data.status = 'confirmed'
-  } else if (order.status === 'confirmed') {
-    data.status = 'in_production'
-  }
+  if (order.status === 'confirmed') data.status = 'in_production'
   await tx.salesOrder.update({ where: { id: salesOrderId }, data })
 }
 
