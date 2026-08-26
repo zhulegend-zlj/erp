@@ -605,11 +605,17 @@ describe('hardening（加固回归）', () => {
     it('成品入库点亮生产中，收满后熄灭；采购+生产都完成自动待出货', async () => {
       const customer = await prisma.customer.create({ data: { name: '客户-PR' } })
       const product = await prisma.product.create({ data: { sku: 'F-PR', name: '成品PR' } })
+      const product2 = await prisma.product.create({ data: { sku: 'F-PR2', name: '成品PR2' } })
       const order = await prisma.salesOrder.create({
         data: {
           orderNo: 'SO-PR', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
           status: 'in_production', purchasing: true,
-          items: { create: { productId: product.id, qty: 10, unitPrice: 5 } },
+          items: {
+            create: [
+              { productId: product.id, qty: 10, unitPrice: 5 },
+              { productId: product2.id, qty: 1, unitPrice: 5 },
+            ],
+          },
         },
       })
       const app = buildApp()
@@ -623,21 +629,21 @@ describe('hardening（加固回归）', () => {
       expect(row?.producing).toBe(true)
       expect(row?.status).toBe('in_production')
 
-      // 采购中且未收满 → 仍是运作中
+      // 采购中且 F-PR 收满（但 F-PR2 未入）→ 生产中保持点亮、仍是运作中
       const full = await app.inject({
         method: 'POST', url: '/api/production-entries', headers: { cookie },
         payload: { salesOrderId: order.id, productId: product.id, qty: 6 },
       })
       expect(full.statusCode).toBe(200)
       row = await prisma.salesOrder.findUnique({ where: { id: order.id } })
-      expect(row?.producing).toBe(false)
+      expect(row?.producing).toBe(true)
       expect(row?.status).toBe('in_production')
 
-      // 采购也完成 → 自动待出货
+      // 采购也完成，最后把 F-PR2 那台入掉（全部收满）→ 自动待出货
       await prisma.salesOrder.update({ where: { id: order.id }, data: { purchasing: false, status: 'in_production' } })
       const extra = await app.inject({
         method: 'POST', url: '/api/production-entries', headers: { cookie },
-        payload: { salesOrderId: order.id, productId: product.id, qty: 1 },
+        payload: { salesOrderId: order.id, productId: product2.id, qty: 1 },
       })
       expect(extra.statusCode).toBe(200)
       row = await prisma.salesOrder.findUnique({ where: { id: order.id } })

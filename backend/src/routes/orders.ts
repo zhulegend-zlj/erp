@@ -206,10 +206,21 @@ export function ordersRoutes(app: FastifyInstance) {
       where: { salesOrderId: id },
       _sum: { qty: true },
     })
+    // 按成品维度的已入库量（成品入库表单提示「最多还能入 X 台」用）
+    const producedByProductRows = await prisma.productionEntry.groupBy({
+      by: ['productId'],
+      where: { salesOrderId: id },
+      _sum: { qty: true },
+    })
+    const producedByProduct: Record<number, number> = {}
+    for (const g of producedByProductRows) {
+      producedByProduct[g.productId] = g._sum.qty ?? 0
+    }
     const totalQty = order.items.reduce((sum, it) => sum + it.qty, 0)
     return {
       ...sanitizeOrderForRole(order, role),
       producedQty: produced._sum.qty ?? 0,
+      producedByProduct,
       shippedQty: shipped._sum.qty ?? 0,
       totalQty,
     }

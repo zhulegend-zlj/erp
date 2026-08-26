@@ -804,7 +804,13 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
 
 function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; products: Product[]; onDone?: () => void }) {
   const [submitting, setSubmitting] = useState(false)
-  const [orderProgress, setOrderProgress] = useState<{ producedQty: number; totalQty: number } | null>(null)
+  const [orderProgress, setOrderProgress] = useState<{
+    producedQty: number
+    totalQty: number
+    items?: { productId: number; qty: number }[]
+    producedByProduct?: Record<number, number>
+  } | null>(null)
+  const [selectedProductId, setSelectedProductId] = useState<number | undefined>()
   const [form] = Form.useForm<{
     salesOrderId?: number
     productId?: number
@@ -812,12 +818,24 @@ function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; pr
     entryDate?: string
   }>()
 
+  const productTotal = orderProgress?.items?.find((i) => i.productId === selectedProductId)?.qty ?? 0
+  const productDone = selectedProductId != null ? (orderProgress?.producedByProduct?.[selectedProductId] ?? 0) : 0
+  const remainQty = productTotal - productDone
+
   async function submit(values: {
     salesOrderId?: number
     productId?: number
     qty?: number
     entryDate?: string
   }) {
+    if (selectedProductId != null && remainQty <= 0) {
+      message.warning('该成品已收满，不能再入库')
+      return
+    }
+    if (selectedProductId != null && remainQty > 0 && values.qty != null && values.qty > remainQty) {
+      message.warning('入库数量不能超过 ' + remainQty + ' 台（该成品订单数量 ' + productTotal + ' 台）')
+      return
+    }
     setSubmitting(true)
     try {
       await api.post('/production-entries', {
@@ -850,10 +868,23 @@ function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; pr
             placeholder="选择订单"
             options={orders.map((o) => ({ value: o.id, label: o.orderNo + '（' + orderPhaseLabel(o) + '）' }))}
             onChange={(v) => {
+              setSelectedProductId(undefined)
+              form.setFieldValue('productId', undefined)
+              form.setFieldValue('qty', undefined)
               void api
-                .get<{ producedQty?: number; totalQty?: number }>('/orders/' + v)
+                .get<{
+                  producedQty?: number
+                  totalQty?: number
+                  items?: { productId: number; qty: number }[]
+                  producedByProduct?: Record<number, number>
+                }>('/orders/' + v)
                 .then(({ data }) =>
-                  setOrderProgress({ producedQty: data.producedQty ?? 0, totalQty: data.totalQty ?? 0 }),
+                  setOrderProgress({
+                    producedQty: data.producedQty ?? 0,
+                    totalQty: data.totalQty ?? 0,
+                    items: data.items,
+                    producedByProduct: data.producedByProduct,
+                  }),
                 )
                 .catch(notifyError)
             }}
@@ -868,10 +899,21 @@ function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; pr
           <Select
             placeholder="选择成品"
             options={products.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
+            onChange={(v) => {
+              setSelectedProductId(v)
+              form.setFieldValue('qty', undefined)
+            }}
           />
         </Form.Item>
         <Form.Item name="qty" label="数量" rules={[{ required: true, message: '数量' }]}>
-          <InputNumber min={1} precision={0} step={1} placeholder="数量" />
+          <InputNumber
+            min={1}
+            max={selectedProductId != null && remainQty > 0 ? remainQty : 1}
+            precision={0}
+            step={1}
+            placeholder="数量"
+            disabled={selectedProductId != null && remainQty <= 0}
+          />
         </Form.Item>
         <Form.Item name="entryDate" label="入库日期">
           <Input type="date" />
@@ -883,6 +925,14 @@ function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; pr
           {orderProgress.totalQty > 0 && orderProgress.producedQty >= orderProgress.totalQty ? (
             <Tag color="green">已收满，待出货</Tag>
           ) : null}
+        </div>
+      ) : null}
+      {selectedProductId != null && productTotal > 0 ? (
+        <div style={{ marginBottom: 12 }}>
+          <Tag color={remainQty > 0 ? 'blue' : 'red'}>
+            该成品订单数量 {productTotal} 台，已入库 {productDone} 台，
+            {remainQty > 0 ? '最多还能入 ' + remainQty + ' 台' : '已收满不能再入库'}
+          </Tag>
         </div>
       ) : null}
       <Button type="primary" htmlType="submit" loading={submitting}>

@@ -88,6 +88,40 @@ describe('inventory', () => {
     expect(entry).toMatchObject({ salesOrderId: order.id, productId: product.id, qty: 20 })
   })
 
+  it('成品入库数量不能超过订单该成品数量（累计）', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F8-CAP', name: '限量成品' } })
+    const customer = await prisma.customer.create({ data: { name: '客户CAP' } })
+    const order = await prisma.salesOrder.create({
+      data: {
+        orderNo: 'SO-CAP-1', customerId: customer.id, zrhDeliveryDate: new Date('2026-09-30'),
+        status: 'in_production',
+        items: { create: { productId: product.id, qty: 100, unitPrice: 5 } },
+      },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    // 第一次入 60 台 → 成功
+    const ok = await app.inject({
+      method: 'POST', url: '/api/production-entries', headers: { cookie },
+      payload: { salesOrderId: order.id, productId: product.id, qty: 60 },
+    })
+    expect(ok.statusCode).toBe(200)
+    // 再入 50 台（累计 110 > 100）→ 400 超限
+    const over = await app.inject({
+      method: 'POST', url: '/api/production-entries', headers: { cookie },
+      payload: { salesOrderId: order.id, productId: product.id, qty: 50 },
+    })
+    expect(over.statusCode).toBe(400)
+    expect(over.json().error).toContain('入库数量超限')
+    expect(over.json().error).toContain('已入库 60')
+    expect(over.json().error).toContain('最多还能入 40')
+    // 订单详情带出按成品已入库量
+    const detail = await app.inject({ method: 'GET', url: '/api/orders/' + order.id, headers: { cookie } })
+    expect(detail.statusCode).toBe(200)
+    const body = detail.json()
+    expect(body.producedByProduct[product.id]).toBe(60)
+  })
+
   it('库存列表返回 itemType/itemId/名称/qtyOnHand/不良品', async () => {
     const part = await prisma.part.create({ data: { sku: 'P8-A', name: '木板' } })
     const product = await prisma.product.create({ data: { sku: 'F8-1', name: '成品柜' } })

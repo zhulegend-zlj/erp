@@ -164,14 +164,26 @@ export function inventoryRoutes(app: FastifyInstance) {
         // 成品必须属于该订单明细，且订单处于生产相关状态（防凭空虚增库存）
         const order = await tx.salesOrder.findUnique({
           where: { id: data.salesOrderId },
-          select: { id: true, status: true, items: { select: { productId: true } } },
+          select: { id: true, status: true, items: { select: { productId: true, qty: true } } },
         })
         if (!order) throw new Error('订单不存在')
         if (order.status === 'draft' || order.status === 'shipped' || order.status === 'completed') {
           throw new Error('订单当前状态不能成品入库（需已确认/生产中/待出货）')
         }
-        if (!order.items.some((it) => it.productId === data.productId)) {
+        const orderItem = order.items.find((it) => it.productId === data.productId)
+        if (!orderItem) {
           throw new Error('该成品不在所选订单中，不能入库')
+        }
+        // 入库上限：累计入库不能超过订单该成品的数量
+        const already = await tx.productionEntry.aggregate({
+          where: { salesOrderId: data.salesOrderId, productId: data.productId },
+          _sum: { qty: true },
+        })
+        const doneQty = already._sum.qty ?? 0
+        if (doneQty + data.qty > orderItem.qty) {
+          throw new Error(
+            `入库数量超限：该订单此成品共 ${orderItem.qty} 台，已入库 ${doneQty} 台，最多还能入 ${orderItem.qty - doneQty} 台`,
+          )
         }
         const created = await tx.productionEntry.create({
           data: {
@@ -191,7 +203,11 @@ export function inventoryRoutes(app: FastifyInstance) {
       const message = err instanceof Error ? err.message : '成品入库失败'
       if (message.includes('库存不足')) return reply.code(400).send({ error: message })
       if (message.includes('订单不存在')) return reply.code(404).send({ error: message })
-      if (message.includes('不能成品入库') || message.includes('不在所选订单')) {
+      if (
+        message.includes('不能成品入库') ||
+        message.includes('不在所选订单') ||
+        message.includes('入库数量超限')
+      ) {
         return reply.code(400).send({ error: message })
       }
       const info = prismaErrorInfo(err)
