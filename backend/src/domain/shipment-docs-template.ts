@@ -14,12 +14,6 @@ function num(v: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-function fmtDate(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return d.getFullYear() + '.' + m + '.' + day
-}
-
 function excelDate(d: Date): Date {
   return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
 }
@@ -97,10 +91,22 @@ function markText(l: DocLine): string {
   return parts.join('\n')
 }
 
-function dueDateFor(shippedAt: Date, terms: string | null): Date | null {
-  const days = paymentDays(terms)
-  if (days === null) return null
-  return excelDate(new Date(shippedAt.getTime() + days * 86400000))
+function excelSerial(d: Date): number {
+  return Math.round((excelDate(d).getTime() - Date.UTC(1899, 11, 30)) / 86400000)
+}
+
+function setWrap(ws: ExcelJS.Worksheet, addr: string) {
+  const cell = ws.getCell(addr)
+  cell.alignment = { wrapText: true, vertical: 'top' }
+}
+
+/** 运输说明：出货时未填则按明细自动生成（SKU 数量 pcs, ...） */
+function shippingInstructionsText(d: ShipmentDocData): string {
+  if (d.shipment.shippingInstructions) return d.shipment.shippingInstructions
+  const bySku = new Map<string, number>()
+  for (const l of d.lines) bySku.set(l.product.sku, (bySku.get(l.product.sku) ?? 0) + l.qty)
+  const text = [...bySku.entries()].map(([sku, qty]) => sku + ' ' + qty + ' pcs').join(', ')
+  return text.slice(0, 240)
 }
 
 function fillNotify(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
@@ -109,20 +115,27 @@ function fillNotify(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   const lines = (d.customer.notifyParty || '').split('\n').filter(Boolean).slice(0, 7)
   for (let i = 0; i < 7; i++) {
     setVal(ws, addr('A', labelRow + 1 + i), lines[i] ?? '')
+    setWrap(ws, addr('A', labelRow + 1 + i))
   }
 }
 
 function fillShipperConsignee(ws: ExcelJS.Worksheet, d: ShipmentDocData, consigneeLabelRow: number) {
+  void consigneeLabelRow
   // 发货人块（两张表一致：A5 标签，名称 A6、地址 A7、联系方式 A8）
   setVal(ws, 'A6', d.company.name)
   setVal(ws, 'A7', d.company.address)
   setVal(ws, 'A8', 'Contact: ' + (d.company.contact || '') + (d.company.email ? ';' + d.company.email : ''))
+  setWrap(ws, 'A6')
+  setWrap(ws, 'A7')
+  setWrap(ws, 'A8')
   // 收货人块：标签行 +1 名称、+2 地址、+3 国家、+4 VAT、+5 EORI
   setVal(ws, addr('A', consigneeLabelRow + 1), d.customer.name)
   setVal(ws, addr('A', consigneeLabelRow + 2), d.customer.address ?? '')
   setVal(ws, addr('A', consigneeLabelRow + 3), d.customer.country ?? '')
   setVal(ws, addr('A', consigneeLabelRow + 4), 'VAT#: ' + (d.customer.vatNo ?? ''))
   setVal(ws, addr('A', consigneeLabelRow + 5), 'EORI: ' + (d.customer.eori ?? ''))
+  setWrap(ws, addr('A', consigneeLabelRow + 1))
+  setWrap(ws, addr('A', consigneeLabelRow + 2))
   fillNotify(ws, d)
 }
 
@@ -137,7 +150,6 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   // 右上角日期与发票号
   const d2 = ws.getCell('M2')
   d2.value = excelDate(d.shipment.shippedAt)
-  d2.numFmt = 'yyyy.mm.dd'
   setVal(ws, 'M3', d.shipment.invoiceNo ?? '')
 
   // 抬头（Issuer）
@@ -148,6 +160,7 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   setVal(ws, 'D7', issuerAddr[2] ?? '')
   setVal(ws, 'D8', 'Contact: ' + (d.company.contact || ''))
   setVal(ws, 'D9', d.company.email)
+  for (const a of ['D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'K4', 'K5', 'K6', 'K7', 'K8']) setWrap(ws, a)
 
   // 客户（TO）：模板在 K 列（K4 名称、K5-7 地址、K8 联系方式）
   const custAddr = (d.customer.address || '').split('\n')
@@ -179,10 +192,14 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
     setVal(ws, addr('I', row), num(l.unitPrice) ?? '')
     setVal(ws, addr('J', row), ext)
     setVal(ws, addr('K', row), ext)
-    const due = dueDateFor(d.shipment.shippedAt, d.shipment.paymentTerms)
+    // Due Date 与原表一致：公式 =M2+账期天数（保留模板 m/d/yy 显示格式）
+    const days = paymentDays(d.shipment.paymentTerms)
     const dueCell = ws.getCell(addr('L', row))
-    dueCell.value = due ? due : null
-    if (due) dueCell.numFmt = 'yyyy.mm.dd'
+    if (days === null) {
+      dueCell.value = null
+    } else {
+      dueCell.value = { formula: 'M2+' + days, result: excelSerial(d.shipment.shippedAt) + days } as ExcelJS.CellFormulaValue
+    }
     setVal(ws, addr('M', row), l.remark ?? '')
   }
   for (let i = k; i < capacity; i++) {
@@ -223,16 +240,25 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   }
 
   // 条款区（按标签定位填写）
-  const footerMap: Array<[string, string]> = [
-    ['1.Shipping Date:', fmtDate(d.shipment.shippedAt)],
-    ['2.Shipping instructions:', d.shipment.shippingInstructions ?? ''],
+  const footerMap: Array<[string, string | null]> = [
+    ['1.Shipping Date:', null],
+    ['2.Shipping instructions:', shippingInstructionsText(d)],
     ['3.Payment terms:', d.shipment.paymentTerms ?? ''],
     ['4.VAT identification number:', d.company.vatNo],
     ['5.Tax rate:', d.shipment.taxRate || d.company.taxRate],
   ]
   for (const [label, value] of footerMap) {
     const r = findRowByText(ws, label, 'A')
-    if (r !== null) setVal(ws, addr('D', r), value)
+    if (r === null) continue
+    if (label === '1.Shipping Date:') {
+      const c = ws.getCell(addr('D', r))
+      c.value = excelDate(d.shipment.shippedAt)
+      c.numFmt = 'yyyy.mm.dd'
+    } else {
+      const c = ws.getCell(addr('D', r))
+      c.value = value ?? ''
+      if (label === '2.Shipping instructions:') c.numFmt = 'General'
+    }
   }
   const bankRow = findRowByText(ws, '6.Collecting bank:', 'A')
   if (bankRow !== null) {
