@@ -129,6 +129,38 @@ describe('purchasing', () => {
     expect(res.json().items).toHaveLength(1)
   })
 
+  it('草稿订单也可以生成采购单，并自动推进为已确认+采购中', async () => {
+    const customer = await prisma.customer.create({ data: { name: '客户D' } })
+    const supplier = await prisma.supplier.create({ data: { name: '供应商D' } })
+    const part = await prisma.part.create({ data: { sku: 'P-D', name: '零件D', supplierId: supplier.id } })
+    const order = await prisma.salesOrder.create({
+      data: { orderNo: 'PO-DRAFT-1', customerId: customer.id, customerPoNo: 'PO-DRAFT-1', status: 'draft' },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    // 待采购列表应包含草稿订单
+    const pending = await app.inject({
+      method: 'GET', url: '/api/orders?pendingPurchase=true', headers: { cookie },
+    })
+    expect(pending.statusCode).toBe(200)
+    expect((pending.json() as Array<{ id: number }>).some((o) => o.id === order.id)).toBe(true)
+    // 对草稿订单生成采购单
+    const res = await app.inject({
+      method: 'POST', url: '/api/purchase-orders', headers: { cookie },
+      payload: { supplierId: supplier.id, salesOrderId: order.id, items: [{ partId: part.id, qty: 10, unitPrice: 1 }] },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().orderNo).toBe('PO-DRAFT-1-Z001')
+    const after = await prisma.salesOrder.findUnique({ where: { id: order.id } })
+    expect(after?.status).toBe('confirmed')
+    expect(after?.purchasing).toBe(true)
+    // 已有采购单的草稿/已确认订单不再出现在待采购列表
+    const pending2 = await app.inject({
+      method: 'GET', url: '/api/orders?pendingPurchase=true', headers: { cookie },
+    })
+    expect((pending2.json() as Array<{ id: number }>).some((o) => o.id === order.id)).toBe(false)
+  })
+
   it('挂销售订单的采购单号 = 订单PO号 + -Z001/-Z002 递增', async () => {
     const customer = await prisma.customer.create({ data: { name: '客户Z' } })
     const order = await prisma.salesOrder.create({

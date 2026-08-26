@@ -61,7 +61,7 @@ describe('sales workflow（订单字段/排程/部分出货/权限/提醒）', (
     expect(noZrh.json().error).toContain('ZRH')
   })
 
-  it('采购提醒：pendingPurchase=true 只返回已确认且无采购单的订单', async () => {
+  it('采购提醒：pendingPurchase=true 返回 草稿/已确认 且无采购单的订单（老板口径：草稿也可采购）', async () => {
     const app = buildApp()
     const { order } = await seedOrder('SO-P1', 'PO-P1', 10, 5)
     await seedOrder('SO-P2', 'PO-P2', 20, 5, 'draft')
@@ -70,13 +70,13 @@ describe('sales workflow（订单字段/排程/部分出货/权限/提醒）', (
     const pending = await app.inject({ method: 'GET', url: '/api/orders?pendingPurchase=true', headers: { cookie } })
     expect(pending.statusCode).toBe(200)
     const rows = pending.json() as Array<{ orderNo: string }>
-    expect(rows.map((r) => r.orderNo)).toEqual(['SO-P1'])
+    expect(rows.map((r) => r.orderNo).sort()).toEqual(['SO-P1', 'SO-P2'])
 
-    // 生成采购单后从提醒中消失
+    // 生成采购单后从提醒中消失（草稿订单仍未生成采购单，保留在提醒里）
     const supplier = await prisma.supplier.create({ data: { name: 'S1' } })
     await prisma.purchaseOrder.create({ data: { orderNo: 'PO-SUP-1', supplierId: supplier.id, salesOrderId: order.id } })
     const pending2 = await app.inject({ method: 'GET', url: '/api/orders?pendingPurchase=true', headers: { cookie } })
-    expect((pending2.json() as unknown[]).length).toBe(0)
+    expect((pending2.json() as Array<{ orderNo: string }>).map((r) => r.orderNo)).toEqual(['SO-P2'])
   })
 
   it('到货仓：销售可增改删，仓库只读，被排程使用的不能删', async () => {

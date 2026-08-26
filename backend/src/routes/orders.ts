@@ -140,14 +140,14 @@ export function ordersRoutes(app: FastifyInstance) {
   })
 
   // 5 角色均可查看列表；可选 page/pageSize 分页；purchase/warehouse/engineer 隐藏销售单价；
-  // 可选 pendingPurchase=true：只返回已确认且未生成采购单的订单（采购提醒用）；每行附带 已出/总量
+  // 可选 pendingPurchase=true：只返回 草稿/已确认 且未生成采购单的订单（采购提醒用，草稿也可采购）；每行附带 已出/总量
   app.get('/api/orders', { preHandler: requireRole(...ALL_ROLES) }, async (req, reply) => {
     const pagination = parsePagination(req.query as Record<string, unknown>)
     if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
     const role = (req as { user?: { role?: string } }).user?.role ?? ''
     const pendingPurchase = (req.query as Record<string, unknown>).pendingPurchase === 'true'
     const where: Prisma.SalesOrderWhereInput = pendingPurchase
-      ? { status: 'confirmed', purchaseOrders: { none: {} } }
+      ? { status: { in: ['draft', 'confirmed'] }, purchaseOrders: { none: {} } }
       : {}
     const orderBy = { id: 'desc' as const }
     // 已出数量：按出货明细行（行级订单）汇总
