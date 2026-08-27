@@ -99,7 +99,7 @@ function FileUpload({
         </div>
       ) : (
         <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
-          支持 pdf/dwg/dxf/step/stp/igs/zip/xlsx 及图片，单个文件 ≤ 20MB
+          支持 pdf/dwg/dxf/step/stp/igs/zip/xlsx 及图片，单个文件 ≤ 600MB（图片建议 20MB 以内）
         </div>
       )}
     </div>
@@ -829,7 +829,9 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
               return (
                 <Select
                   style={{ width: 280 }}
-                  placeholder="选择零件"
+                  placeholder="选择零件（可输入名称/料号搜索）"
+                  showSearch
+                  optionFilterProp="label"
                   value={r.partId}
                   disabled={!canWrite}
                   onChange={(v) => updateRow(index, { partId: v })}

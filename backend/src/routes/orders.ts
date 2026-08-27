@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import type { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { createWriteStream } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -194,6 +194,10 @@ export function ordersRoutes(app: FastifyInstance) {
         }
       }
       if (!tmpName) return reply.code(400).send({ error: '未收到图片文件' })
+      // 识别图只收 20MB 以内的图片（大文件是图档不是截图）
+      if ((await stat(tmpName)).size > 20 * 1024 * 1024) {
+        return reply.code(400).send({ error: '图片超过 20MB，请压缩后再上传（该功能用于客户订单截图）' })
+      }
 
       const outcome = await readOrderImageWithModlens(tmpName)
       if (!outcome.ok) {
@@ -240,17 +244,24 @@ export function ordersRoutes(app: FastifyInstance) {
       ? { status: { in: ['draft', 'confirmed'] }, purchaseOrders: { none: {} } }
       : {}
     const orderBy = { id: 'desc' as const }
-    // 已出数量：按出货明细行（行级订单）汇总
+    // 已出数量：按出货明细行（行级订单）汇总；同时按 订单+成品 给出每个成品的已出数
     const withShipped = async (
       rows: Prisma.SalesOrderGetPayload<{ include: typeof ITEMS_INCLUDE }>[],
     ) => {
       const ids = rows.map((o) => o.id)
       const grouped = await prisma.shipmentLine.groupBy({
-        by: ['salesOrderId'],
+        by: ['salesOrderId', 'productId'],
         where: { salesOrderId: { in: ids } },
         _sum: { qty: true },
       })
-      const shippedMap = new Map(grouped.map((g) => [g.salesOrderId, g._sum.qty ?? 0]))
+      const shippedMap = new Map<number, number>()
+      const shippedByProduct = new Map<string, number>()
+      for (const g of grouped) {
+        const orderId = g.salesOrderId
+        const qty = g._sum.qty ?? 0
+        if (orderId !== null) shippedMap.set(orderId, (shippedMap.get(orderId) ?? 0) + qty)
+        if (orderId !== null) shippedByProduct.set(`${orderId}:${g.productId}`, qty)
+      }
       return rows.map((o) => ({
         ...sanitizeOrderForRole(o, role),
         shippedQty: shippedMap.get(o.id) ?? 0,
@@ -260,6 +271,10 @@ export function ordersRoutes(app: FastifyInstance) {
           (min: Date | null, it) =>
             it.zrhDeliveryDate && (min === null || it.zrhDeliveryDate < min) ? it.zrhDeliveryDate : min,
           null,
+        ),
+        // 每个成品的已出数（订单详情弹窗展示）
+        shippedByProduct: Object.fromEntries(
+          o.items.map((it) => [String(it.productId), shippedByProduct.get(`${o.id}:${it.productId}`) ?? 0]),
         ),
       }))
     }

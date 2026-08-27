@@ -3,6 +3,7 @@ import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react
 import {
   Alert,
   Avatar,
+  Badge,
   Button,
   Card,
   Form,
@@ -283,6 +284,28 @@ function AppShell() {
   const location = useLocation()
   const { token } = theme.useToken()
 
+  // 出货排程红点提醒：仓库=待备货数；销售=已备好待出货数（仓库备好后销售侧收到反馈）
+  const [scheduleBadge, setScheduleBadge] = useState(0)
+  useEffect(() => {
+    if (!user) return
+    const status = user.role === 'warehouse' ? 'pending' : user.role === 'sales' ? 'picked' : null
+    if (!status) return
+    let alive = true
+    const fetchCount = () =>
+      api
+        .get<Array<{ id: number }>>('/schedules', { params: { status } })
+        .then(({ data }) => {
+          if (alive) setScheduleBadge(data.length)
+        })
+        .catch(() => {})
+    void fetchCount()
+    const timer = setInterval(() => void fetchCount(), 60000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [user])
+
   const menuItems: MenuProps['items'] = useMemo(
     () =>
       navItems
@@ -290,9 +313,16 @@ function AppShell() {
         .map((item) => ({
           key: item.path,
           icon: item.icon,
-          label: item.label,
+          label:
+            item.path === '/schedules' && scheduleBadge > 0 ? (
+              <Badge count={scheduleBadge} size="small" offset={[8, 0]} title={user?.role === 'warehouse' ? '待备货' : '已备好待出货'}>
+                {item.label}
+              </Badge>
+            ) : (
+              item.label
+            ),
         })),
-    [user],
+    [user, scheduleBadge],
   )
 
   const [pwdOpen, setPwdOpen] = useState(false)

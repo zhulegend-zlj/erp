@@ -98,7 +98,7 @@ export function uploadRoutes(app: FastifyInstance) {
       // 失败清理临时文件；超限错误映射为 413
       if (tmpName) await rm(resolve(UPLOAD_DIR, tmpName), { force: true }).catch(() => {})
       if ((err as { code?: string }).code === 'FST_REQ_FILE_TOO_LARGE') {
-        return reply.code(413).send({ error: '文件超过 20MB 限制' })
+        return reply.code(413).send({ error: '文件超过 600MB 限制' })
       }
       throw err
     }

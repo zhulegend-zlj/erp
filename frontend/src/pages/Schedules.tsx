@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button, Card, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'antd'
-import { CheckOutlined, DeleteOutlined, EditOutlined, PlusOutlined, StopOutlined } from '@ant-design/icons'
+import { CheckOutlined, DeleteOutlined, EditOutlined, PlusOutlined, PrinterOutlined, StopOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { dateStr, notifyError } from './common'
@@ -249,6 +249,48 @@ export default function Schedules() {
     }
   }
 
+  // 打印出货计划：参考 Endor 出货计划表（标题/序号/出货日期/目的地/订单号/品名/中文品名/数量/箱数/体积/重量，
+  // 按承诺日分组并带小计；箱数/体积/重量留空手填）
+  function esc(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  }
+
+  function printShipPlan() {
+    const active = rows.filter((r) => r.status !== 'cancelled')
+    const byDate = new Map<string, ScheduleRow[]>()
+    for (const r of active) {
+      const d = r.promisedDate ? String(r.promisedDate).slice(0, 10) : '未定'
+      byDate.set(d, [...(byDate.get(d) ?? []), r])
+    }
+    const dates = [...byDate.keys()].sort()
+    const title = 'JMC Shipment Plan出货计划' + new Date().toISOString().slice(0, 10)
+    let trs = ''
+    for (const d of dates) {
+      const group = byDate.get(d) ?? []
+      let seq = 0
+      let sumQty = 0
+      for (const r of group) {
+        seq += 1
+        sumQty += r.qty
+        trs += '<tr><td>' + seq + '</td><td>' + d + '</td><td>' + esc(r.hub.name) + '</td><td>' + esc(r.salesOrder.orderNo) + '</td><td>' + esc(r.product.sku) + '</td><td>' + esc(r.product.name) + '</td><td>' + r.qty + '</td><td></td><td></td><td></td></tr>'
+      }
+      trs += '<tr class="sub"><td></td><td></td><td></td><td></td><td></td><td>合计</td><td>' + sumQty + '</td><td></td><td></td><td></td></tr>'
+    }
+    const html =
+      '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
+      '<style>body{font-family:SimSun,Arial,sans-serif;margin:24px}h2{text-align:center}table{border-collapse:collapse;width:100%}td,th{border:1px solid #000;padding:4px 6px;font-size:12px}th{background:#f0f0f0}tr.sub td{font-weight:bold;background:#fafafa}@media print{h2{margin-top:0}}</style>' +
+      '</head><body><h2>' + esc(title) + '</h2><table><thead><tr><th>序号</th><th>出货日期</th><th>目的地</th><th>订单号</th><th>品名</th><th>中文品名</th><th>数量</th><th>箱数</th><th>体积</th><th>重量</th></tr></thead><tbody>' +
+      trs +
+      '</tbody></table><script>window.onload=function(){window.print()}<\/script></body></html>'
+    const w = window.open('', '_blank', 'width=1000,height=700')
+    if (!w) {
+      message.warning('浏览器拦截了打印窗口，请允许弹窗后重试')
+      return
+    }
+    w.document.write(html)
+    w.document.close()
+  }
+
   const columns = [
     {
       title: '状态',
@@ -261,7 +303,6 @@ export default function Schedules() {
       },
     },
     { title: '订单号', key: 'orderNo', render: (_: unknown, r: ScheduleRow) => r.salesOrder.orderNo },
-    { title: '客户PO', key: 'po', render: (_: unknown, r: ScheduleRow) => r.salesOrder.customerPoNo ?? '-' },
     { title: '成品', key: 'product', render: (_: unknown, r: ScheduleRow) => r.product.sku + ' ' + r.product.name },
     { title: '数量', dataIndex: 'qty', key: 'qty', width: 80 },
     { title: '到货仓', key: 'hub', render: (_: unknown, r: ScheduleRow) => r.hub.name },
@@ -298,7 +339,10 @@ export default function Schedules() {
   ]
 
   return (
-    <Card title="出货排程（客户 OPO 表录入 → 仓库备货 → 出货）">
+    <Card
+      title="出货排程（客户 OPO 表录入 → 仓库备货 → 出货）"
+      extra={canCreate ? <Button icon={<PrinterOutlined />} onClick={printShipPlan}>打印出货计划</Button> : null}
+    >
       {canCreate ? (
         <Form form={form} layout="inline" onFinish={handleCreate} style={{ marginBottom: 16, rowGap: 8, flexWrap: 'wrap' }}>
           <Form.Item name="salesOrderId" rules={[{ required: true, message: '选择订单' }]}>

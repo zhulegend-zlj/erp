@@ -42,6 +42,7 @@ interface SalesOrder {
   producing?: boolean
   shippedQty?: number
   totalQty?: number
+  shippedByProduct?: Record<string, number>
   confirmReminderAt?: string | null
   confirmReminderBy?: string | null
   customer: { name: string }
@@ -162,6 +163,7 @@ export default function Orders() {
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [parsingImage, setParsingImage] = useState(false)
   const imageInputRef = useRef<HTMLInputElement>(null)
+  const [detailTarget, setDetailTarget] = useState<SalesOrder | null>(null)
 
   const canCreate = user?.role === 'sales'
   const canAdvance = user?.role === 'sales' || user?.role === 'boss'
@@ -391,8 +393,21 @@ export default function Orders() {
     {
       title: '明细',
       key: 'items',
-      render: (_: unknown, r: SalesOrder) =>
-        r.items.map((it) => it.product.name + ' × ' + it.qty).join('；'),
+      width: 260,
+      render: (_: unknown, r: SalesOrder) => {
+        const names = r.items.map((it) => it.product.name + ' × ' + it.qty)
+        const overflow = names.length > 2
+        return (
+          <div style={{ maxHeight: 46, overflow: 'hidden', lineHeight: '22px' }}>
+            <span>{names.slice(0, 2).join('；') + (overflow ? '…' : '')}</span>
+            {overflow ? (
+              <a style={{ marginLeft: 6 }} onClick={() => setDetailTarget(r)}>
+                共{names.length}项 显示更多
+              </a>
+            ) : null}
+          </div>
+        )
+      },
     },
     {
       title: '操作',
@@ -582,6 +597,53 @@ export default function Orders() {
           </div>
           <OrderItemsFields products={products} />
         </Form>
+      </Modal>
+      <Modal
+        title={'订单明细：' + (detailTarget?.orderNo ?? '')}
+        open={detailTarget !== null}
+        onCancel={() => setDetailTarget(null)}
+        footer={null}
+        width={860}
+      >
+        <Table<OrderItem>
+          rowKey="productId"
+          size="small"
+          pagination={false}
+          dataSource={detailTarget?.items ?? []}
+          columns={[
+            { title: '成品', key: 'p', render: (_: unknown, it: OrderItem) => it.product.name + '（' + it.product.sku + '）' },
+            { title: '数量', dataIndex: 'qty', key: 'qty', width: 80 },
+            {
+              title: '单价',
+              dataIndex: 'unitPrice',
+              key: 'unitPrice',
+              width: 100,
+              render: (v: string | undefined) => (v === undefined || v === null ? '-' : v),
+            },
+            {
+              title: '客户交期',
+              key: 'cd',
+              render: (_: unknown, it: OrderItem) => (it.customerDeliveryDate ? String(it.customerDeliveryDate).slice(0, 10) : '-'),
+            },
+            {
+              title: 'ZRH交期',
+              key: 'zd',
+              render: (_: unknown, it: OrderItem) => (it.zrhDeliveryDate ? String(it.zrhDeliveryDate).slice(0, 10) : '-'),
+            },
+            {
+              title: '已出',
+              key: 'shipped',
+              width: 80,
+              render: (_: unknown, it: OrderItem) => {
+                const shipped = detailTarget?.shippedByProduct?.[String(it.productId)] ?? 0
+                const total = it.qty
+                if (shipped >= total && total > 0) return <Tag color="green">出满</Tag>
+                if (shipped > 0) return <Tag color="blue">{shipped + '/' + total}</Tag>
+                return '0'
+              },
+            },
+          ]}
+        />
       </Modal>
       <Modal
         title="删除订单"
