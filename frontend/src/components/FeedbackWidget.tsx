@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button, Drawer, FloatButton, Form, Input, Select, message } from 'antd'
 import { CommentOutlined } from '@ant-design/icons'
 import { api } from '../api'
+import { useAuth } from '../auth'
 
 interface FeedbackFormValues {
   module: string
@@ -24,6 +25,16 @@ const MODULE_OPTIONS = [
   { value: '其他', label: '其他' },
 ]
 
+// 各角色只能给自己有权限的模块提反馈（与左侧菜单权限一致，后端同样校验）
+const ROLE_MODULES: Record<string, string[]> = {
+  boss: MODULE_OPTIONS.map((m) => m.value),
+  sales: ['首页', '订单', '出货排程', '出货', '基础资料', '账号登录', '其他'],
+  purchase: ['首页', '采购', '基础资料', '账号登录', '其他'],
+  warehouse: ['首页', '库存', '出货排程', '账号登录', '其他'],
+  engineer: ['首页', '基础资料', '账号登录', '其他'],
+  finance: ['首页', '财务', '账号登录', '其他'],
+}
+
 const PRIORITY_OPTIONS = [
   { value: '高', label: '高' },
   { value: '中', label: '中' },
@@ -36,9 +47,13 @@ function errMsg(err: unknown): string {
 }
 
 export default function FeedbackWidget() {
+  const { user } = useAuth()
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [form] = Form.useForm<FeedbackFormValues>()
+
+  const allowed = ROLE_MODULES[user?.role ?? ''] ?? ['其他']
+  const options = MODULE_OPTIONS.filter((m) => allowed.includes(m.value))
 
   async function handleSubmit(values: FeedbackFormValues) {
     setSubmitting(true)
@@ -80,7 +95,7 @@ export default function FeedbackWidget() {
           onFinish={handleSubmit}
         >
           <Form.Item name="module" label="模块">
-            <Select options={MODULE_OPTIONS} />
+            <Select options={options} />
           </Form.Item>
           <Form.Item
             name="content"

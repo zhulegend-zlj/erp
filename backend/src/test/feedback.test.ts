@@ -48,4 +48,26 @@ describe('feedback', () => {
     })
     expect(res.statusCode).toBe(400)
   })
+
+  it('角色只能给自己有权限的模块提反馈（销售提交采购 → 400）', async () => {
+    const app = buildApp()
+    const sales = await loginCookie(app, 'sales')
+
+    const denied = await app.inject({
+      method: 'POST',
+      url: '/api/feedback',
+      headers: { cookie: sales },
+      payload: { content: '销售越权模块', module: '采购', priority: '中' },
+    })
+    expect(denied.statusCode).toBe(400)
+    expect(denied.json().error).toContain('权限范围')
+
+    const allowedRes = await app.inject({
+      method: 'POST',
+      url: '/api/feedback',
+      headers: { cookie: sales },
+      payload: { content: '销售正常模块-' + Date.now(), module: '订单', priority: '中' },
+    })
+    expect(allowedRes.statusCode).toBe(200)
+  })
 })
