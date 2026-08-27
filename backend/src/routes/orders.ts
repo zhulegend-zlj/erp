@@ -65,6 +65,24 @@ const statusSchema = z.object({
   status: z.string({ error: '状态必填' }).min(1, '状态必填'),
 })
 
+// 编辑订单：明细与表头均可改（items 传了就必须 ≥1 行且每行带交期）
+const updateOrderSchema = z.object({
+  customerId: z.number({ error: '客户必须为整数' }).int().positive().optional(),
+  customerPoNo: z.string().min(1, '客户PO号必填').max(60, '客户PO号过长').optional(),
+  orderDate: z
+    .string({ error: '订单日期必须为字符串' })
+    .refine((v) => !Number.isNaN(Date.parse(v)), '订单日期必须为合法日期')
+    .optional(),
+  paymentTerms: z.string().nullable().optional(),
+  items: z
+    .array(orderItemSchema, { error: '明细必填' })
+    .min(1, '订单至少包含一个明细')
+    .refine((items) => new Set(items.map((i) => i.productId)).size === items.length, {
+      message: '同一成品不能在订单明细中重复',
+    })
+    .optional(),
+})
+
 function parseBody<T>(schema: z.ZodType<T>, body: unknown, reply: FastifyReply): T | null {
   const result = schema.safeParse(body)
   if (!result.success) {
@@ -296,6 +314,86 @@ export function ordersRoutes(app: FastifyInstance) {
     }
     const refreshed = await prisma.salesOrder.findUnique({ where: { id }, include: ITEMS_INCLUDE })
     return reply.code(200).send(refreshed)
+  })
+
+  // 编辑订单（老板口径：同一客户PO号后续要加成品，不能重复建单 → 用编辑加成品/改数量/改交期）
+  // 草稿可随意编辑；已确认但尚无任何业务痕迹（无采购单/出货单/排程/领料/成品入库/收款/库存流水）也可编辑；
+  // 一旦开始采购/生产/出货即锁定，防止把运作中的单据改烂。
+  app.patch('/api/orders/:id', { preHandler: requireRole('sales', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '订单 ID 必须为正整数' })
+    const data = parseBody(updateOrderSchema, req.body, reply)
+    if (data === null) return
+
+    const order = await prisma.salesOrder.findUnique({ where: { id } })
+    if (!order) return reply.code(404).send({ error: '订单不存在' })
+    if (order.status !== 'draft' && order.status !== 'confirmed') {
+      return reply.code(400).send({ error: `订单状态为「${order.status}」，不能编辑（仅草稿、或未开始业务的已确认订单可编辑）` })
+    }
+
+    // 改客户PO号 = 改订单号：撞已有订单号要拦截
+    const nextOrderNo = data.customerPoNo ?? order.customerPoNo ?? order.orderNo
+    if (data.customerPoNo && data.customerPoNo !== order.customerPoNo) {
+      const duplicate = await prisma.salesOrder.findUnique({ where: { orderNo: nextOrderNo } })
+      if (duplicate) {
+        return reply.code(400).send({ error: `客户PO号「${nextOrderNo}」已被使用，请核对（同一PO号重复录入会被拦截）` })
+      }
+    }
+
+    // 已确认订单：有业务痕迹即锁定（口径与删除一致）
+    if (order.status === 'confirmed') {
+      const [purchaseOrders, shipments, schedules, issues, productionEntries, payments, ledgers] = await Promise.all([
+        prisma.purchaseOrder.count({ where: { salesOrderId: id } }),
+        prisma.shipment.count({ where: { salesOrderId: id } }),
+        prisma.shipmentSchedule.count({ where: { salesOrderId: id, status: { not: 'cancelled' } } }),
+        prisma.issue.count({ where: { salesOrderId: id } }),
+        prisma.productionEntry.count({ where: { salesOrderId: id } }),
+        prisma.customerPayment.count({ where: { salesOrderId: id } }),
+        prisma.inventoryLedger.count({ where: { salesOrderId: id } }),
+      ])
+      const blockers: string[] = []
+      if (purchaseOrders > 0) blockers.push(`${purchaseOrders} 张采购单`)
+      if (shipments > 0) blockers.push(`${shipments} 张出货单`)
+      if (schedules > 0) blockers.push(`${schedules} 条出货排程`)
+      if (issues > 0) blockers.push(`${issues} 条领料`)
+      if (productionEntries > 0) blockers.push(`${productionEntries} 条成品入库`)
+      if (payments > 0) blockers.push(`${payments} 笔收款`)
+      if (ledgers > 0) blockers.push(`${ledgers} 条库存流水`)
+      if (blockers.length > 0) {
+        return reply.code(400).send({ error: `订单已有业务记录，不能编辑：${blockers.join('、')}` })
+      }
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.salesOrder.update({
+        where: { id },
+        data: {
+          ...(data.customerId !== undefined ? { customerId: data.customerId } : {}),
+          ...(data.customerPoNo !== undefined ? { customerPoNo: data.customerPoNo } : {}),
+          orderNo: nextOrderNo,
+          ...(data.orderDate ? { orderDate: new Date(data.orderDate) } : {}),
+          ...(data.paymentTerms !== undefined ? { paymentTerms: data.paymentTerms } : {}),
+        },
+      })
+      if (data.items) {
+        await tx.salesOrderItem.deleteMany({ where: { orderId: id } })
+        for (const item of data.items) {
+          await tx.salesOrderItem.create({
+            data: {
+              orderId: id,
+              productId: item.productId,
+              qty: item.qty,
+              unitPrice: item.unitPrice,
+              customerDeliveryDate: new Date(item.customerDeliveryDate),
+              zrhDeliveryDate: new Date(item.zrhDeliveryDate),
+            },
+          })
+        }
+      }
+      return tx.salesOrder.findUniqueOrThrow({ where: { id }, include: ITEMS_INCLUDE })
+    })
+
+    return reply.code(200).send(updated)
   })
 
   // 删除订单：仅 sales/boss。只允许删除没有任何业务痕迹的订单

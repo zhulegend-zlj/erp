@@ -49,6 +49,114 @@ describe('orders', () => {
     expect(second.json().error).toContain('已被使用')
   })
 
+  it('销售可编辑草稿订单：追加成品、改交期；订单号跟随客户PO号变化', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const product2 = await prisma.product.create({ data: { sku: 'F002', name: '成品B' } })
+    const created = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: { customerId: customer.id, customerPoNo: 'PO-EDIT-1', items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 10, unitPrice: 10 }] }
+    })
+    expect(created.statusCode).toBe(200)
+    const orderId = created.json().id
+    const edited = await app.inject({
+      method: 'PATCH', url: '/api/orders/' + orderId, headers: { cookie },
+      payload: {
+        customerPoNo: 'PO-EDIT-2',
+        items: [
+          { productId: product.id, customerDeliveryDate: '2026-10-01', zrhDeliveryDate: '2026-10-01', qty: 20, unitPrice: 12 },
+          { productId: product2.id, customerDeliveryDate: '2026-10-15', zrhDeliveryDate: '2026-10-10', qty: 5, unitPrice: 8 },
+        ],
+      }
+    })
+    expect(edited.statusCode).toBe(200)
+    const body = edited.json()
+    expect(body.orderNo).toBe('PO-EDIT-2')
+    expect(body.items).toHaveLength(2)
+    expect(body.items[0].qty).toBe(20)
+    expect(body.items[1].product.sku).toBe('F002')
+  })
+
+  it('编辑订单撞已有客户PO号返回 400', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const make = (po: string) =>
+      app.inject({
+        method: 'POST', url: '/api/orders', headers: { cookie },
+        payload: { customerId: customer.id, customerPoNo: po, items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 1 }] }
+      })
+    const a = await make('PO-EA')
+    const b = await make('PO-EB')
+    expect(a.statusCode).toBe(200)
+    expect(b.statusCode).toBe(200)
+    const res = await app.inject({
+      method: 'PATCH', url: '/api/orders/' + a.json().id, headers: { cookie },
+      payload: { customerPoNo: 'PO-EB' }
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('已被使用')
+  })
+
+  it('已确认且无业务痕迹的订单可编辑；有采购单后编辑被锁定', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const created = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: { customerId: customer.id, customerPoNo: 'PO-EC', items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 1 }] }
+    })
+    const orderId = created.json().id
+    await app.inject({ method: 'PATCH', url: '/api/orders/' + orderId + '/status', headers: { cookie }, payload: { status: 'confirmed' } })
+    // 无业务痕迹：可编辑
+    const ok = await app.inject({
+      method: 'PATCH', url: '/api/orders/' + orderId, headers: { cookie },
+      payload: { paymentTerms: 'NET 60', items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 2, unitPrice: 1 }] }
+    })
+    expect(ok.statusCode).toBe(200)
+    expect(ok.json().paymentTerms).toBe('NET 60')
+    // 有采购单：锁定
+    const supplier = await prisma.supplier.create({ data: { name: '供应商-锁定' } })
+    await prisma.purchaseOrder.create({ data: { orderNo: 'PO-LOCK-1', supplierId: supplier.id, salesOrderId: orderId } })
+    const locked = await app.inject({
+      method: 'PATCH', url: '/api/orders/' + orderId, headers: { cookie },
+      payload: { items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 3, unitPrice: 1 }] }
+    })
+    expect(locked.statusCode).toBe(400)
+    expect(locked.json().error).toContain('不能编辑')
+  })
+
+  it('非销售/老板角色编辑订单返回 403', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const created = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: { customerId: customer.id, customerPoNo: 'PO-403', items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 1 }] }
+    })
+    const warehouseCookie = await loginCookie(app, 'warehouse')
+    const res = await app.inject({
+      method: 'PATCH', url: '/api/orders/' + created.json().id, headers: { cookie: warehouseCookie },
+      payload: { paymentTerms: 'X' }
+    })
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('编辑订单明细为空或交期缺失返回 400', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const created = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: { customerId: customer.id, customerPoNo: 'PO-EMP', items: [{ productId: product.id, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 1, unitPrice: 1 }] }
+    })
+    const orderId = created.json().id
+    const empty = await app.inject({ method: 'PATCH', url: '/api/orders/' + orderId, headers: { cookie }, payload: { items: [] } })
+    expect(empty.statusCode).toBe(400)
+    const noDate = await app.inject({
+      method: 'PATCH', url: '/api/orders/' + orderId, headers: { cookie },
+      payload: { items: [{ productId: product.id, qty: 1, unitPrice: 1 }] }
+    })
+    expect(noDate.statusCode).toBe(400)
+    expect(noDate.json().error).toContain('客户交期')
+  })
+
   it('创建订单时 items 为空返回 400', async () => {
     const app = buildApp()
     const { customer, cookie } = await seedOrder(app)

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, message } from 'antd'
-import { PlusOutlined, MinusCircleOutlined, DeleteOutlined } from '@ant-design/icons'
+import { PlusOutlined, MinusCircleOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { dateStr, notifyError, orderPhaseLabel, phaseTagColor, statusLabel } from './common'
@@ -71,6 +71,76 @@ function todayStr(): string {
   return d.getFullYear() + '-' + m + '-' + day
 }
 
+// 订单明细行编辑（新建/编辑共用）：成品/数量/单价/客户交期/ZRH交期 一行排齐
+function OrderItemsFields({ products }: { products: Product[] }) {
+  return (
+    <Form.List name="items" initialValue={[{}]}>
+      {(fields, { add, remove }) => (
+        <>
+          {fields.map((field) => (
+            <Space key={field.key} align="center" size={6} wrap style={{ display: 'flex', marginBottom: 8 }}>
+              <Form.Item
+                name={[field.name, 'productId']}
+                rules={[{ required: true, message: '选择成品' }]}
+                style={{ width: 165, marginBottom: 0 }}
+              >
+                <Select
+                  placeholder="选择成品"
+                  showSearch
+                  optionFilterProp="label"
+                  options={products.map((p) => ({
+                    value: p.id,
+                    label: p.name + '（' + p.sku + '）',
+                  }))}
+                />
+              </Form.Item>
+              <Form.Item
+                name={[field.name, 'qty']}
+                rules={[{ required: true, message: '数量' }]}
+                style={{ width: 80, marginBottom: 0 }}
+              >
+                <InputNumber min={1} precision={0} step={1} placeholder="数量" style={{ width: 80 }} />
+              </Form.Item>
+              <Form.Item
+                name={[field.name, 'unitPrice']}
+                rules={[{ required: true, message: '单价' }]}
+                style={{ width: 90, marginBottom: 0 }}
+              >
+                <InputNumber min={0} placeholder="单价" style={{ width: 90 }} />
+              </Form.Item>
+              <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>客户交期</span>
+              <Form.Item
+                name={[field.name, 'customerDeliveryDate']}
+                rules={[{ required: true, message: '客户交期' }]}
+                style={{ marginBottom: 0 }}
+              >
+                <Input type="date" style={{ width: 135 }} />
+              </Form.Item>
+              <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>ZRH交期</span>
+              <Form.Item
+                name={[field.name, 'zrhDeliveryDate']}
+                rules={[{ required: true, message: 'ZRH交期' }]}
+                style={{ marginBottom: 0 }}
+              >
+                <Input type="date" style={{ width: 135 }} />
+              </Form.Item>
+              <Button
+                type="text"
+                danger
+                icon={<MinusCircleOutlined />}
+                onClick={() => remove(field.name)}
+              />
+            </Space>
+          ))}
+          <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+            添加明细
+          </Button>
+        </>
+      )}
+    </Form.List>
+  )
+}
+
 export default function Orders() {
   const { user } = useAuth()
   const [orders, setOrders] = useState<SalesOrder[]>([])
@@ -83,10 +153,13 @@ export default function Orders() {
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [form] = Form.useForm<OrderFormValues>()
+  const [editForm] = Form.useForm<OrderFormValues>()
   const [pageSize, setPageSize] = useState(10)
   const [deleteTarget, setDeleteTarget] = useState<SalesOrder | null>(null)
   const [deleteText, setDeleteText] = useState('')
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [editingTarget, setEditingTarget] = useState<SalesOrder | null>(null)
+  const [editSubmitting, setEditSubmitting] = useState(false)
 
   const canCreate = user?.role === 'sales'
   const canAdvance = user?.role === 'sales' || user?.role === 'boss'
@@ -150,6 +223,50 @@ export default function Orders() {
       notifyError(err)
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  function openEdit(r: SalesOrder) {
+    editForm.setFieldsValue({
+      customerId: r.customerId,
+      customerPoNo: r.customerPoNo ?? undefined,
+      orderDate: r.orderDate ? String(r.orderDate).slice(0, 10) : todayStr(),
+      paymentTerms: r.paymentTerms ?? undefined,
+      items: (r.items ?? []).map((it) => ({
+        productId: it.productId,
+        qty: it.qty,
+        unitPrice: Number(it.unitPrice),
+        customerDeliveryDate: it.customerDeliveryDate ? String(it.customerDeliveryDate).slice(0, 10) : undefined,
+        zrhDeliveryDate: it.zrhDeliveryDate ? String(it.zrhDeliveryDate).slice(0, 10) : undefined,
+      })),
+    })
+    setEditingTarget(r)
+  }
+
+  async function handleUpdate(values: OrderFormValues) {
+    if (!editingTarget) return
+    setEditSubmitting(true)
+    try {
+      await api.patch('/orders/' + editingTarget.id, {
+        customerId: values.customerId,
+        customerPoNo: values.customerPoNo,
+        orderDate: values.orderDate || undefined,
+        paymentTerms: values.paymentTerms || null,
+        items: (values.items ?? []).map((it) => ({
+          productId: Number(it.productId ?? 0),
+          qty: Number(it.qty ?? 0),
+          unitPrice: Number(it.unitPrice ?? 0),
+          customerDeliveryDate: it.customerDeliveryDate,
+          zrhDeliveryDate: it.zrhDeliveryDate,
+        })),
+      })
+      message.success('订单已更新')
+      setEditingTarget(null)
+      await load()
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setEditSubmitting(false)
     }
   }
 
@@ -271,6 +388,11 @@ export default function Orders() {
                 </Button>
               </Popconfirm>
             ) : null}
+            {r.status === 'draft' || r.status === 'confirmed' ? (
+              <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>
+                编辑
+              </Button>
+            ) : null}
             <Button
               size="small"
               danger
@@ -362,70 +484,41 @@ export default function Orders() {
               <Input placeholder="如 NET 60（自动带客户默认）" />
             </Form.Item>
           </div>
-          <Form.List name="items" initialValue={[{}]}>
-            {(fields, { add, remove }) => (
-              <>
-                {fields.map((field) => (
-                  <Space key={field.key} align="center" size={6} wrap style={{ display: 'flex', marginBottom: 8 }}>
-                    <Form.Item
-                      name={[field.name, 'productId']}
-                      rules={[{ required: true, message: '选择成品' }]}
-                      style={{ width: 165, marginBottom: 0 }}
-                    >
-                      <Select
-                        placeholder="选择成品"
-                        showSearch
-                        optionFilterProp="label"
-                        options={products.map((p) => ({
-                          value: p.id,
-                          label: p.name + '（' + p.sku + '）',
-                        }))}
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      name={[field.name, 'qty']}
-                      rules={[{ required: true, message: '数量' }]}
-                      style={{ width: 80, marginBottom: 0 }}
-                    >
-                      <InputNumber min={1} precision={0} step={1} placeholder="数量" style={{ width: 80 }} />
-                    </Form.Item>
-                    <Form.Item
-                      name={[field.name, 'unitPrice']}
-                      rules={[{ required: true, message: '单价' }]}
-                      style={{ width: 90, marginBottom: 0 }}
-                    >
-                      <InputNumber min={0} placeholder="单价" style={{ width: 90 }} />
-                    </Form.Item>
-                    <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>客户交期</span>
-                    <Form.Item
-                      name={[field.name, 'customerDeliveryDate']}
-                      rules={[{ required: true, message: '客户交期' }]}
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Input type="date" style={{ width: 135 }} />
-                    </Form.Item>
-                    <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>ZRH交期</span>
-                    <Form.Item
-                      name={[field.name, 'zrhDeliveryDate']}
-                      rules={[{ required: true, message: 'ZRH交期' }]}
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Input type="date" style={{ width: 135 }} />
-                    </Form.Item>
-                    <Button
-                      type="text"
-                      danger
-                      icon={<MinusCircleOutlined />}
-                      onClick={() => remove(field.name)}
-                    />
-                  </Space>
-                ))}
-                <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                  添加明细
-                </Button>
-              </>
-            )}
-          </Form.List>
+          <OrderItemsFields products={products} />
+        </Form>
+      </Modal>
+      <Modal
+        title={'编辑订单：' + (editingTarget?.orderNo ?? '')}
+        open={editingTarget !== null}
+        onCancel={() => setEditingTarget(null)}
+        onOk={() => editForm.submit()}
+        confirmLoading={editSubmitting}
+        width={820}
+      >
+        <Form form={editForm} layout="vertical" onFinish={handleUpdate}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px' }}>
+            <Form.Item name="customerId" label="客户" rules={[{ required: true, message: '请选择客户' }]}>
+              <Select
+                showSearch
+                optionFilterProp="label"
+                options={customers.map((c) => ({ value: c.id, label: c.name }))}
+                onChange={(v) => {
+                  const c = customers.find((x) => x.id === v)
+                  if (c?.defaultPaymentTerms) editForm.setFieldsValue({ paymentTerms: c.defaultPaymentTerms })
+                }}
+              />
+            </Form.Item>
+            <Form.Item name="customerPoNo" label="客户PO号（即订单号）" rules={[{ required: true, message: '请输入客户PO号' }]}>
+              <Input placeholder="修改PO号会同步修改订单号（撞已有PO号会被拦截）" />
+            </Form.Item>
+            <Form.Item name="orderDate" label="订单日期" rules={[{ required: true, message: '请选择订单日期' }]}>
+              <Input type="date" />
+            </Form.Item>
+            <Form.Item name="paymentTerms" label="付款条件">
+              <Input placeholder="如 NET 60（自动带客户默认）" />
+            </Form.Item>
+          </div>
+          <OrderItemsFields products={products} />
         </Form>
       </Modal>
       <Modal
