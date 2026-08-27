@@ -11,7 +11,7 @@ export const FEEDBACK_PATH = process.env.FEEDBACK_PATH
   ? resolve(process.env.FEEDBACK_PATH)
   : resolve(dirname(fileURLToPath(import.meta.url)), '../../../FEEDBACK.md')
 
-// 与当前 ERP 页面/功能一一对应（前端下拉同表）
+// 与当前 ERP 页面一一对应（前端下拉同表）
 export const FEEDBACK_MODULES = [
   '首页',
   '看板',
@@ -19,7 +19,7 @@ export const FEEDBACK_MODULES = [
   '采购',
   '库存',
   '出货排程',
-  '出货（单证中心）',
+  '出货',
   '财务',
   '基础资料',
   '账号登录',
