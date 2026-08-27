@@ -71,10 +71,14 @@ export default function Schedules() {
       return 0
     }
   })
-  // 打印出货计划：勾选行 + 装运方式
+  // 打印出货计划：勾选行 + 装运方式 + 出货时间
   const [printOpen, setPrintOpen] = useState(false)
   const [printSelected, setPrintSelected] = useState<number[]>([])
   const [printMode, setPrintMode] = useState('拼柜/不打板')
+  const [printDate, setPrintDate] = useState(() => {
+    const d = new Date()
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+  })
 
   const reminderCount = role === 'warehouse' ? rows.filter((r) => r.status === 'pending').length : role === 'sales' ? rows.filter((r) => r.status === 'picked').length : 0
   const unacked = Math.max(0, reminderCount - ackedCount)
@@ -293,30 +297,31 @@ export default function Schedules() {
     setPrintOpen(true)
   }
 
-  function printShipPlan(list: ScheduleRow[], mode: string) {
-    const byDate = new Map<string, ScheduleRow[]>()
+  function printShipPlan(list: ScheduleRow[], mode: string, shipDate: string) {
+    // 按目的地（到货仓）分组：同一目的地的排程放一起、小计合计 = 同一台车（参考 Endor 出货计划表）
+    const byHub = new Map<string, ScheduleRow[]>()
     for (const r of list) {
-      const d = r.promisedDate ? String(r.promisedDate).slice(0, 10) : '未定'
-      byDate.set(d, [...(byDate.get(d) ?? []), r])
+      byHub.set(r.hub.name, [...(byHub.get(r.hub.name) ?? []), r])
     }
-    const dates = [...byDate.keys()].sort()
+    const hubs = [...byHub.keys()].sort()
     const title = 'JMC Shipment Plan出货计划' + new Date().toISOString().slice(0, 10)
     let trs = ''
-    for (const d of dates) {
-      const group = byDate.get(d) ?? []
+    for (const hubName of hubs) {
+      const group = byHub.get(hubName) ?? []
       let seq = 0
       let sumQty = 0
+      trs += '<tr class="hub"><td colspan="10">目的地：' + esc(hubName) + '　（同一台车）</td></tr>'
       for (const r of group) {
         seq += 1
         sumQty += r.qty
-        trs += '<tr><td>' + seq + '</td><td>' + d + '</td><td>' + esc(r.hub.name) + '</td><td>' + esc(r.salesOrder.orderNo) + '</td><td>' + esc(r.product.sku) + '</td><td>' + esc(r.product.name) + '</td><td>' + r.qty + '</td><td></td><td></td><td></td></tr>'
+        trs += '<tr><td>' + seq + '</td><td>' + shipDate + '</td><td>' + esc(r.hub.name) + '</td><td>' + esc(r.salesOrder.orderNo) + '</td><td>' + esc(r.product.sku) + '</td><td>' + esc(r.product.name) + '</td><td>' + r.qty + '</td><td></td><td></td><td></td></tr>'
       }
-      trs += '<tr class="sub"><td></td><td></td><td></td><td></td><td></td><td>合计</td><td>' + sumQty + '</td><td></td><td></td><td></td></tr>'
+      trs += '<tr class="sub"><td></td><td></td><td></td><td></td><td></td><td>合计（' + esc(hubName) + '）</td><td>' + sumQty + '</td><td></td><td></td><td></td></tr>'
     }
     const html =
       '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
-      '<style>body{font-family:SimSun,Arial,sans-serif;margin:24px}h2{text-align:center}table{border-collapse:collapse;width:100%}td,th{border:1px solid #000;padding:4px 6px;font-size:12px}th{background:#f0f0f0}tr.sub td{font-weight:bold;background:#fafafa}@media print{h2{margin-top:0}}</style>' +
-      '</head><body><h2>' + esc(title) + '</h2><p style="text-align:center;margin:2px 0 12px;font-size:14px">装运方式：' + esc(mode) + '</p><table><thead><tr><th>序号</th><th>出货日期</th><th>目的地</th><th>订单号</th><th>品名</th><th>中文品名</th><th>数量</th><th>箱数</th><th>体积</th><th>重量</th></tr></thead><tbody>' +
+      '<style>body{font-family:SimSun,Arial,sans-serif;margin:24px}h2{text-align:center}table{border-collapse:collapse;width:100%}td,th{border:1px solid #000;padding:4px 6px;font-size:12px}th{background:#f0f0f0}tr.sub td{font-weight:bold;background:#fafafa}tr.hub td{font-weight:bold;background:#eef3fb;border:none;padding-top:10px}@media print{h2{margin-top:0}}</style>' +
+      '</head><body><h2>' + esc(title) + '</h2><p style="text-align:center;margin:2px 0 2px;font-size:14px">装运方式：' + esc(mode) + '</p><p style="text-align:center;margin:0 0 12px;font-size:14px">出货时间：' + esc(shipDate) + '</p><table><thead><tr><th>序号</th><th>出货日期</th><th>目的地</th><th>订单号</th><th>品名</th><th>中文品名</th><th>数量</th><th>箱数</th><th>体积</th><th>重量</th></tr></thead><tbody>' +
       trs +
       '</tbody></table><script>window.onload=function(){window.print()}<\/script></body></html>'
     const w = window.open('', '_blank', 'width=1000,height=700')
@@ -530,21 +535,27 @@ export default function Schedules() {
             message.warning('请勾选至少一条排程')
             return
           }
-          printShipPlan(list, printMode)
+          printShipPlan(list, printMode, printDate)
           setPrintOpen(false)
         }}
         okText="打印"
         width={760}
       >
-        <div style={{ marginBottom: 12 }}>
-          装运方式：
-          <Select
-            style={{ width: 170, marginLeft: 8 }}
-            value={printMode}
-            onChange={(v) => setPrintMode(v)}
-            options={PRINT_MODES.map((m) => ({ value: m, label: m }))}
-          />
-          <span style={{ marginLeft: 16, color: '#888', fontSize: 12 }}>已出货/已取消的排程不在列表内</span>
+        <div style={{ marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+          <span>
+            出货时间：
+            <Input type="date" value={printDate} onChange={(e) => setPrintDate(e.target.value)} style={{ width: 160, marginLeft: 8 }} />
+          </span>
+          <span>
+            装运方式：
+            <Select
+              style={{ width: 170, marginLeft: 8 }}
+              value={printMode}
+              onChange={(v) => setPrintMode(v)}
+              options={PRINT_MODES.map((m) => ({ value: m, label: m }))}
+            />
+          </span>
+          <span style={{ color: '#888', fontSize: 12 }}>同一目的地的排程会排在一起并合计（同一台车）；已出货/已取消不参与打印</span>
         </div>
         <Table<ScheduleRow>
           rowKey="id"

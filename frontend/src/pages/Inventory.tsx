@@ -66,6 +66,8 @@ interface PurchaseOrderOption {
   orderNo: string
   supplierName: string
   status: string
+  orderedQty?: number
+  receivedQty?: number
 }
 
 interface SupplierOption {
@@ -230,10 +232,14 @@ function ReceiptForm({ parts, suppliers, onDone }: { parts: Part[]; suppliers: S
             optionFilterProp="label"
             onChange={onPoChange}
             options={[
-              ...purchaseOrders.map((po) => ({
-                value: po.id,
-                label: po.orderNo + '（' + po.supplierName + '）',
-              })),
+              ...purchaseOrders.map((po) => {
+                const statusLabel = po.status === 'received' ? '已收齐' : po.status === 'partial' ? '部分收货' : '待收货'
+                const progress = po.receivedQty !== undefined && po.orderedQty !== undefined ? '｜已收 ' + po.receivedQty + '/' + po.orderedQty : ''
+                return {
+                  value: po.id,
+                  label: po.orderNo + '（' + po.supplierName + '｜' + statusLabel + progress + '）',
+                }
+              }),
               { value: 'self', label: '自购买（无采购单）' },
             ]}
           />
@@ -2094,6 +2100,48 @@ export default function Inventory() {
   const canManage = user?.role === 'warehouse' || user?.role === 'boss'
   const isWarehouse = user?.role === 'warehouse'
 
+  // 采购单到货提醒（仓库）：采购下单后库存收到提醒，点「知道了」不再提示
+  const [poReminder, setPoReminder] = useState(0)
+  const [poAcked, setPoAcked] = useState(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('erp-po-seen') ?? '{}') as Record<string, number>
+      return user ? (raw[user.role] ?? 0) : 0
+    } catch {
+      return 0
+    }
+  })
+  useEffect(() => {
+    if (!isWarehouse) return
+    let alive = true
+    const fetchCount = () =>
+      api
+        .get<Array<{ status: string }>>('/purchase-orders')
+        .then(({ data }) => {
+          if (alive) setPoReminder(data.filter((p) => p.status === 'open' || p.status === 'partial').length)
+        })
+        .catch(() => {})
+    void fetchCount()
+    const timer = setInterval(() => void fetchCount(), 60000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [isWarehouse])
+
+  function ackPoReminder() {
+    if (!user) return
+    try {
+      const raw = JSON.parse(localStorage.getItem('erp-po-seen') ?? '{}') as Record<string, number>
+      raw[user.role] = poReminder
+      localStorage.setItem('erp-po-seen', JSON.stringify(raw))
+    } catch {
+      /* ignore */
+    }
+    setPoAcked(poReminder)
+    window.dispatchEvent(new CustomEvent('po-ack'))
+    message.success('已收到，红点已清除')
+  }
+
   const items = [
     ...(canManage
       ? [
@@ -2174,6 +2222,19 @@ export default function Inventory() {
 
   return (
     <Card title="库存管理">
+      {isWarehouse && poReminder - poAcked > 0 ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={'有 ' + (poReminder - poAcked) + ' 张采购单待收货（采购刚下单）'}
+          action={
+            <Button size="small" onClick={ackPoReminder}>
+              知道了
+            </Button>
+          }
+        />
+      ) : null}
       <Tabs defaultActiveKey={canManage ? 'receipt' : 'stock'} items={items} />
     </Card>
   )

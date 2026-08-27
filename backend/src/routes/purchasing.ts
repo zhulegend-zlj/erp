@@ -200,9 +200,10 @@ export function purchasingRoutes(app: FastifyInstance) {
     // 采购单价口径（BUG-09）：与零件价格一致——仅 采购/老板/财务 可见，销售/仓库/工程剥离
     const role = (req as { user?: { role?: string } }).user?.role ?? ''
     const hidePrice = ['sales', 'warehouse', 'engineer'].includes(role)
-    const toRow = (po: Prisma.PurchaseOrderGetPayload<{ include: typeof PURCHASE_ORDER_INCLUDE }>) => {
+    const toRow = (po: Prisma.PurchaseOrderGetPayload<{ include: typeof PURCHASE_ORDER_INCLUDE }>, receivedQty: number) => {
       const totalAmount = po.items.reduce((sum, it) => sum + it.qty * it.unitPrice.toNumber(), 0)
       const paidAmount = po.payments.reduce((sum, p) => sum + p.amount.toNumber(), 0)
+      const orderedQty = po.items.reduce((sum, it) => sum + it.qty, 0)
       return {
         id: po.id,
         orderNo: po.orderNo,
@@ -215,6 +216,9 @@ export function purchasingRoutes(app: FastifyInstance) {
         totalAmount,
         paidAmount,
         outstanding: Math.max(0, totalAmount - paidAmount),
+        // 收货进度：仓库收货下拉里显示「已收 X/Y」（反馈）
+        orderedQty,
+        receivedQty,
         items: po.items.map((it) => ({
           id: it.id,
           partId: it.partId,
@@ -227,10 +231,25 @@ export function purchasingRoutes(app: FastifyInstance) {
       }
     }
 
+    // 批量附带每张采购单的已收数量
+    const enrich = async (rows: Array<Prisma.PurchaseOrderGetPayload<{ include: typeof PURCHASE_ORDER_INCLUDE }>>) => {
+      if (rows.length === 0) return []
+      const groups = await prisma.receipt.groupBy({
+        by: ['purchaseOrderId'],
+        where: { purchaseOrderId: { in: rows.map((r) => r.id) } },
+        _sum: { qty: true },
+      })
+      const receivedMap = new Map<number, number>()
+      groups.forEach((g) => {
+        if (g.purchaseOrderId !== null) receivedMap.set(g.purchaseOrderId, g._sum.qty ?? 0)
+      })
+      return rows.map((r) => toRow(r, receivedMap.get(r.id) ?? 0))
+    }
+
     const orderBy = { id: 'desc' as const }
     if (pagination.kind === 'none') {
       const rows = await prisma.purchaseOrder.findMany({ where, orderBy, include: PURCHASE_ORDER_INCLUDE })
-      return rows.map(toRow)
+      return enrich(rows)
     }
     const page = pagination.page
     const [rows, total] = await Promise.all([
@@ -243,7 +262,7 @@ export function purchasingRoutes(app: FastifyInstance) {
       }),
       prisma.purchaseOrder.count({ where }),
     ])
-    return pagedResult(rows.map(toRow), total, page)
+    return pagedResult(await enrich(rows), total, page)
   })
 
   // 采购单：仅 purchase 可创建

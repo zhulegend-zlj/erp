@@ -284,28 +284,30 @@ function AppShell() {
   const location = useLocation()
   const { token } = theme.useToken()
 
-  // 出货排程红点提醒：仓库=待备货数；销售=已备好待出货数（仓库备好后销售侧收到反馈）。
-  // 已读数按角色持久化到 localStorage（刷新/重登不复活）；点进排程页或点「知道了」即已读。
-  const SCHEDULE_SEEN_KEY = 'erp-schedule-seen'
-  function readScheduleSeen(role: string): number {
+  // 提醒红点（已读数按角色持久化 localStorage：刷新/重登不复活；点进对应页面或点「知道了」即已读）
+  function readSeenCount(key: string, role: string): number {
     try {
-      const raw = JSON.parse(localStorage.getItem(SCHEDULE_SEEN_KEY) ?? '{}') as Record<string, number>
+      const raw = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, number>
       return raw[role] ?? 0
     } catch {
       return 0
     }
   }
-  function writeScheduleSeen(role: string, count: number) {
+  function writeSeenCount(key: string, role: string, count: number) {
     try {
-      const raw = JSON.parse(localStorage.getItem(SCHEDULE_SEEN_KEY) ?? '{}') as Record<string, number>
+      const raw = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, number>
       raw[role] = count
-      localStorage.setItem(SCHEDULE_SEEN_KEY, JSON.stringify(raw))
+      localStorage.setItem(key, JSON.stringify(raw))
     } catch {
       /* ignore */
     }
   }
+  const SCHEDULE_SEEN_KEY = 'erp-schedule-seen'
+  const PO_SEEN_KEY = 'erp-po-seen'
+
+  // ① 出货排程提醒：仓库=待备货数；销售=已备好待出货数
   const [scheduleCount, setScheduleCount] = useState(0)
-  const [scheduleSeen, setScheduleSeen] = useState(() => (user ? readScheduleSeen(user.role) : 0))
+  const [scheduleSeen, setScheduleSeen] = useState(() => (user ? readSeenCount(SCHEDULE_SEEN_KEY, user.role) : 0))
   const scheduleBadge = Math.max(0, scheduleCount - scheduleSeen)
   useEffect(() => {
     if (!user) return
@@ -327,46 +329,81 @@ function AppShell() {
     }
   }, [user])
 
-  // 打开出货排程页 = 已查看，把当前数量记为已读（持久化）
+  // ② 采购单到货提醒（仓库）：采购下单后库存侧收到提醒
+  const [poCount, setPoCount] = useState(0)
+  const [poSeen, setPoSeen] = useState(() => (user ? readSeenCount(PO_SEEN_KEY, user.role) : 0))
+  const poBadge = Math.max(0, poCount - poSeen)
   useEffect(() => {
-    if (location.pathname === '/schedules' && user) {
-      setScheduleSeen(scheduleCount)
-      writeScheduleSeen(user.role, scheduleCount)
+    if (!user || user.role !== 'warehouse') return
+    let alive = true
+    const fetchCount = () =>
+      api
+        .get<Array<{ status: string }>>('/purchase-orders')
+        .then(({ data }) => {
+          if (alive) setPoCount(data.filter((p) => p.status === 'open' || p.status === 'partial').length)
+        })
+        .catch(() => {})
+    void fetchCount()
+    const timer = setInterval(() => void fetchCount(), 60000)
+    return () => {
+      alive = false
+      clearInterval(timer)
     }
-  }, [location.pathname, scheduleCount, user])
-
-  // 排程页点「知道了」后同步已读数（跨组件通知）
-  useEffect(() => {
-    const onAck = () => {
-      if (user) setScheduleSeen(readScheduleSeen(user.role))
-    }
-    window.addEventListener('schedule-ack', onAck)
-    return () => window.removeEventListener('schedule-ack', onAck)
   }, [user])
 
-  const menuItems: MenuProps['items'] = useMemo(
-    () =>
-      navItems
-        .filter((item) => user && item.roles.includes(user.role))
-        .map((item) => ({
+  // 打开对应页面 = 已查看（持久化）
+  useEffect(() => {
+    if (!user) return
+    if (location.pathname === '/schedules') {
+      setScheduleSeen(scheduleCount)
+      writeSeenCount(SCHEDULE_SEEN_KEY, user.role, scheduleCount)
+    }
+    if (location.pathname === '/inventory') {
+      setPoSeen(poCount)
+      writeSeenCount(PO_SEEN_KEY, user.role, poCount)
+    }
+  }, [location.pathname, scheduleCount, poCount, user])
+
+  // 页面内点「知道了」后同步已读数（跨组件通知）
+  useEffect(() => {
+    const onAck = () => {
+      if (user) setScheduleSeen(readSeenCount(SCHEDULE_SEEN_KEY, user.role))
+    }
+    const onPoAck = () => {
+      if (user) setPoSeen(readSeenCount(PO_SEEN_KEY, user.role))
+    }
+    window.addEventListener('schedule-ack', onAck)
+    window.addEventListener('po-ack', onPoAck)
+    return () => {
+      window.removeEventListener('schedule-ack', onAck)
+      window.removeEventListener('po-ack', onPoAck)
+    }
+  }, [user])
+
+  const menuItems: MenuProps['items'] = useMemo(() => {
+    const badgeFor = (path: string) => {
+      if (path === '/schedules') return { count: scheduleBadge, title: user?.role === 'warehouse' ? '待备货' : '已备好待出货' }
+      if (path === '/inventory') return { count: poBadge, title: '待收货采购单' }
+      return null
+    }
+    return navItems
+      .filter((item) => user && item.roles.includes(user.role))
+      .map((item) => {
+        const badge = badgeFor(item.path)
+        return {
           key: item.path,
           icon:
-            item.path === '/schedules' && scheduleBadge > 0 ? (
-              <Badge
-                count={scheduleBadge}
-                size="small"
-                offset={[6, -2]}
-                title={user?.role === 'warehouse' ? '待备货' : '已备好待出货'}
-              >
+            badge && badge.count > 0 ? (
+              <Badge count={badge.count} size="small" offset={[6, -2]} title={badge.title}>
                 {item.icon}
               </Badge>
             ) : (
               item.icon
             ),
           label: item.label,
-        })),
-    [user, scheduleBadge],
-  )
+        }
+      })
+  }, [user, scheduleBadge, poBadge])
 
   const [pwdOpen, setPwdOpen] = useState(false)
   const [pwdSubmitting, setPwdSubmitting] = useState(false)
