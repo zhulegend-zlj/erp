@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button, Drawer, FloatButton, Form, Input, Select, message } from 'antd'
 import { CommentOutlined } from '@ant-design/icons'
+import { useLocation } from 'react-router-dom'
 import { api } from '../api'
 import { useAuth } from '../auth'
 
@@ -25,6 +26,27 @@ const MODULE_OPTIONS = [
   { value: '其他', label: '其他' },
 ]
 
+// 当前页面 → 反馈模块（点开反馈时默认选中所在页面；无匹配则「其他」）
+const ROUTE_MODULES: Array<[string, string]> = [
+  ['/dashboard', '看板'],
+  ['/orders', '订单'],
+  ['/purchasing', '采购'],
+  ['/inventory', '库存'],
+  ['/schedules', '出货排程'],
+  ['/shipping', '出货'],
+  ['/finance', '财务'],
+  ['/masters', '基础资料'],
+  ['/login', '账号登录'],
+  ['/', '首页'],
+]
+
+function moduleForPath(pathname: string): string {
+  for (const [prefix, module] of ROUTE_MODULES) {
+    if (pathname === prefix || pathname.startsWith(prefix + '/')) return module
+  }
+  return '其他'
+}
+
 // 各角色只能给自己有权限的模块提反馈（与左侧菜单权限一致，后端同样校验）
 const ROLE_MODULES: Record<string, string[]> = {
   boss: MODULE_OPTIONS.map((m) => m.value),
@@ -48,12 +70,20 @@ function errMsg(err: unknown): string {
 
 export default function FeedbackWidget() {
   const { user } = useAuth()
+  const location = useLocation()
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [form] = Form.useForm<FeedbackFormValues>()
 
   const allowed = ROLE_MODULES[user?.role ?? ''] ?? ['其他']
   const options = MODULE_OPTIONS.filter((m) => allowed.includes(m.value))
+
+  // 打开时默认选中当前页面模块（本角色无权限的页面模块则回落「其他」）
+  function openWidget() {
+    const pageModule = moduleForPath(location.pathname)
+    form.setFieldsValue({ module: allowed.includes(pageModule) ? pageModule : '其他' })
+    setOpen(true)
+  }
 
   async function handleSubmit(values: FeedbackFormValues) {
     setSubmitting(true)
@@ -79,7 +109,7 @@ export default function FeedbackWidget() {
         icon={<CommentOutlined />}
         tooltip="意见反馈"
         style={{ position: 'fixed', right: 8, top: '50%', transform: 'translateY(-50%)' }}
-        onClick={() => setOpen(true)}
+        onClick={openWidget}
       />
       <Drawer
         title="意见反馈"
