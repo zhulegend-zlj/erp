@@ -11,9 +11,24 @@ export const FEEDBACK_PATH = process.env.FEEDBACK_PATH
   ? resolve(process.env.FEEDBACK_PATH)
   : resolve(dirname(fileURLToPath(import.meta.url)), '../../../FEEDBACK.md')
 
+// 与当前 ERP 页面/功能一一对应（前端下拉同表）
+export const FEEDBACK_MODULES = [
+  '首页',
+  '看板',
+  '订单',
+  '采购',
+  '库存',
+  '出货排程',
+  '出货（单证中心）',
+  '财务',
+  '基础资料',
+  '账号登录',
+  '其他',
+] as const
+
 const feedbackSchema = z.object({
   content: z.string({ error: '反馈内容必填' }).trim().min(1, '反馈内容必填').max(2000, '反馈内容过长（最多 2000 字）'),
-  module: z.string().optional(),
+  module: z.enum(FEEDBACK_MODULES).optional(),
   priority: z.string().optional(),
 })
 

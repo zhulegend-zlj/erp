@@ -35,4 +35,17 @@ describe('feedback', () => {
     })
     expect(res.statusCode).toBe(400)
   })
+
+  it('不存在的模块名返回 400（模块需匹配现有页面）', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'boss')
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/feedback',
+      headers: { cookie },
+      payload: { content: '测试', module: '不存在的模块', priority: '中' },
+    })
+    expect(res.statusCode).toBe(400)
+  })
 })

@@ -9,14 +9,18 @@ interface FeedbackFormValues {
   priority: string
 }
 
+// 与当前 ERP 实际页面/功能一一对应（方便归类处理）
 const MODULE_OPTIONS = [
+  { value: '首页', label: '首页（提醒/导航）' },
   { value: '看板', label: '看板' },
-  { value: '订单', label: '订单' },
+  { value: '订单', label: '订单（含一键导入图片/编辑/删除）' },
   { value: '采购', label: '采购' },
-  { value: '库存', label: '库存' },
-  { value: '出货', label: '出货' },
+  { value: '库存', label: '库存（流水/台账/退补货）' },
+  { value: '出货排程', label: '出货排程（含打印出货计划）' },
+  { value: '出货（单证中心）', label: '出货（单证中心：单证/节点/导出）' },
   { value: '财务', label: '财务' },
-  { value: '基础资料', label: '基础资料' },
+  { value: '基础资料', label: '基础资料（客户/供应商/成品/零件/BOM/到货仓/公司资料）' },
+  { value: '账号登录', label: '账号登录' },
   { value: '其他', label: '其他' },
 ]
 
