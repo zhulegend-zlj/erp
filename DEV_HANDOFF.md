@@ -81,6 +81,8 @@
 > 
 > **2026-08-27 专业测试 12 项缺陷全部修复（工厂，老板拍板「修」）**：测试报告见 `测试报告-20260827.md`（含修复记录第八节）。要点：①**并发一致性**（高×3）：收货/成品入库/出货事务加 SELECT FOR UPDATE 行锁（采购单/订单/排程按 id 排序防死锁）+ 出货加「已出+本批≤订单数量」双保险，新增 3 个并发回归（8并发收2只成2、5并发入12只成1、3并发出12只成1）；②**账实一致性**：出货后 PATCH 禁止改 成品/数量/单价、排程改量复用订单剩余校验、手工出货模式后端下线（400 提示走排程，UI 早已删除）；③**错误不泄漏**：新增 errors.routeError 统一出口（中文业务错误 400/404，其余 500 通用文案），替换各路由 message.includes catch；数量字段统一 max；Fastify 4xx 透传 400；④权限：排程「已备好」仅仓库可标；采购单单价对 sales/warehouse/engineer 剥离（采购/老板/财务可见）；⑤输入边界：名称/SKU/反馈/备注长度上限；⑥parse-image 无文件 400。测试 182→**188/188**、typecheck 干净、前端 build 通过、后端已重启。**家里电脑注意：拉代码后测试文件与出货流程口径已变（手工出货停用，测试 helper 新增 shipViaSchedule）。**
 > 
+> **2026-08-27 Line# 全链路（老板强调：OPO 表 Line# 是建单关键依据，最后要体现在 Official Invoice 上）**：**迁移 `202608270003_shipment_line_line_no`**（SalesOrderItem.lineNo 由 INT 改 TEXT（OPO 行号如 2.1）；ShipmentLine 新增 lineNo；**家里电脑拉代码后跑 `npx prisma migrate deploy`**）。链路：新建/编辑订单明细行「Line#」文本输入（照客户 OPO 表 Line Number+Shipment 抄，如 2.1）→ 排程出货时随订单行带进出货明细行（ShipmentLine.lineNo）→ 单证引擎 lineNoMap 优先用客户 Line# 原样打印到 Official Invoice 的 Line# 列（无 Line# 才按 SKU 顺序兜底 1.1/2.1）；编辑单证弹窗可改 Line#。compare-tpl.ts 对拍：Official Invoice 的 Line# 列与原表零差异（fixture lineNo='2.1'）。测试 **191/191**、typecheck 干净、前端 build 通过、后端已重启。
+> 
 > **下一阶段（2026-08-26 起）**：①老板导出三份单证验收效果并反馈微调；②采购拆单（5000 套拆多单）等与采购对接后落实；③工程补备件后销售即可对备件下单；④早期两条反馈已于 08-26 处理完（成品图片标签改「图片」、流水/收发台账评估结论=不重合保留，见 FEEDBACK.md）。
 >
 > **在别处继续开发**：直接 `git pull origin main` 后按第 6 节启动；首次记得 `npx prisma migrate deploy` 与重建账号（见第 3 节）。

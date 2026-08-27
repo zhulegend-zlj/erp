@@ -21,7 +21,7 @@ const company = {
 
 const line = (sku: string, nameEn: string, po: string, qty: number, price: number, lot: string, extra: Partial<DocLine> = {}): DocLine => ({
   product: { sku, name: 'x', nameEn, hsCode: null },
-  qty, unitPrice: String(price), customerPoNo: po, lotNo: lot,
+  qty, unitPrice: String(price), customerPoNo: po, lineNo: null, lotNo: lot,
   cartons: null, netWeight: null, grossWeight: null, cbm: null,
   containerNo: null, sealNo: null, hblNo: null, remark: null, ...extra,
 })
@@ -45,7 +45,7 @@ const official: ShipmentDocData = {
     shippedAt: new Date('2026-08-14'),
   },
   lines: [
-    line('CSP_V3_BPK', 'CLUBSPORT PEDALS V3 BRAKE PERFORMANCE KIT', '269776', 1264, 56.97, null, { remark: '100% payment' }),
+    line('CSP_V3_BPK', 'CLUBSPORT PEDALS V3 BRAKE PERFORMANCE KIT', '269776', 1264, 56.97, null, { remark: '100% payment', lineNo: '2.1' }),
   ],
   payments: [],
 }

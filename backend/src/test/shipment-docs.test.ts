@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import XLSX from 'xlsx'
 import { buildApp } from '../server'
 import { loginCookie, resetDb, shipViaSchedule } from './helpers'
 import { prisma } from '../db'
@@ -24,7 +25,7 @@ async function seedReadyOrder() {
       customerId: customer.id,
       zrhDeliveryDate: new Date(),
       status: 'ready',
-      items: { create: { productId: product.id, qty: 100, unitPrice: 56.97 } },
+      items: { create: { productId: product.id, qty: 100, unitPrice: 56.97, lineNo: '2.1' } },
     },
   })
   return { product, customer, order }
@@ -243,6 +244,12 @@ describe('shipment docs（出货明细行/单证导出/公司资料）', () => {
       expect(res.statusCode).toBe(200)
       expect(res.headers['content-type']).toContain('spreadsheetml')
       expect(res.rawPayload.length).toBeGreaterThan(1000)
+      if (type === 'official') {
+        // Line#（订单行号）要打印到 Official Invoice 的 Line# 列（A 列明细首行）
+        const wb = XLSX.read(res.rawPayload)
+        const sheet = wb.Sheets[wb.SheetNames[0]!]!
+        expect(sheet['A14']?.v ?? sheet['A14']?.w).toBe('2.1')
+      }
     }
     const bad = await app.inject({
       method: 'GET',

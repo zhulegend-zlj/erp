@@ -64,6 +64,7 @@ interface ShipmentLine {
   qty: number
   unitPrice: string
   customerPoNo: string | null
+  lineNo: string | null
   lotNo: string | null
   cartons: number | null
   netWeight: string | null
@@ -106,6 +107,7 @@ interface LineRow {
   qty?: number | null
   unitPrice?: number | null
   customerPoNo?: string
+  lineNo?: string
   lotNo?: string
   cartons?: number | null
   netWeight?: number | null
@@ -132,6 +134,7 @@ function toLineRow(l: ShipmentLine): LineRow {
     qty: l.qty,
     unitPrice: Number(l.unitPrice),
     customerPoNo: l.customerPoNo ?? undefined,
+    lineNo: l.lineNo ?? undefined,
     lotNo: l.lotNo ?? undefined,
     cartons: l.cartons,
     netWeight: l.netWeight ? Number(l.netWeight) : undefined,
@@ -172,6 +175,7 @@ function LinesEditor({
     { title: '数量', key: 'qty', width: 90, render: (_: unknown, r: LineRow) => <InputNumber min={1} precision={0} value={r.qty ?? undefined} onChange={(v) => patch(r.key, { qty: v })} style={{ width: '100%' }} /> },
     { title: '单价', key: 'unitPrice', width: 100, render: (_: unknown, r: LineRow) => <InputNumber min={0} precision={2} value={r.unitPrice ?? undefined} onChange={(v) => patch(r.key, { unitPrice: v })} style={{ width: '100%' }} /> },
     { title: '客户PO', key: 'customerPoNo', width: 110, render: (_: unknown, r: LineRow) => <Input value={r.customerPoNo ?? ''} onChange={(e) => patch(r.key, { customerPoNo: e.target.value })} /> },
+    { title: 'Line#', key: 'lineNo', width: 70, render: (_: unknown, r: LineRow) => <Input maxLength={20} placeholder="如 2.1" value={r.lineNo ?? ''} onChange={(e) => patch(r.key, { lineNo: e.target.value })} /> },
     { title: 'Lot', key: 'lotNo', width: 110, render: (_: unknown, r: LineRow) => <Input value={r.lotNo ?? ''} onChange={(e) => patch(r.key, { lotNo: e.target.value })} /> },
     { title: '箱数', key: 'cartons', width: 80, render: (_: unknown, r: LineRow) => <InputNumber min={0} precision={0} value={num(r.cartons)} onChange={(v) => patch(r.key, { cartons: v })} style={{ width: '100%' }} /> },
     { title: '净重(kg)', key: 'netWeight', width: 90, render: (_: unknown, r: LineRow) => <InputNumber min={0} precision={3} value={num(r.netWeight)} onChange={(v) => patch(r.key, { netWeight: v })} style={{ width: '100%' }} /> },
@@ -217,6 +221,7 @@ function linePayload(lines: LineRow[]) {
     qty: Number(l.qty ?? 0),
     unitPrice: Number(l.unitPrice ?? 0),
     customerPoNo: l.customerPoNo || null,
+    lineNo: l.lineNo?.trim() || null,
     lotNo: l.lotNo || null,
     cartons: typeof l.cartons === 'number' ? l.cartons : null,
     netWeight: typeof l.netWeight === 'number' ? l.netWeight : null,

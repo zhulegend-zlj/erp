@@ -151,7 +151,7 @@ model SalesOrderItem {
   productId            Int
   qty                  Int
   unitPrice            Decimal    @db.Decimal(12, 2)
-  lineNo               Int? // 客户PO行号 Line#（销售手动录入，照客户采购单抄）
+  lineNo               String? // 客户PO行号 Line#（销售按客户OPO表手动录入，如 2.1；原样打印到 Official Invoice）
   // 交期下放到明细行：同一张订单里不同成品可以有不同的交期
   customerDeliveryDate DateTime? // 客户交期（该成品客户要求到货日）
   zrhDeliveryDate      DateTime? // ZRH交货日期（承诺客户的交货日期 = 该成品生产完成目标）
@@ -266,6 +266,7 @@ model ShipmentLine {
   qty          Int
   unitPrice    Decimal           @db.Decimal(12, 2)
   customerPoNo String?
+  lineNo       String? // 客户PO行号 Line#（随订单明细行带出，打印到 Official Invoice）
   lotNo        String?
   cartons      Int?
   netWeight    Decimal?          @db.Decimal(12, 3)

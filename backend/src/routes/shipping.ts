@@ -30,6 +30,7 @@ const shipmentLineSchema = z.object({
   qty: z.number({ error: '数量必填' }).int().positive({ error: '数量必须为正整数' }).max(2147483647),
   unitPrice: z.number({ error: '单价必填' }).nonnegative().max(9999999999.99),
   customerPoNo: optionalText,
+  lineNo: z.string().trim().max(20, 'Line# 过长').nullable().optional(),
   lotNo: optionalText,
   cartons: z.number().int().nonnegative().nullable().optional(),
   netWeight: z.number().nonnegative().nullable().optional(),
@@ -123,6 +124,7 @@ interface LineToCreate {
   qty: number
   unitPrice: number
   customerPoNo: string | null
+  lineNo: string | null
   salesOrderId: number
   scheduleId: number | null
   lotNo: string | null
@@ -186,6 +188,8 @@ export function shippingRoutes(app: FastifyInstance) {
               qty: s.qty,
               unitPrice: Number(item.unitPrice),
               customerPoNo: order.customerPoNo,
+              // Line# 随订单明细行带出（销售按客户OPO表录入，打印到 Official Invoice）
+              lineNo: item.lineNo ?? null,
               salesOrderId: order.id,
               scheduleId: full.id,
               lotNo: null,
@@ -267,6 +271,7 @@ export function shippingRoutes(app: FastifyInstance) {
             qty: l.qty,
             unitPrice: l.unitPrice,
             customerPoNo: l.customerPoNo,
+            lineNo: l.lineNo,
             salesOrderId: l.salesOrderId,
             scheduleId: l.scheduleId,
             lotNo: l.lotNo,
@@ -374,6 +379,7 @@ export function shippingRoutes(app: FastifyInstance) {
                 salesOrderId: existing[i]?.salesOrderId ?? shipment.salesOrderId,
                 scheduleId: existing[i]?.scheduleId ?? null,
                 customerPoNo: l.customerPoNo || null,
+                lineNo: l.lineNo || null,
                 lotNo: l.lotNo || null,
                 cartons: l.cartons ?? null,
                 netWeight: l.netWeight ?? null,
@@ -550,6 +556,7 @@ export function shippingRoutes(app: FastifyInstance) {
             qty: l.qty,
             unitPrice: l.unitPrice.toString(),
             customerPoNo: l.customerPoNo,
+            lineNo: l.lineNo,
             lotNo: l.lotNo,
             cartons: l.cartons,
             netWeight: l.netWeight?.toString() ?? null,

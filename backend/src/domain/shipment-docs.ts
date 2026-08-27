@@ -9,6 +9,7 @@ export interface DocLine {
   qty: number
   unitPrice: string
   customerPoNo: string | null
+  lineNo: string | null // 客户OPO行号 Line#（销售录入，原样打印）
   lotNo: string | null
   cartons: number | null
   netWeight: string | null
@@ -112,14 +113,14 @@ function dueDateFor(shippedAt: Date, terms: string | null): Date | null {
   return excelDate(new Date(shippedAt.getTime() + days * 86400000))
 }
 
-/** 行号：按 Item#（SKU）分组编号，如 1.1 / 2.1（照模板） */
+/** 行号：优先用销售录入的客户 Line#（如 2.1）原样打印；没有才按 Item#（SKU）分组编号兜底 */
 function lineNoMap(lines: DocLine[]): Map<string, string> {
   const map = new Map<string, string>()
   let n = 0
   for (const l of lines) {
     if (!map.has(l.product.sku)) {
       n++
-      map.set(l.product.sku, n + '.1')
+      map.set(l.product.sku, l.lineNo?.trim() || n + '.1')
     }
   }
   return map

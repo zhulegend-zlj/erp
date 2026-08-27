@@ -25,14 +25,14 @@ describe('orders', () => {
       payload: {
         customerId: customer.id,
         customerPoNo: 'PO-TEST-1',
-        items: [{ productId: product.id, lineNo: 3, customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 100, unitPrice: 10 }]
+        items: [{ productId: product.id, lineNo: '2.1', customerDeliveryDate: '2026-09-30', zrhDeliveryDate: '2026-09-30', qty: 100, unitPrice: 10 }]
       }
     })
     expect(res.statusCode).toBe(200)
     expect(res.json().orderNo).toBe('PO-TEST-1')
     expect(res.json().status).toBe('draft')
     expect(res.json().items).toHaveLength(1)
-    expect(res.json().items[0].lineNo).toBe(3)
+    expect(res.json().items[0].lineNo).toBe('2.1')
   })
 
   it('重复的客户PO号创建订单返回 400', async () => {

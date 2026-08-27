@@ -57,7 +57,8 @@ function lineNoMap(lines: DocLine[]): Map<string, string> {
   for (const l of lines) {
     if (!map.has(l.product.sku)) {
       n++
-      map.set(l.product.sku, n + '.1')
+      // 优先用销售录入的客户 Line#（如 2.1）原样打印；没有才按 SKU 分组编号兜底
+      map.set(l.product.sku, l.lineNo?.trim() || n + '.1')
     }
   }
   return map
