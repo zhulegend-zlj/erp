@@ -1055,8 +1055,9 @@ export default function Masters() {
   // 客户：老板 + 采购 + 销售（销售最熟客户）；供应商：老板 + 采购
   const canWriteCustomer = role === 'boss' || role === 'purchase' || role === 'sales'
   const canWriteBusiness = role === 'boss' || role === 'purchase'
-  // 成品/零件/BOM：老板 + 工程
+  // 零件/BOM：老板 + 工程；成品：老板 + 工程 + 销售（老板要求销售可操作成品）
   const canWriteEngineering = role === 'boss' || role === 'engineer'
+  const canWriteProduct = role === 'boss' || role === 'engineer' || role === 'sales'
   // 采购在零件页只挂供应商
   const linkSupplierOnly = role === 'purchase'
   // 保持当前页签：切走再回来仍停在刚才浏览的页签（如零件页）
@@ -1081,7 +1082,7 @@ export default function Masters() {
           {
             key: 'products',
             label: '成品',
-            children: <CrudTab resource={RESOURCES[2]!} canWrite={canWriteEngineering} />,
+            children: <CrudTab resource={RESOURCES[2]!} canWrite={canWriteProduct} />,
           },
           {
             key: 'parts',

@@ -29,6 +29,8 @@ const SUPPLIER_WRITE_ROLES = ['boss', 'purchase'] as const
 const CUSTOMER_WRITE_ROLES = ['boss', 'purchase', 'sales'] as const
 // 成品/零件/BOM：工程与老板维护
 const ENGINEER_WRITE_ROLES = ['boss', 'engineer'] as const
+// 成品：老板 + 工程 + 销售（老板要求销售可操作成品）；零件/BOM 仍归工程
+const PRODUCT_WRITE_ROLES = ['boss', 'engineer', 'sales'] as const
 
 const customerSchema = z.object({
   name: z.string({ error: '名称必填' }).min(1, '名称必填').max(200, '名称过长（最多 200 字）'),
@@ -456,7 +458,7 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
 export function mastersRoutes(app: FastifyInstance) {
   registerCrud(app, { resource: 'customer', schema: customerSchema, writeRoles: CUSTOMER_WRITE_ROLES })
   registerCrud(app, { resource: 'supplier', schema: supplierSchema, writeRoles: SUPPLIER_WRITE_ROLES })
-  registerCrud(app, { resource: 'product', schema: productSchema, writeRoles: ENGINEER_WRITE_ROLES })
+  registerCrud(app, { resource: 'product', schema: productSchema, writeRoles: PRODUCT_WRITE_ROLES })
   registerCrud(app, { resource: 'part', schema: partSchema, writeRoles: ENGINEER_WRITE_ROLES })
 
   app.get('/api/products/:id/bom', { preHandler: requireRole(...READ_ROLES) }, async (req, reply) => {

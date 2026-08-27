@@ -61,6 +61,40 @@ describe('masters 权限（工程/采购分工）', () => {
     expect(purchaseBom.statusCode).toBe(403)
   })
 
+  it('销售可创建/修改/删除成品，但不能动零件与 BOM', async () => {
+    const app = buildApp()
+    const sales = await loginCookie(app, 'sales')
+
+    const created = await app.inject({
+      method: 'POST', url: '/api/products', headers: { cookie: sales },
+      payload: { sku: 'F-SALES', name: '销售成品', unit: '件' }
+    })
+    expect(created.statusCode).toBe(200)
+    const productId = created.json().id
+
+    const updated = await app.inject({
+      method: 'PUT', url: '/api/products/' + productId, headers: { cookie: sales },
+      payload: { sku: 'F-SALES', name: '销售成品改', unit: '件', nameEn: 'SALES PRODUCT' }
+    })
+    expect(updated.statusCode).toBe(200)
+    expect(updated.json().nameEn).toBe('SALES PRODUCT')
+
+    const partDenied = await app.inject({
+      method: 'POST', url: '/api/parts', headers: { cookie: sales },
+      payload: { sku: 'P-SALES', name: '销售零件' }
+    })
+    expect(partDenied.statusCode).toBe(403)
+
+    const bomDenied = await app.inject({
+      method: 'PUT', url: '/api/products/' + productId + '/bom', headers: { cookie: sales },
+      payload: [{ partId: 1, qty: 1 }]
+    })
+    expect(bomDenied.statusCode).toBe(403)
+
+    const deleted = await app.inject({ method: 'DELETE', url: '/api/products/' + productId, headers: { cookie: sales } })
+    expect(deleted.statusCode).toBe(200)
+  })
+
   it('purchase 无权新建零件，但可以给零件挂供应商', async () => {
     const app = buildApp()
     const engineerCookie = await loginCookie(app, 'engineer')
