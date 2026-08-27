@@ -1,10 +1,17 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import type { Prisma } from '@prisma/client'
 import { z } from 'zod'
+import { createWriteStream } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { pipeline } from 'node:stream/promises'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { parsePositiveInt } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
+import { parseOrderImageText, readOrderImageWithModlens } from '../domain/order-image'
 
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 
@@ -155,6 +162,71 @@ export function ordersRoutes(app: FastifyInstance) {
     })
 
     return reply.code(200).send(order)
+  })
+
+  // 一键导入图片建单：客户发的订单截图 → modlens 多模态读图 → 解析出 成品/数量/单价/need-by 日期，
+  // 并与库内成品 SKU 匹配（大小写不敏感、_ 与 - 互通）。读不出时返回 422，前端提示转人工（智能代理）再读。
+  app.post('/api/orders/parse-image', { preHandler: requireRole('sales', 'boss') }, async (req, reply) => {
+    const dir = await mkdtemp(join(tmpdir(), 'erp-parseimg-'))
+    let tmpName: string | null = null
+    try {
+      for await (const raw of req.parts()) {
+        const part = raw as { type: string; fieldname?: string; filename?: string; mimetype?: string; file?: NodeJS.ReadableStream }
+        if (part.type === 'file') {
+          if (tmpName !== null) {
+            part.file?.resume()
+            continue
+          }
+          const mimetype = part.mimetype ?? ''
+          const extByMime: Record<string, string> = {
+            'image/jpeg': '.jpg',
+            'image/png': '.png',
+            'image/webp': '.webp',
+            'image/gif': '.gif',
+          }
+          const ext = extByMime[mimetype]
+          if (!ext) {
+            part.file?.resume()
+            return reply.code(400).send({ error: '仅支持 jpg/png/webp/gif 图片' })
+          }
+          tmpName = join(dir, randomUUID() + ext)
+          await pipeline(part.file!, createWriteStream(tmpName))
+        }
+      }
+      if (!tmpName) return reply.code(400).send({ error: '未收到图片文件' })
+
+      const outcome = await readOrderImageWithModlens(tmpName)
+      if (!outcome.ok) {
+        return reply.code(422).send({ error: '图片识别失败（读不出内容），请换一张更清晰的截图；或转人工由智能代理读取后手工填写', detail: outcome.error })
+      }
+      const parsed = parseOrderImageText(outcome.rawText)
+      if (parsed.lines.length === 0) {
+        return reply.code(422).send({ error: '图片里没有识别出订单明细行（成品/数量/单价），请确认截图包含订单表格' })
+      }
+
+      // 与库内成品 SKU 匹配：大小写不敏感，_/-/空格归一化
+      const products = await prisma.product.findMany({ select: { id: true, sku: true, name: true } })
+      const norm = (s: string) => s.trim().toUpperCase().replace(/[_\-\s]+/g, '_')
+      const bySku = new Map(products.map((p) => [norm(p.sku), p]))
+      const lines = parsed.lines.map((l) => {
+        const matched = bySku.get(norm(l.sku))
+        return {
+          sku: l.sku,
+          qty: l.qty,
+          unitPrice: l.unitPrice,
+          needByDate: l.needByDate ?? null,
+          matched: matched ? { productId: matched.id, name: matched.name } : null,
+        }
+      })
+      return reply.code(200).send({ po: parsed.po, lines })
+    } catch (err) {
+      if ((err as { code?: string }).code === 'FST_REQ_FILE_TOO_LARGE') {
+        return reply.code(413).send({ error: '图片超过 20MB 限制' })
+      }
+      throw err
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
   })
 
   // 5 角色均可查看列表；可选 page/pageSize 分页；purchase/warehouse/engineer 隐藏销售单价；

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, message } from 'antd'
-import { PlusOutlined, MinusCircleOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons'
+import { PlusOutlined, MinusCircleOutlined, DeleteOutlined, EditOutlined, UploadOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { dateStr, notifyError, orderPhaseLabel, phaseTagColor, statusLabel } from './common'
@@ -160,6 +160,8 @@ export default function Orders() {
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [editingTarget, setEditingTarget] = useState<SalesOrder | null>(null)
   const [editSubmitting, setEditSubmitting] = useState(false)
+  const [parsingImage, setParsingImage] = useState(false)
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   const canCreate = user?.role === 'sales'
   const canAdvance = user?.role === 'sales' || user?.role === 'boss'
@@ -223,6 +225,51 @@ export default function Orders() {
       notifyError(err)
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  // 一键导入图片：客户截图 → 后端多模态读图 → 自动填明细行（成品/数量/单价/交期）
+  async function handleImageImport(file: File) {
+    setParsingImage(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const { data } = await api.post('/orders/parse-image', fd)
+      const parsed = data as {
+        po: string | null
+        lines: Array<{
+          sku: string
+          qty: number
+          unitPrice: number
+          needByDate: string | null
+          matched: { productId: number; name: string } | null
+        }>
+      }
+      const matched = parsed.lines.filter((l) => l.matched !== null)
+      const unmatched = parsed.lines.filter((l) => l.matched === null)
+      form.setFieldsValue({
+        items: parsed.lines.map((l) => ({
+          productId: l.matched?.productId,
+          qty: l.qty,
+          unitPrice: l.unitPrice,
+          customerDeliveryDate: l.needByDate ?? undefined,
+          zrhDeliveryDate: l.needByDate ?? undefined,
+        })),
+      })
+      if (parsed.po && !form.getFieldValue('customerPoNo')) {
+        form.setFieldsValue({ customerPoNo: parsed.po })
+      }
+      if (matched.length > 0) {
+        message.success('图片导入成功：识别 ' + parsed.lines.length + ' 行，' + matched.length + ' 行已自动匹配成品')
+      }
+      if (unmatched.length > 0) {
+        message.warning('以下料号未匹配到系统成品，请逐行手动选择成品：' + unmatched.map((l) => l.sku).join('、'))
+      }
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setParsingImage(false)
+      if (imageInputRef.current) imageInputRef.current.value = ''
     }
   }
 
@@ -483,6 +530,21 @@ export default function Orders() {
             <Form.Item name="paymentTerms" label="付款条件">
               <Input placeholder="如 NET 60（自动带客户默认）" />
             </Form.Item>
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <Button icon={<UploadOutlined />} loading={parsingImage} onClick={() => imageInputRef.current?.click()}>
+              一键导入图片（客户截图自动填明细）
+            </Button>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) void handleImageImport(f)
+              }}
+            />
           </div>
           <OrderItemsFields products={products} />
         </Form>
