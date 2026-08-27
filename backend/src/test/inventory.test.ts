@@ -601,4 +601,28 @@ describe('inventory', () => {
     const stock = await prisma.stock.findUnique({ where: { itemType_itemId: { itemType: 'part', itemId: part.id } } })
     expect(stock?.qtyOnHand).toBe(0)
   })
+
+  it('并发成品入库不超订单数量（BUG-02 回归：5 并发各入 12 台只成功 1 次）', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F-CONC2', name: '成品CONC2' } })
+    const customer = await prisma.customer.create({ data: { name: 'C-CONC2' } })
+    const order = await prisma.salesOrder.create({
+      data: {
+        orderNo: 'SO-CONC2', customerId: customer.id, zrhDeliveryDate: new Date(), status: 'confirmed',
+        items: { create: { productId: product.id, qty: 12, unitPrice: 1 } },
+      },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        app.inject({
+          method: 'POST', url: '/api/production-entries', headers: { cookie },
+          payload: { salesOrderId: order.id, productId: product.id, qty: 12 },
+        }),
+      ),
+    )
+    expect(results.filter((r) => r.statusCode === 200)).toHaveLength(1)
+    const total = await prisma.productionEntry.aggregate({ where: { salesOrderId: order.id }, _sum: { qty: true } })
+    expect(total._sum.qty).toBe(12)
+  })
 })

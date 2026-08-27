@@ -69,6 +69,24 @@ export function prismaErrorInfo(err: unknown): ErrorInfo | null {
   return null
 }
 
+/**
+ * 路由 catch 统一出口：业务错误（我们主动 throw 的中文消息）按语义返回 400/404；
+ * 其余（Prisma 校验/连接器等内部错误）一律 500 且不回显内部细节——防止路径/源码/SQL 泄漏。
+ * notFoundKeys：命中这些关键词的业务错误返回 404（如 不存在），默认 400。
+ */
+export function routeError(err: unknown, notFoundKeys: string[] = []): { status: number; message: string } {
+  if (!(err instanceof Error)) return { status: 500, message: '服务器错误，请稍后重试' }
+  const message = err.message
+  const isBusiness = /[\u4e00-\u9fa5]/.test(message)
+  if (isBusiness) {
+    const status = notFoundKeys.some((k) => message.includes(k)) ? 404 : 400
+    return { status, message }
+  }
+  const info = prismaErrorInfo(err)
+  if (info) return { status: info.status, message: info.message }
+  return { status: 500, message: '服务器错误，请稍后重试' }
+}
+
 /** 判断一个值是否可作为正整数 ID。 */
 export function parsePositiveInt(value: unknown): number | null {
   if (typeof value === 'number') {

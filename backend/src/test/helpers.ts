@@ -10,6 +10,52 @@ export function createTestApp(): FastifyInstance {
 }
 
 /**
+ * 走正式出货路径：建排程 → 仓库备好 → 从排程出货（无排程手工出货已停用）。
+ * 返回 POST /api/shipments 的响应（失败时返回对应 4xx 响应，供用例断言）。
+ */
+export async function shipViaSchedule(
+  app: FastifyInstance,
+  cookie: string,
+  orderId: number,
+  productId: number,
+  qty: number,
+  opts: { hubName?: string } = {},
+) {
+  const hub = await prisma.shipToHub.create({
+    data: { name: opts.hubName ?? 'TEST-HUB-' + orderId + '-' + Math.random().toString(36).slice(2, 8) },
+  })
+  const sched = await app.inject({
+    method: 'POST',
+    url: '/api/schedules',
+    headers: { cookie },
+    payload: {
+      salesOrderId: orderId,
+      productId,
+      qty,
+      hubId: hub.id,
+      needByDate: '2026-09-30',
+      promisedDate: '2026-09-30',
+    },
+  })
+  if (sched.statusCode !== 200) return sched
+  const schedId = sched.json().id as number
+  const wh = await loginCookie(app, 'warehouse')
+  const pick = await app.inject({
+    method: 'PATCH',
+    url: '/api/schedules/' + schedId,
+    headers: { cookie: wh },
+    payload: { status: 'picked' },
+  })
+  if (pick.statusCode !== 200) return pick
+  return app.inject({
+    method: 'POST',
+    url: '/api/shipments',
+    headers: { cookie },
+    payload: { hubId: hub.id, schedules: [{ id: schedId, qty }] },
+  })
+}
+
+/**
  * 按外键依赖顺序清空所有业务表，保证集成测试在共享 PostgreSQL 上互相隔离。
  * 注意：user 表不动，loginCookie 依赖对测试账号的 upsert。
  */

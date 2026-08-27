@@ -252,4 +252,29 @@ describe('sales workflow（订单字段/排程/部分出货/权限/提醒）', (
     expect(put.statusCode).toBe(200)
     expect(put.json().defaultMark).toBe('FANATEC')
   })
+
+  it('销售不能把排程标记已备好（BUG-08 回归，仅仓库可标）', async () => {
+    const app = buildApp()
+    const sales = await loginCookie(app, 'sales')
+    const { order, product } = await seedOrder('SO-S-PICK', 'PO-PICK', 10, 5)
+    const hub = await prisma.shipToHub.create({ data: { name: 'TEST-HUB-PICK' } })
+    const sched = await app.inject({
+      method: 'POST', url: '/api/schedules', headers: { cookie: sales },
+      payload: { salesOrderId: order.id, productId: product.id, qty: 5, hubId: hub.id, needByDate: '2026-09-30', promisedDate: '2026-09-30' },
+    })
+    expect(sched.statusCode).toBe(200)
+    const picked = await app.inject({
+      method: 'PATCH', url: '/api/schedules/' + sched.json().id, headers: { cookie: sales },
+      payload: { status: 'picked' },
+    })
+    expect(picked.statusCode).toBe(400)
+    expect(picked.json().error).toContain('只有仓库')
+    // 仓库标则成功
+    const warehouse = await loginCookie(app, 'warehouse')
+    const whPick = await app.inject({
+      method: 'PATCH', url: '/api/schedules/' + sched.json().id, headers: { cookie: warehouse },
+      payload: { status: 'picked' },
+    })
+    expect(whPick.statusCode).toBe(200)
+  })
 })

@@ -224,10 +224,12 @@ export function ordersRoutes(app: FastifyInstance) {
       })
       return reply.code(200).send({ po: parsed.po, lines })
     } catch (err) {
+      // multipart 解析失败/无文件/非 multipart 请求统一 400，不再落 500（BUG-12）
       if ((err as { code?: string }).code === 'FST_REQ_FILE_TOO_LARGE') {
         return reply.code(413).send({ error: '图片超过 20MB 限制' })
       }
-      throw err
+      if (reply.sent) return
+      return reply.code(400).send({ error: '未收到图片文件或格式不正确（请用表单上传图片字段 file）' })
     } finally {
       await rm(dir, { recursive: true, force: true }).catch(() => {})
     }

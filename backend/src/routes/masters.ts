@@ -31,7 +31,7 @@ const CUSTOMER_WRITE_ROLES = ['boss', 'purchase', 'sales'] as const
 const ENGINEER_WRITE_ROLES = ['boss', 'engineer'] as const
 
 const customerSchema = z.object({
-  name: z.string({ error: '名称必填' }).min(1, '名称必填'),
+  name: z.string({ error: '名称必填' }).min(1, '名称必填').max(200, '名称过长（最多 200 字）'),
   country: z.string().optional(),
   contact: z.string().optional(),
   // 单证字段：收货地址/VAT/EORI/通知方（发票/装箱单自动带出）
@@ -47,13 +47,13 @@ const customerSchema = z.object({
 })
 
 const supplierSchema = z.object({
-  name: z.string({ error: '名称必填' }).min(1, '名称必填'),
+  name: z.string({ error: '名称必填' }).min(1, '名称必填').max(200, '名称过长（最多 200 字）'),
   contact: z.string().optional(),
 })
 
 const productSchema = z.object({
-  sku: z.string({ error: 'SKU 必填' }).min(1, 'SKU 必填'),
-  name: z.string({ error: '名称必填' }).min(1, '名称必填'),
+  sku: z.string({ error: 'SKU 必填' }).min(1, 'SKU 必填').max(60, 'SKU 过长（最多 60 字）'),
+  name: z.string({ error: '名称必填' }).min(1, '名称必填').max(200, '名称过长（最多 200 字）'),
   // 单证字段：英文品名（发票 Description 列）、海关编码
   nameEn: z.string().nullable().optional(),
   hsCode: z.string().nullable().optional(),
@@ -62,8 +62,8 @@ const productSchema = z.object({
 })
 
 const partSchema = z.object({
-  sku: z.string({ error: 'SKU 必填' }).min(1, 'SKU 必填'),
-  name: z.string({ error: '名称必填' }).min(1, '名称必填'),
+  sku: z.string({ error: 'SKU 必填' }).min(1, 'SKU 必填').max(60, 'SKU 过长（最多 60 字）'),
+  name: z.string({ error: '名称必填' }).min(1, '名称必填').max(200, '名称过长（最多 200 字）'),
   nameEn: z.string().nullable().optional(),
   unit: z.string().optional(),
   spec: z.string().nullable().optional(),

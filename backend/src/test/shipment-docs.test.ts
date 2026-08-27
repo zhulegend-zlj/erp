@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { buildApp } from '../server'
-import { loginCookie, resetDb } from './helpers'
+import { loginCookie, resetDb, shipViaSchedule } from './helpers'
 import { prisma } from '../db'
 
 async function seedReadyOrder() {
@@ -35,16 +35,35 @@ describe('shipment docs（出货明细行/单证导出/公司资料）', () => {
     await resetDb()
   })
 
-  it('出货带明细行：按行扣库存、字段落库、订单变已出货', async () => {
+  it('两个排程拼票出货：按行扣库存、字段落库、订单变已出货', async () => {
     const app = buildApp()
     const { product, order } = await seedReadyOrder()
     const cookie = await loginCookie(app, 'sales')
+    // 两条排程（60+40）拼一票，替代原手工明细行拆行
+    const hub = await prisma.shipToHub.create({ data: { name: 'TEST-HUB-DOC' } })
+    const mk = (qty: number) =>
+      app.inject({
+        method: 'POST', url: '/api/schedules', headers: { cookie },
+        payload: { salesOrderId: order.id, productId: product.id, qty, hubId: hub.id, needByDate: '2026-09-30', promisedDate: '2026-09-30' }
+      })
+    const s1 = await mk(60)
+    const s2 = await mk(40)
+    expect(s1.statusCode).toBe(200)
+    expect(s2.statusCode).toBe(200)
+    const wh = await loginCookie(app, 'warehouse')
+    await app.inject({ method: 'PATCH', url: '/api/schedules/' + s1.json().id, headers: { cookie: wh }, payload: { status: 'picked' } })
+    await app.inject({ method: 'PATCH', url: '/api/schedules/' + s2.json().id, headers: { cookie: wh }, payload: { status: 'picked' } })
+
     const res = await app.inject({
       method: 'POST',
       url: '/api/shipments',
       headers: { cookie },
       payload: {
-        salesOrderId: order.id,
+        hubId: hub.id,
+        schedules: [
+          { id: s1.json().id, qty: 60 },
+          { id: s2.json().id, qty: 40 },
+        ],
         invoiceNo: 'ZRH20260814006',
         paymentTerms: 'NET 60',
         incoterm: 'FCA',
@@ -56,10 +75,6 @@ describe('shipment docs（出货明细行/单证导出/公司资料）', () => {
         etd: '2026-08-18',
         eta: '2026-09-23',
         shippingInstructions: 'ALU 1264 pcs',
-        lines: [
-          { productId: product.id, qty: 60, unitPrice: 56.97, customerPoNo: '269776', lotNo: 'ABO5D6341', cartons: 1, netWeight: 44.1, grossWeight: 254.94, cbm: 1.512, containerNo: 'SELU4535980', sealNo: 'M4492285', hblNo: 'SZX31192884', remark: '100% payment' },
-          { productId: product.id, qty: 40, unitPrice: 56.97, customerPoNo: '269776', lotNo: 'ABO5D6341', cartons: 1, netWeight: 0.14, grossWeight: 0.22, cbm: 0.015552, containerNo: 'SELU4535980', sealNo: 'M4492285', hblNo: 'SZX31192884' },
-        ],
       },
     })
     expect(res.statusCode).toBe(200)
@@ -67,7 +82,22 @@ describe('shipment docs（出货明细行/单证导出/公司资料）', () => {
     expect(body.invoiceNo).toBe('ZRH20260814006')
     expect(body.vesselVoyage).toContain('CMA CGM ZHENG HE')
     expect(body.lines).toHaveLength(2)
-    expect(body.lines[0]).toMatchObject({ qty: 60, customerPoNo: '269776', hblNo: 'SZX31192884' })
+    expect(body.lines[0].qty).toBe(60)
+
+    // 出货后补录行级单证（箱数/毛净重/CBM/柜号/HBL 等），不允许改数量
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: '/api/shipments/' + body.id,
+      headers: { cookie },
+      payload: {
+        lines: [
+          { productId: product.id, qty: 60, unitPrice: 56.97, customerPoNo: '269776', lotNo: 'ABO5D6341', cartons: 1, netWeight: 44.1, grossWeight: 254.94, cbm: 1.512, containerNo: 'SELU4535980', sealNo: 'M4492285', hblNo: 'SZX31192884', remark: '100% payment' },
+          { productId: product.id, qty: 40, unitPrice: 56.97, customerPoNo: '269776', lotNo: 'ABO5D6341', cartons: 1, netWeight: 0.14, grossWeight: 0.22, cbm: 0.015552, containerNo: 'SELU4535980', sealNo: 'M4492285', hblNo: 'SZX31192884' },
+        ],
+      },
+    })
+    expect(patch.statusCode).toBe(200)
+    expect(patch.json().lines[0]).toMatchObject({ qty: 60, customerPoNo: '269776', hblNo: 'SZX31192884' })
 
     const stock = await prisma.stock.findUnique({
       where: { itemType_itemId: { itemType: 'product', itemId: product.id } },
@@ -77,34 +107,21 @@ describe('shipment docs（出货明细行/单证导出/公司资料）', () => {
     expect(updated?.status).toBe('shipped')
   })
 
-  it('出货不带明细行时自动按订单明细生成行', async () => {
+  it('排程出货自动按排程生成行', async () => {
     const app = buildApp()
     const { product, order } = await seedReadyOrder()
     const cookie = await loginCookie(app, 'sales')
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/shipments',
-      headers: { cookie },
-      payload: { salesOrderId: order.id },
-    })
+    const res = await shipViaSchedule(app, cookie, order.id, product.id, 100)
     expect(res.statusCode).toBe(200)
     expect(res.json().lines).toHaveLength(1)
     expect(res.json().lines[0]).toMatchObject({ productId: product.id, qty: 100 })
   })
 
-  it('部分出货：90/100 出货成功，订单保持待出货并显示已出，超量出货拒绝', async () => {
+  it('部分出货：90/100 出货成功，订单保持待出货并显示已出，超量排程拒绝', async () => {
     const app = buildApp()
     const { product, order } = await seedReadyOrder()
     const cookie = await loginCookie(app, 'sales')
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/shipments',
-      headers: { cookie },
-      payload: {
-        salesOrderId: order.id,
-        lines: [{ productId: product.id, qty: 90, unitPrice: 56.97 }],
-      },
-    })
+    const res = await shipViaSchedule(app, cookie, order.id, product.id, 90)
     expect(res.statusCode).toBe(200)
     expect(res.json().lines[0].qty).toBe(90)
     const stock = await prisma.stock.findUnique({
@@ -117,44 +134,32 @@ describe('shipment docs（出货明细行/单证导出/公司资料）', () => {
     const detail = await app.inject({ method: 'GET', url: '/api/orders/' + order.id, headers: { cookie } })
     expect(detail.json().shippedQty).toBe(90)
 
-    // 超出订单数量的出货拒绝
+    // 超出订单剩余数量的排程被拒绝
     const over = await app.inject({
       method: 'POST',
-      url: '/api/shipments',
+      url: '/api/schedules',
       headers: { cookie },
       payload: {
-        salesOrderId: order.id,
-        lines: [{ productId: product.id, qty: 20, unitPrice: 56.97 }],
+        salesOrderId: order.id, productId: product.id, qty: 20,
+        hubId: (await prisma.shipToHub.create({ data: { name: 'TEST-HUB-OVER' } })).id,
+        needByDate: '2026-09-30', promisedDate: '2026-09-30',
       },
     })
     expect(over.statusCode).toBe(400)
-    expect(over.json().error).toContain('超过订单数量')
+    expect(over.json().error).toContain('超过订单剩余')
 
     // 出完剩余 10 台 → 订单自动已出货
-    const rest = await app.inject({
-      method: 'POST',
-      url: '/api/shipments',
-      headers: { cookie },
-      payload: {
-        salesOrderId: order.id,
-        lines: [{ productId: product.id, qty: 10, unitPrice: 56.97 }],
-      },
-    })
+    const rest = await shipViaSchedule(app, cookie, order.id, product.id, 10)
     expect(rest.statusCode).toBe(200)
     const done = await prisma.salesOrder.findUnique({ where: { id: order.id } })
     expect(done?.status).toBe('shipped')
   })
 
-  it('PATCH 出货单更新单证字段与明细行（不动库存），仅 sales 可改', async () => {
+  it('PATCH 出货单更新单证字段（不动库存、不能改数量），仅 sales 可改', async () => {
     const app = buildApp()
     const { product, order } = await seedReadyOrder()
     const cookie = await loginCookie(app, 'sales')
-    const created = await app.inject({
-      method: 'POST',
-      url: '/api/shipments',
-      headers: { cookie },
-      payload: { salesOrderId: order.id },
-    })
+    const created = await shipViaSchedule(app, cookie, order.id, product.id, 100)
     const id = created.json().id
 
     const patch = await app.inject({
@@ -173,6 +178,16 @@ describe('shipment docs（出货明细行/单证导出/公司资料）', () => {
     expect(patch.json().lines).toHaveLength(1)
     expect(patch.json().lines[0].hblNo).toBe('SZX31192884')
 
+    // 出货后不能改数量/成品（账实一致性）
+    const badQty = await app.inject({
+      method: 'PATCH',
+      url: '/api/shipments/' + id,
+      headers: { cookie },
+      payload: { lines: [{ productId: product.id, qty: 120, unitPrice: 56.97 }] },
+    })
+    expect(badQty.statusCode).toBe(400)
+    expect(badQty.json().error).toContain('不能修改')
+
     const stock = await prisma.stock.findUnique({
       where: { itemType_itemId: { itemType: 'product', itemId: product.id } },
     })
@@ -190,14 +205,22 @@ describe('shipment docs（出货明细行/单证导出/公司资料）', () => {
 
   it('三份单证导出：返回 xlsx，非法 type 400，非销售/老板 403', async () => {
     const app = buildApp()
-    const { order } = await seedReadyOrder()
+    const { product, order } = await seedReadyOrder()
     const cookie = await loginCookie(app, 'sales')
+    const hub = await prisma.shipToHub.create({ data: { name: 'TEST-HUB-EXP' } })
+    const sched = await app.inject({
+      method: 'POST', url: '/api/schedules', headers: { cookie },
+      payload: { salesOrderId: order.id, productId: product.id, qty: 100, hubId: hub.id, needByDate: '2026-09-30', promisedDate: '2026-09-30' }
+    })
+    const wh = await loginCookie(app, 'warehouse')
+    await app.inject({ method: 'PATCH', url: '/api/schedules/' + sched.json().id, headers: { cookie: wh }, payload: { status: 'picked' } })
     const created = await app.inject({
       method: 'POST',
       url: '/api/shipments',
       headers: { cookie },
       payload: {
-        salesOrderId: order.id,
+        hubId: hub.id,
+        schedules: [{ id: sched.json().id, qty: 100 }],
         invoiceNo: 'ZRH20260814006',
         paymentTerms: 'NET 60',
         incoterm: 'FCA',

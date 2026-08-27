@@ -293,7 +293,13 @@ describe('purchasing', () => {
       outstanding: 25,
     })
     expect(row.items).toHaveLength(1)
-    expect(row.items[0]).toMatchObject({ partId: part.id, sku: 'P-LIST', name: '螺丝LIST', qty: 10, unitPrice: 2.5 })
+    // 采购单价口径：仓库不可见，采购/老板/财务可见
+    expect(row.items[0]).toMatchObject({ partId: part.id, sku: 'P-LIST', name: '螺丝LIST', qty: 10 })
+    expect(row.items[0].unitPrice).toBeUndefined()
+    const purchaseCookie = await loginCookie(app, 'purchase')
+    const res2 = await app.inject({ method: 'GET', url: '/api/purchase-orders', headers: { cookie: purchaseCookie } })
+    const row2 = res2.json().find((r: any) => r.id === po.id)
+    expect(row2.items[0].unitPrice).toBe(2.5)
   })
 
   it('需求计算仅 purchase/boss 可访问（403）', async () => {
@@ -342,5 +348,26 @@ describe('purchasing', () => {
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().error).toContain('未设置供应商')
+  })
+
+  it('并发收货不超订购量（BUG-01 回归：8 并发收 2 台只成功 2 次）', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商-CONC' } })
+    const part = await prisma.part.create({ data: { sku: 'P-CONC', name: '零件CONC', supplierId: supplier.id } })
+    const po = await prisma.purchaseOrder.create({
+      data: { orderNo: 'PO-CONC', supplierId: supplier.id, items: { create: { partId: part.id, qty: 2, unitPrice: 1 } } },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'warehouse')
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        app.inject({
+          method: 'POST', url: '/api/receipts', headers: { cookie },
+          payload: { purchaseOrderId: po.id, items: [{ partId: part.id, qty: 1 }] },
+        }),
+      ),
+    )
+    expect(results.filter((r) => r.statusCode === 200)).toHaveLength(2)
+    const receipts = await prisma.receipt.findMany({ where: { purchaseOrderId: po.id } })
+    expect(receipts.reduce((s, r) => s + r.qty, 0)).toBe(2)
   })
 })

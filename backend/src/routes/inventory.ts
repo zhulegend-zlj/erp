@@ -5,14 +5,18 @@ import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
 import { usageDisplay } from '../domain/bom'
 import { refreshProducingPhase, refreshProducingPhaseAfterUndo } from '../domain/order-phase'
-import { parsePositiveInt, prismaErrorInfo } from '../errors'
+import { parsePositiveInt, prismaErrorInfo, routeError } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
 
 const ALL_ROLES = ['boss', 'purchase', 'warehouse', 'sales', 'finance'] as const
 
 const issueItemSchema = z.object({
   partId: z.number({ error: '零件必填' }).int({ error: '零件必须为整数' }).positive({ error: '零件必须为正整数' }),
-  qty: z.number({ error: '数量必填' }).int({ error: '数量必须为整数' }).positive({ error: '数量必须为正整数' }),
+  qty: z
+    .number({ error: '数量必填' })
+    .int({ error: '数量必须为整数' })
+    .positive({ error: '数量必须为正整数' })
+    .max(2147483647, { error: '数量超出允许范围' }),
 })
 
 const issueSchema = z.object({
@@ -25,7 +29,11 @@ const issueSchema = z.object({
 const productionEntrySchema = z.object({
   salesOrderId: z.number({ error: '订单必填' }).int({ error: '订单必须为整数' }).positive({ error: '订单必须为正整数' }),
   productId: z.number({ error: '成品必填' }).int({ error: '成品必须为整数' }).positive({ error: '成品必须为正整数' }),
-  qty: z.number({ error: '数量必填' }).int({ error: '数量必须为整数' }).positive({ error: '数量必须为正整数' }),
+  qty: z
+    .number({ error: '数量必填' })
+    .int({ error: '数量必须为整数' })
+    .positive({ error: '数量必须为正整数' })
+    .max(2147483647, { error: '数量超出允许范围' }),
   entryDate: z
     .string({ error: '入库日期必须为字符串' })
     .refine((v) => !Number.isNaN(Date.parse(v)), '入库日期必须为合法日期')
@@ -89,15 +97,8 @@ export function inventoryRoutes(app: FastifyInstance) {
       })
       return reply.code(200).send({ ok: true, issues })
     } catch (err) {
-      const message = err instanceof Error ? err.message : '领料失败'
-      if (message.includes('库存不足')) return reply.code(400).send({ error: message })
-      if (message.includes('订单不存在')) return reply.code(404).send({ error: message })
-      if (message.includes('不能领料') || message.includes('不能重复') || message.includes('不在该订单')) {
-        return reply.code(400).send({ error: message })
-      }
-      const info = prismaErrorInfo(err)
-      if (info) return reply.code(info.status).send({ error: info.message })
-      return reply.code(500).send({ error: '领料失败，请稍后重试' })
+      const e = routeError(err, ['订单不存在'])
+      return reply.code(e.status).send({ error: e.message })
     }
   })
 
@@ -161,6 +162,8 @@ export function inventoryRoutes(app: FastifyInstance) {
 
     try {
       const entry = await prisma.$transaction(async (tx) => {
+        // 并发防护（BUG-02）：锁订单行，同单并发入库串行化，累计上限校验不再竞态
+        await tx.$queryRaw`SELECT id FROM "SalesOrder" WHERE id = ${data.salesOrderId} FOR UPDATE`
         // 成品必须属于该订单明细，且订单处于生产相关状态（防凭空虚增库存）
         const order = await tx.salesOrder.findUnique({
           where: { id: data.salesOrderId },
@@ -200,19 +203,8 @@ export function inventoryRoutes(app: FastifyInstance) {
       })
       return reply.code(200).send(entry)
     } catch (err) {
-      const message = err instanceof Error ? err.message : '成品入库失败'
-      if (message.includes('库存不足')) return reply.code(400).send({ error: message })
-      if (message.includes('订单不存在')) return reply.code(404).send({ error: message })
-      if (
-        message.includes('不能成品入库') ||
-        message.includes('不在所选订单') ||
-        message.includes('入库数量超限')
-      ) {
-        return reply.code(400).send({ error: message })
-      }
-      const info = prismaErrorInfo(err)
-      if (info) return reply.code(info.status).send({ error: info.message })
-      return reply.code(500).send({ error: '成品入库失败，请稍后重试' })
+      const e = routeError(err, ['订单不存在'])
+      return reply.code(e.status).send({ error: e.message })
     }
   })
 

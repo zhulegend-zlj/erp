@@ -13,12 +13,12 @@ const returnReplenishSchema = z
     partId: z.number({ error: '物料必填' }).int().positive(),
     supplierId: z.number({ error: '供应商必填' }).int().positive(),
     returnDate: z.string().refine((v) => !Number.isNaN(Date.parse(v)), '退货日期不合法').optional(),
-    returnQty: z.number({ error: '退货数量必须为数字' }).int().nonnegative().default(0),
+    returnQty: z.number({ error: '退货数量必须为数字' }).int().nonnegative().max(2147483647, { error: '数量超出允许范围' }).default(0),
     replenishDate: z.string().refine((v) => !Number.isNaN(Date.parse(v)), '补货日期不合法').optional(),
-    replenishQty: z.number({ error: '补货数量必须为数字' }).int().nonnegative().default(0),
+    replenishQty: z.number({ error: '补货数量必须为数字' }).int().nonnegative().max(2147483647, { error: '数量超出允许范围' }).default(0),
     purchaseOrderNo: z.string().nullable().optional(),
-    lotNo: z.string().nullable().optional(),
-    note: z.string().nullable().optional(),
+    lotNo: z.string().max(100, '来料单号过长').nullable().optional(),
+    note: z.string().max(500, '备注过长（最多 500 字）').nullable().optional(),
   })
   .refine((v) => v.returnQty + v.replenishQty > 0, {
     message: '退货与补货数量至少填写一项',

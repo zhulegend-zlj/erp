@@ -554,4 +554,12 @@ describe('orders', () => {
     const bad = await app.inject({ method: 'DELETE', url: '/api/orders/abc', headers: { cookie } })
     expect(bad.statusCode).toBe(400)
   })
+
+  it('图片识别无文件返回 400 而非 500（BUG-12 回归）', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'sales')
+    const res = await app.inject({ method: 'POST', url: '/api/orders/parse-image', headers: { cookie }, payload: {} })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('图片文件')
+  })
 })

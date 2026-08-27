@@ -33,6 +33,11 @@ export function buildApp() {
     if ((error as { code?: string }).code === 'FST_REQ_FILE_TOO_LARGE') {
       return reply.code(413).send({ error: '文件超过 600MB 限制' })
     }
+    // Fastify 自身的 4xx（Content-Length 不匹配、非 JSON 请求体等）透传状态码，不再落 500（BUG-10）
+    const fsStatus = (error as { statusCode?: unknown }).statusCode
+    if (typeof fsStatus === 'number' && fsStatus >= 400 && fsStatus < 500) {
+      return reply.code(fsStatus).send({ error: '请求格式错误，请检查提交内容' })
+    }
     // 未映射错误只记录日志，不向客户端回显内部细节（路径/SQL/连接串等）
     request.log.error({ err: error }, '未处理错误')
     return reply.code(500).send({ error: '服务器错误，请稍后重试' })

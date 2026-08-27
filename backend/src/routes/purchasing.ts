@@ -6,7 +6,7 @@ import { requireRole } from '../auth/guard'
 import { bomExplode, computePurchaseGap, usageDisplay } from '../domain/bom'
 import { applyStockChange } from '../domain/inventory'
 import { markPurchasingStarted, refreshPurchasingPhase, refreshPurchasingPhaseAfterUndo } from '../domain/order-phase'
-import { parsePositiveInt, prismaErrorInfo } from '../errors'
+import { parsePositiveInt, prismaErrorInfo, routeError } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
 
 const purchaseItemSchema = z.object({
@@ -197,6 +197,9 @@ export function purchasingRoutes(app: FastifyInstance) {
     const pagination = parsePagination(req.query as Record<string, unknown>)
     if (pagination.kind === 'error') return reply.code(400).send({ error: pagination.message })
 
+    // 采购单价口径（BUG-09）：与零件价格一致——仅 采购/老板/财务 可见，销售/仓库/工程剥离
+    const role = (req as { user?: { role?: string } }).user?.role ?? ''
+    const hidePrice = ['sales', 'warehouse', 'engineer'].includes(role)
     const toRow = (po: Prisma.PurchaseOrderGetPayload<{ include: typeof PURCHASE_ORDER_INCLUDE }>) => {
       const totalAmount = po.items.reduce((sum, it) => sum + it.qty * it.unitPrice.toNumber(), 0)
       const paidAmount = po.payments.reduce((sum, p) => sum + p.amount.toNumber(), 0)
@@ -219,7 +222,7 @@ export function purchasingRoutes(app: FastifyInstance) {
           name: it.part.name,
           unit: it.part.unit,
           qty: it.qty,
-          unitPrice: it.unitPrice.toNumber(),
+          ...(hidePrice ? {} : { unitPrice: it.unitPrice.toNumber() }),
         })),
       }
     }
@@ -387,6 +390,10 @@ export function purchasingRoutes(app: FastifyInstance) {
 
     try {
       await prisma.$transaction(async (tx) => {
+        // 并发防护（BUG-01）：锁采购单行，同单并发收货串行化，累计校验不再竞态
+        if (data.purchaseOrderId != null) {
+          await tx.$queryRaw`SELECT id FROM "PurchaseOrder" WHERE id = ${data.purchaseOrderId} FOR UPDATE`
+        }
         const purchaseOrder = data.purchaseOrderId != null
           ? await tx.purchaseOrder.findUnique({
               where: { id: data.purchaseOrderId },
@@ -461,20 +468,8 @@ export function purchasingRoutes(app: FastifyInstance) {
         }
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : '收货失败'
-      if (message.includes('库存不足')) return reply.code(400).send({ error: message })
-      if (message.includes('采购单不存在')) return reply.code(404).send({ error: message })
-      if (
-        message.includes('不在该采购单') ||
-        message.includes('超过订购数量') ||
-        message.includes('不能重复') ||
-        message.includes('不存在')
-      ) {
-        return reply.code(400).send({ error: message })
-      }
-      const info = prismaErrorInfo(err)
-      if (info) return reply.code(info.status).send({ error: info.message })
-      return reply.code(500).send({ error: '收货失败，请稍后重试' })
+      const e = routeError(err, ['采购单不存在'])
+      return reply.code(e.status).send({ error: e.message })
     }
 
     return reply.code(200).send({ ok: true })

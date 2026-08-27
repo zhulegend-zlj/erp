@@ -143,6 +143,25 @@ export function scheduleRoutes(app: FastifyInstance) {
       if (row.status !== 'pending' && row.status !== 'picked') {
         return reply.code(400).send({ error: '已出货/已取消的排程不能修改' })
       }
+      // 改数量同样受「订单剩余」约束（BUG-05）：其他排程 + 已出 + 新数量 ≤ 订单该成品数量
+      const order = await prisma.salesOrder.findUnique({ where: { id: row.salesOrderId }, include: { items: true } })
+      if (!order) return reply.code(404).send({ error: '订单不存在' })
+      const item = order.items.find((it) => it.productId === row.productId)
+      if (!item) return reply.code(400).send({ error: '该成品不在订单明细中' })
+      const [scheduled, shipped] = await Promise.all([
+        prisma.shipmentSchedule.aggregate({
+          where: { salesOrderId: row.salesOrderId, productId: row.productId, status: { not: 'cancelled' }, id: { not: row.id } },
+          _sum: { qty: true },
+        }),
+        prisma.shipmentLine.aggregate({
+          where: { salesOrderId: row.salesOrderId, productId: row.productId },
+          _sum: { qty: true },
+        }),
+      ])
+      const used = (scheduled._sum.qty ?? 0) + (shipped._sum.qty ?? 0)
+      if (used + (data.qty as number) > item.qty) {
+        return reply.code(400).send({ error: '排程数量超过订单剩余（订单 ' + item.qty + '，其他排程/已出 ' + used + '）' })
+      }
       update.qty = data.qty
     }
     if (data.hubId !== undefined) {
@@ -154,6 +173,7 @@ export function scheduleRoutes(app: FastifyInstance) {
     if (data.promisedDate !== undefined) update.promisedDate = new Date(data.promisedDate as string)
     if (data.note !== undefined) update.note = (data.note as string) || null
     if (data.status !== undefined) {
+      if (data.status === 'picked') return reply.code(400).send({ error: '只有仓库可以标记「已备好」，销售请勿代标' })
       if (row.status === 'shipped') return reply.code(400).send({ error: '已出货的排程不能改状态' })
       update.status = data.status
     }

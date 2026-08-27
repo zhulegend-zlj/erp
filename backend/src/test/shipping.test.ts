@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { buildApp } from '../server'
-import { loginCookie, resetDb } from './helpers'
+import { loginCookie, resetDb, shipViaSchedule } from './helpers'
 import { prisma } from '../db'
 
 describe('shipping', () => {
@@ -8,7 +8,7 @@ describe('shipping', () => {
     await resetDb()
   })
 
-  it('出货后成品库存减少，可追加运输节点', async () => {
+  it('从排程出货后成品库存减少，可追加运输节点', async () => {
     const product = await prisma.product.create({ data: { sku: 'F300', name: '成品B' } })
     await prisma.stock.create({ data: { itemType: 'product', itemId: product.id, qtyOnHand: 100 } })
     const customer = await prisma.customer.create({ data: { name: 'C1' } })
@@ -23,12 +23,7 @@ describe('shipping', () => {
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'sales')
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/shipments',
-      headers: { cookie },
-      payload: { salesOrderId: order.id }
-    })
+    const res = await shipViaSchedule(app, cookie, order.id, product.id, 100)
     expect(res.statusCode).toBe(200)
     expect(res.json().salesOrderId).toBe(order.id)
     const stock = await prisma.stock.findUnique({
@@ -69,12 +64,7 @@ describe('shipping', () => {
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'sales')
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/shipments',
-      headers: { cookie },
-      payload: { salesOrderId: order.id }
-    })
+    const res = await shipViaSchedule(app, cookie, order.id, product.id, 20)
     expect(res.statusCode).toBe(400)
     expect(res.json().error).toContain('库存不足')
     const stock = await prisma.stock.findUnique({
@@ -85,9 +75,13 @@ describe('shipping', () => {
     expect(updatedOrder?.status).toBe('ready')
     const shipmentCount = await prisma.shipment.count({ where: { salesOrderId: order.id } })
     expect(shipmentCount).toBe(0)
+    // 排程也不应被扣减（同一事务回滚）
+    const sched = await prisma.shipmentSchedule.findFirst({ where: { salesOrderId: order.id } })
+    expect(sched?.qty).toBe(20)
+    expect(sched?.status).toBe('picked')
   })
 
-  it('同一订单重复出货返回 400，库存与出货单数量不变', async () => {
+  it('同一排程重复出货返回 400，库存与出货单数量不变', async () => {
     const product = await prisma.product.create({ data: { sku: 'F300', name: '成品B' } })
     await prisma.stock.create({ data: { itemType: 'product', itemId: product.id, qtyOnHand: 100 } })
     const customer = await prisma.customer.create({ data: { name: 'C1' } })
@@ -102,11 +96,19 @@ describe('shipping', () => {
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'sales')
+    const hub = await prisma.shipToHub.create({ data: { name: 'TEST-HUB-REP' } })
+    const sched = await app.inject({
+      method: 'POST', url: '/api/schedules', headers: { cookie },
+      payload: { salesOrderId: order.id, productId: product.id, qty: 10, hubId: hub.id, needByDate: '2026-09-30', promisedDate: '2026-09-30' }
+    })
+    expect(sched.statusCode).toBe(200)
+    const schedId = sched.json().id
+    const wh = await loginCookie(app, 'warehouse')
+    await app.inject({ method: 'PATCH', url: '/api/schedules/' + schedId, headers: { cookie: wh }, payload: { status: 'picked' } })
+
     const first = await app.inject({
-      method: 'POST',
-      url: '/api/shipments',
-      headers: { cookie },
-      payload: { salesOrderId: order.id }
+      method: 'POST', url: '/api/shipments', headers: { cookie },
+      payload: { hubId: hub.id, schedules: [{ id: schedId, qty: 10 }] }
     })
     expect(first.statusCode).toBe(200)
     const stockAfterFirst = await prisma.stock.findUnique({
@@ -114,14 +116,12 @@ describe('shipping', () => {
     })
     expect(stockAfterFirst?.qtyOnHand).toBe(90)
 
+    // 同一排程再出（已 shipped 状态）→ 400
     const second = await app.inject({
-      method: 'POST',
-      url: '/api/shipments',
-      headers: { cookie },
-      payload: { salesOrderId: order.id }
+      method: 'POST', url: '/api/shipments', headers: { cookie },
+      payload: { hubId: hub.id, schedules: [{ id: schedId, qty: 10 }] }
     })
     expect(second.statusCode).toBe(400)
-    expect(second.json().error).toContain('订单已出货')
 
     const stock = await prisma.stock.findUnique({
       where: { itemType_itemId: { itemType: 'product', itemId: product.id } }
@@ -146,12 +146,7 @@ describe('shipping', () => {
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'sales')
-    const shipment = await app.inject({
-      method: 'POST',
-      url: '/api/shipments',
-      headers: { cookie },
-      payload: { salesOrderId: order.id }
-    })
+    const shipment = await shipViaSchedule(app, cookie, order.id, product.id, 1)
     expect(shipment.statusCode).toBe(200)
     const shipmentId = shipment.json().id
 
@@ -189,7 +184,7 @@ describe('shipping', () => {
     expect(Array.isArray(res.json())).toBe(true)
   })
 
-  it('草稿订单未确认不能出货（400）', async () => {
+  it('草稿订单不能安排排程出货（400）', async () => {
     const product = await prisma.product.create({ data: { sku: 'F303', name: '成品DRAFT' } })
     await prisma.stock.create({ data: { itemType: 'product', itemId: product.id, qtyOnHand: 100 } })
     const customer = await prisma.customer.create({ data: { name: 'C3' } })
@@ -203,18 +198,61 @@ describe('shipping', () => {
     })
     const app = buildApp()
     const cookie = await loginCookie(app, 'sales')
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/shipments',
-      headers: { cookie },
-      payload: { salesOrderId: order.id }
-    })
+    const res = await shipViaSchedule(app, cookie, order.id, product.id, 1)
     expect(res.statusCode).toBe(400)
-    expect(res.json().error).toContain('未确认')
+    expect(res.json().error).toContain('安排出货')
     const stock = await prisma.stock.findUnique({
       where: { itemType_itemId: { itemType: 'product', itemId: product.id } }
     })
     expect(stock?.qtyOnHand).toBe(100)
+  })
+
+  it('无排程手工出货已停用（400）', async () => {
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'sales')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/shipments',
+      headers: { cookie },
+      payload: { salesOrderId: 1, lines: [{ productId: 1, qty: 1, unitPrice: 1 }] }
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('已停用')
+  })
+
+  it('并发出货不超卖（BUG-03 回归：3 并发各出 12 台只成功 1 次）', async () => {
+    const product = await prisma.product.create({ data: { sku: 'F-CONC3', name: '成品CONC3' } })
+    await prisma.stock.create({ data: { itemType: 'product', itemId: product.id, qtyOnHand: 100 } })
+    const customer = await prisma.customer.create({ data: { name: 'C-CONC3' } })
+    const order = await prisma.salesOrder.create({
+      data: {
+        orderNo: 'SO-CONC3', customerId: customer.id, zrhDeliveryDate: new Date(), status: 'ready',
+        items: { create: { productId: product.id, qty: 12, unitPrice: 5 } },
+      },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'sales')
+    const hub = await prisma.shipToHub.create({ data: { name: 'TEST-HUB-CONC3' } })
+    const sched = await app.inject({
+      method: 'POST', url: '/api/schedules', headers: { cookie },
+      payload: { salesOrderId: order.id, productId: product.id, qty: 12, hubId: hub.id, needByDate: '2026-09-30', promisedDate: '2026-09-30' }
+    })
+    expect(sched.statusCode).toBe(200)
+    const schedId = sched.json().id
+    const wh = await loginCookie(app, 'warehouse')
+    await app.inject({ method: 'PATCH', url: '/api/schedules/' + schedId, headers: { cookie: wh }, payload: { status: 'picked' } })
+
+    const results = await Promise.all(
+      Array.from({ length: 3 }, () =>
+        app.inject({
+          method: 'POST', url: '/api/shipments', headers: { cookie },
+          payload: { hubId: hub.id, schedules: [{ id: schedId, qty: 12 }] },
+        }),
+      ),
+    )
+    expect(results.filter((r) => r.statusCode === 200)).toHaveLength(1)
+    const lines = await prisma.shipmentLine.findMany({ where: { salesOrderId: order.id } })
+    expect(lines.reduce((s, l) => s + l.qty, 0)).toBe(12)
   })
 
   it('非 sales 角色无权出货与追加运输节点（403）', async () => {
@@ -259,12 +297,7 @@ describe('shipping', () => {
         items: { create: { productId: product.id, qty: 100, unitPrice: 5 } }
       }
     })
-    const shipment = await app.inject({
-      method: 'POST',
-      url: '/api/shipments',
-      headers: { cookie },
-      payload: { salesOrderId: order.id }
-    })
+    const shipment = await shipViaSchedule(app, cookie, order.id, product.id, 1)
     const badLeg = await app.inject({
       method: 'POST',
       url: '/api/shipments/' + shipment.json().id + '/legs',

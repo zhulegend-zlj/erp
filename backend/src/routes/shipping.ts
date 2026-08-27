@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../db'
 import { requireRole } from '../auth/guard'
 import { applyStockChange } from '../domain/inventory'
-import { prismaErrorInfo, parsePositiveInt } from '../errors'
+import { parsePositiveInt, routeError } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
 import { buildFromTemplate } from '../domain/shipment-docs-template'
 import {
@@ -118,8 +118,6 @@ const HUB_INCLUDE = {
   hub: { select: { id: true, name: true } },
 } as const
 
-type ShipmentLineInput = z.infer<typeof shipmentLineSchema>
-
 interface LineToCreate {
   productId: number
   qty: number
@@ -155,11 +153,19 @@ export function shippingRoutes(app: FastifyInstance) {
 
         if (data.schedules && data.schedules.length > 0) {
           // ===== 排程模式 =====
+          // 并发防护（BUG-03）：先锁排程行，再读——并发出货串行化，剩余/上限校验不再竞态
+          for (const sid of [...new Set(data.schedules.map((s) => s.id))].sort((a, b) => a - b)) {
+            await tx.$queryRaw`SELECT id FROM "ShipmentSchedule" WHERE id = ${sid} FOR UPDATE`
+          }
           const rows = await tx.shipmentSchedule.findMany({
             where: { id: { in: data.schedules.map((s) => s.id) } },
             include: { salesOrder: { select: { id: true, status: true, customerPoNo: true } }, product: { select: { id: true, sku: true } } },
           })
           if (rows.length !== data.schedules.length) throw new Error('排程不存在')
+          // 锁涉及订单行（按 id 排序防死锁）
+          for (const oid of [...new Set(rows.map((r) => r.salesOrder.id))].sort((a, b) => a - b)) {
+            await tx.$queryRaw`SELECT id FROM "SalesOrder" WHERE id = ${oid} FOR UPDATE`
+          }
           for (const r of rows) {
             scheduleRows.set(r.id, { id: r.id, qty: r.qty, productId: r.productId, hubId: r.hubId, salesOrderId: r.salesOrder.id, customerPoNo: r.salesOrder.customerPoNo, unitPrice: 0 })
           }
@@ -195,61 +201,38 @@ export function shippingRoutes(app: FastifyInstance) {
             orderIds.add(order.id)
           }
         } else {
-          // ===== 手工模式 =====
-          if (data.salesOrderId === undefined) throw new Error('订单必填')
-          const order = await tx.salesOrder.findUnique({
-            where: { id: data.salesOrderId },
-            include: { items: { include: { product: { select: { sku: true } } } } },
-          })
-          if (!order) throw new Error('订单不存在')
-          if (order.status === 'shipped' || order.status === 'completed') throw new Error('订单已出货')
-          if (order.status === 'draft') throw new Error('订单未确认，不能出货')
-
-          const lines: ShipmentLineInput[] = data.lines && data.lines.length > 0
-            ? data.lines
-            : order.items.map((it) => ({ productId: it.productId, qty: it.qty, unitPrice: Number(it.unitPrice) }))
-          const qtyByProduct = new Map<number, number>()
-          for (const l of lines) {
-            const item = order.items.find((it) => it.productId === l.productId)
-            if (!item) throw new Error('明细行包含不属于该订单的成品')
-            qtyByProduct.set(l.productId, (qtyByProduct.get(l.productId) ?? 0) + l.qty)
-          }
-          // 部分出货：本批合计 + 已出 不得超过订单数量
-          const shippedAgg = await tx.shipmentLine.groupBy({
-            by: ['productId'],
-            where: { salesOrderId: order.id },
-            _sum: { qty: true },
-          })
-          const shippedByProduct = new Map(shippedAgg.map((g) => [g.productId, g._sum.qty ?? 0]))
-          for (const it of order.items) {
-            const sum = (qtyByProduct.get(it.productId) ?? 0) + (shippedByProduct.get(it.productId) ?? 0)
-            if (sum > it.qty) {
-              throw new Error('明细行数量超过订单数量（' + it.product.sku + ' 已出+本批 ' + sum + ' > 订单 ' + it.qty + '）')
-            }
-          }
-          for (const l of lines) {
-            linesToCreate.push({
-              productId: l.productId,
-              qty: l.qty,
-              unitPrice: l.unitPrice,
-              customerPoNo: l.customerPoNo || order.customerPoNo,
-              salesOrderId: order.id,
-              scheduleId: null,
-              lotNo: l.lotNo || null,
-              cartons: l.cartons ?? null,
-              netWeight: l.netWeight ?? null,
-              grossWeight: l.grossWeight ?? null,
-              cbm: l.cbm ?? null,
-              containerNo: l.containerNo || null,
-              sealNo: l.sealNo || null,
-              hblNo: l.hblNo || null,
-              remark: l.remark || null,
-            })
-          }
-          orderIds.add(order.id)
+          // ===== 手工模式（BUG-06：已停用）=====
+          throw new Error('无排程直接出货已停用，请先到「出货排程」页建排程，仓库备好后从这里出货')
         }
 
         if (linesToCreate.length === 0) throw new Error('出货明细为空')
+        // 出库上限双保险（BUG-03）：每订单每成品 已出+本批 ≤ 订单数量（订单行已锁，无竞态）
+        {
+          const perOrder = new Map<number, Map<number, number>>()
+          for (const l of linesToCreate) {
+            const m = perOrder.get(l.salesOrderId) ?? new Map<number, number>()
+            m.set(l.productId, (m.get(l.productId) ?? 0) + l.qty)
+            perOrder.set(l.salesOrderId, m)
+          }
+          for (const [oid, m] of perOrder) {
+            const order = await tx.salesOrder.findUnique({ where: { id: oid }, include: { items: true } })
+            if (!order) throw new Error('订单不存在')
+            if (order.status === 'draft') throw new Error('订单未确认，不能出货')
+            if (order.status === 'shipped' || order.status === 'completed') throw new Error('订单已出货')
+            const shippedAgg = await tx.shipmentLine.groupBy({
+              by: ['productId'],
+              where: { salesOrderId: oid },
+              _sum: { qty: true },
+            })
+            const shipped = new Map(shippedAgg.map((g) => [g.productId, g._sum.qty ?? 0]))
+            for (const it of order.items) {
+              const sum = (m.get(it.productId) ?? 0) + (shipped.get(it.productId) ?? 0)
+              if (sum > it.qty) {
+                throw new Error('明细行数量超过订单数量（成品 ' + it.productId + ' 已出+本批 ' + sum + ' > 订单 ' + it.qty + '）')
+              }
+            }
+          }
+        }
         // 库存检查（按成品合计）
         const qtyByProduct = new Map<number, number>()
         for (const l of linesToCreate) qtyByProduct.set(l.productId, (qtyByProduct.get(l.productId) ?? 0) + l.qty)
@@ -336,22 +319,8 @@ export function shippingRoutes(app: FastifyInstance) {
       })
       return reply.code(200).send(shipment)
     } catch (err) {
-      const message = err instanceof Error ? err.message : '出货失败'
-      if (message.includes('库存不足')) return reply.code(400).send({ error: message })
-      if (message.includes('尚未备好')) return reply.code(400).send({ error: message })
-      if (message.includes('数量超出') || message.includes('数量超过')) return reply.code(400).send({ error: message })
-      if (message.includes('订单已出货')) return reply.code(400).send({ error: message })
-      if (message.includes('未确认')) return reply.code(400).send({ error: message })
-      if (message.includes('订单必填')) return reply.code(400).send({ error: message })
-      if (message.includes('订单不存在')) return reply.code(404).send({ error: message })
-      if (message.includes('排程不存在')) return reply.code(404).send({ error: message })
-      if (message.includes('排程成品')) return reply.code(400).send({ error: message })
-      if (message.includes('到货仓')) return reply.code(400).send({ error: message })
-      if (message.includes('明细行')) return reply.code(400).send({ error: message })
-      if (message.includes('明细为空')) return reply.code(400).send({ error: message })
-      const info = prismaErrorInfo(err)
-      if (info) return reply.code(info.status).send({ error: info.message })
-      return reply.code(500).send({ error: '出货失败，请稍后重试' })
+      const e = routeError(err, ['订单不存在', '排程不存在'])
+      return reply.code(e.status).send({ error: e.message })
     }
   })
 
@@ -375,44 +344,60 @@ export function shippingRoutes(app: FastifyInstance) {
     if (data.etd !== undefined) update.etd = data.etd ? new Date(data.etd) : null
     if (data.eta !== undefined) update.eta = data.eta ? new Date(data.eta) : null
 
-    await prisma.$transaction(async (tx) => {
-      if (Object.keys(update).length > 0) {
-        await tx.shipment.update({ where: { id }, data: update })
-      }
-      if (data.lines !== undefined) {
-        const existing = await tx.shipmentLine.findMany({ where: { shipmentId: id }, orderBy: { sortOrder: 'asc' as const } })
-        await tx.shipmentLine.deleteMany({ where: { shipmentId: id } })
-        if (data.lines.length > 0) {
-          await tx.shipmentLine.createMany({
-            data: data.lines.map((l, i) => ({
-              shipmentId: id,
-              productId: l.productId,
-              qty: l.qty,
-              unitPrice: l.unitPrice,
-              // 保留原行的订单/排程关联（按原顺序）
-              salesOrderId: existing[i]?.salesOrderId ?? shipment.salesOrderId,
-              scheduleId: existing[i]?.scheduleId ?? null,
-              customerPoNo: l.customerPoNo || null,
-              lotNo: l.lotNo || null,
-              cartons: l.cartons ?? null,
-              netWeight: l.netWeight ?? null,
-              grossWeight: l.grossWeight ?? null,
-              cbm: l.cbm ?? null,
-              containerNo: l.containerNo || null,
-              sealNo: l.sealNo || null,
-              hblNo: l.hblNo || null,
-              remark: l.remark || null,
-              sortOrder: i,
-            })),
-          })
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (Object.keys(update).length > 0) {
+          await tx.shipment.update({ where: { id }, data: update })
         }
-      }
-    })
-    const refreshed = await prisma.shipment.findUniqueOrThrow({
-      where: { id },
-      include: { ...LEGS_INCLUDE, ...LINES_INCLUDE, ...HUB_INCLUDE },
-    })
-    return reply.code(200).send(refreshed)
+        if (data.lines !== undefined) {
+          const existing = await tx.shipmentLine.findMany({ where: { shipmentId: id }, orderBy: { sortOrder: 'asc' as const } })
+          // 账实一致性（BUG-04）：出货后禁止增删行、改成品/数量/单价，仅可补录单证文字
+          if (data.lines.length !== existing.length) {
+            throw new Error('出货后不能增删明细行，仅可补录单证信息（如要改数量请先撤销出货）')
+          }
+          for (let i = 0; i < data.lines.length; i++) {
+            const a = data.lines[i]
+            const b = existing[i]
+            if (!a || !b || a.productId !== b.productId || a.qty !== b.qty || Number(a.unitPrice) !== Number(b.unitPrice)) {
+              throw new Error('出货后不能修改明细行的成品/数量/单价，仅可补录单证信息（箱数/毛净重/CBM/柜号/HBL 等）')
+            }
+          }
+          await tx.shipmentLine.deleteMany({ where: { shipmentId: id } })
+          if (data.lines.length > 0) {
+            await tx.shipmentLine.createMany({
+              data: data.lines.map((l, i) => ({
+                shipmentId: id,
+                productId: l.productId,
+                qty: l.qty,
+                unitPrice: l.unitPrice,
+                // 保留原行的订单/排程关联（按原顺序）
+                salesOrderId: existing[i]?.salesOrderId ?? shipment.salesOrderId,
+                scheduleId: existing[i]?.scheduleId ?? null,
+                customerPoNo: l.customerPoNo || null,
+                lotNo: l.lotNo || null,
+                cartons: l.cartons ?? null,
+                netWeight: l.netWeight ?? null,
+                grossWeight: l.grossWeight ?? null,
+                cbm: l.cbm ?? null,
+                containerNo: l.containerNo || null,
+                sealNo: l.sealNo || null,
+                hblNo: l.hblNo || null,
+                remark: l.remark || null,
+                sortOrder: i,
+              })),
+            })
+          }
+        }
+      })
+      const refreshed = await prisma.shipment.findUniqueOrThrow({
+        where: { id },
+        include: { ...LEGS_INCLUDE, ...LINES_INCLUDE, ...HUB_INCLUDE },
+      })
+      return reply.code(200).send(refreshed)
+    } catch (err) {
+      const e = routeError(err, ['出货单不存在'])
+      return reply.code(e.status).send({ error: e.message })
+    }
   })
 
   // 追加运输节点：仅 sales

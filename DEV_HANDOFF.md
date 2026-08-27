@@ -79,6 +79,8 @@
 > 
 > **2026-08-27 一键导入图片建单（工厂，老板反馈：客户发订单截图）**：新建订单弹窗新增「一键导入图片（客户截图自动填明细）」——上传客户 PO 截图后自动填 明细行（成品/数量/单价/need-by 日期）并带出 PO 号。实现：POST /api/orders/parse-image（sales/boss，multipart 图片）→ `backend/src/domain/order-image.ts` 调 **modlens**（`npx @liustack/modlens analyze -p gemini-api`，本机 ~/.modlens 已配 gemini key）读图 → 本地确定性解析 OCR 全文（锚点：SKU=首个含 _/- 料号串、日期=yyyy/m/d、数量=日期前最后数字、单价=日期后首数字；无日期退化为后两数字；完全重复行去重）→ 与库内成品 SKU 匹配（大小写/_ - 归一），未匹配行前端提示手动选。**依赖/坑**：Windows 下不能直接 spawn npx.cmd（Node 20+ EINVAL），走 `execFile('cmd.exe',['/d','/s','/c','npx',...])`，prompt 里不能用 双引号/竖线/&；modlens 输出结构为 `{result:{summary,ocr:{full_text,lines},layout}}`；图片读不出（或 modlens 未配置）→ 422「转人工由智能代理读取」兜底（老板口径：读不出就派多模态代理读）。开发调试工具 `prisma/try-parse-image.ts "<图片路径>"`。新增 4 个解析测试，后端 **182/182** 通过、typecheck 干净、前端 build 通过、后端已重启。**家里电脑注意：modlens 未配置时该功能返回 422（不影响其他功能），配置好 gemini key 即可用。**
 > 
+> **2026-08-27 专业测试 12 项缺陷全部修复（工厂，老板拍板「修」）**：测试报告见 `测试报告-20260827.md`（含修复记录第八节）。要点：①**并发一致性**（高×3）：收货/成品入库/出货事务加 SELECT FOR UPDATE 行锁（采购单/订单/排程按 id 排序防死锁）+ 出货加「已出+本批≤订单数量」双保险，新增 3 个并发回归（8并发收2只成2、5并发入12只成1、3并发出12只成1）；②**账实一致性**：出货后 PATCH 禁止改 成品/数量/单价、排程改量复用订单剩余校验、手工出货模式后端下线（400 提示走排程，UI 早已删除）；③**错误不泄漏**：新增 errors.routeError 统一出口（中文业务错误 400/404，其余 500 通用文案），替换各路由 message.includes catch；数量字段统一 max；Fastify 4xx 透传 400；④权限：排程「已备好」仅仓库可标；采购单单价对 sales/warehouse/engineer 剥离（采购/老板/财务可见）；⑤输入边界：名称/SKU/反馈/备注长度上限；⑥parse-image 无文件 400。测试 182→**188/188**、typecheck 干净、前端 build 通过、后端已重启。**家里电脑注意：拉代码后测试文件与出货流程口径已变（手工出货停用，测试 helper 新增 shipViaSchedule）。**
+> 
 > **下一阶段（2026-08-26 起）**：①老板导出三份单证验收效果并反馈微调；②采购拆单（5000 套拆多单）等与采购对接后落实；③工程补备件后销售即可对备件下单；④早期两条反馈已于 08-26 处理完（成品图片标签改「图片」、流水/收发台账评估结论=不重合保留，见 FEEDBACK.md）。
 >
 > **在别处继续开发**：直接 `git pull origin main` 后按第 6 节启动；首次记得 `npx prisma migrate deploy` 与重建账号（见第 3 节）。

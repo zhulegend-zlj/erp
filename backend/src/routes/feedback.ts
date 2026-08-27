@@ -12,7 +12,7 @@ export const FEEDBACK_PATH = process.env.FEEDBACK_PATH
   : resolve(dirname(fileURLToPath(import.meta.url)), '../../../FEEDBACK.md')
 
 const feedbackSchema = z.object({
-  content: z.string({ error: '反馈内容必填' }).trim().min(1, '反馈内容必填'),
+  content: z.string({ error: '反馈内容必填' }).trim().min(1, '反馈内容必填').max(2000, '反馈内容过长（最多 2000 字）'),
   module: z.string().optional(),
   priority: z.string().optional(),
 })
