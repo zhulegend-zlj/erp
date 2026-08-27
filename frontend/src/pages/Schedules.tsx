@@ -310,13 +310,13 @@ export default function Schedules() {
       const group = byHub.get(hubName) ?? []
       let seq = 0
       let sumQty = 0
-      trs += '<tr class="hub"><td colspan="10">目的地：' + esc(hubName) + '　（同一台车）</td></tr>'
+      trs += '<tr class="hub"><td colspan="10">目的地：' + esc(hubName) + '</td></tr>'
       for (const r of group) {
         seq += 1
         sumQty += r.qty
         trs += '<tr><td>' + seq + '</td><td>' + shipDate + '</td><td>' + esc(r.hub.name) + '</td><td>' + esc(r.salesOrder.orderNo) + '</td><td>' + esc(r.product.sku) + '</td><td>' + esc(r.product.name) + '</td><td>' + r.qty + '</td><td></td><td></td><td></td></tr>'
       }
-      trs += '<tr class="sub"><td></td><td></td><td></td><td></td><td></td><td>合计（' + esc(hubName) + '）</td><td>' + sumQty + '</td><td></td><td></td><td></td></tr>'
+      trs += '<tr class="sub"><td></td><td></td><td></td><td></td><td></td><td>合计</td><td>' + sumQty + '</td><td></td><td></td><td></td></tr>'
     }
     const html =
       '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
@@ -324,10 +324,17 @@ export default function Schedules() {
       '</head><body><h2>' + esc(title) + '</h2><p style="text-align:center;margin:2px 0 2px;font-size:14px">装运方式：' + esc(mode) + '</p><p style="text-align:center;margin:0 0 12px;font-size:14px">出货时间：' + esc(shipDate) + '</p><table><thead><tr><th>序号</th><th>出货日期</th><th>目的地</th><th>订单号</th><th>品名</th><th>中文品名</th><th>数量</th><th>箱数</th><th>体积</th><th>重量</th></tr></thead><tbody>' +
       trs +
       '</tbody></table><script>window.onload=function(){window.print()}<\/script></body></html>'
-    const w = window.open('', '_blank', 'width=1000,height=700')
+    const w = window.open('', '_blank')
     if (!w) {
       message.warning('浏览器拦截了打印窗口，请允许弹窗后重试')
       return
+    }
+    // 打印窗口默认最大化
+    try {
+      w.moveTo(0, 0)
+      w.resizeTo(screen.availWidth, screen.availHeight)
+    } catch {
+      /* 浏览器可能限制 resizeTo，忽略 */
     }
     w.document.write(html)
     w.document.close()
