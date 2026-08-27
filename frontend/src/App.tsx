@@ -284,8 +284,11 @@ function AppShell() {
   const location = useLocation()
   const { token } = theme.useToken()
 
-  // 出货排程红点提醒：仓库=待备货数；销售=已备好待出货数（仓库备好后销售侧收到反馈）
-  const [scheduleBadge, setScheduleBadge] = useState(0)
+  // 出货排程红点提醒：仓库=待备货数；销售=已备好待出货数（仓库备好后销售侧收到反馈）。
+  // 点进「出货排程」页面即视为已查看：红点消失；之后新增加的排程才重新亮起（只提醒增量）。
+  const [scheduleCount, setScheduleCount] = useState(0)
+  const [scheduleSeen, setScheduleSeen] = useState(0)
+  const scheduleBadge = Math.max(0, scheduleCount - scheduleSeen)
   useEffect(() => {
     if (!user) return
     const status = user.role === 'warehouse' ? 'pending' : user.role === 'sales' ? 'picked' : null
@@ -295,7 +298,7 @@ function AppShell() {
       api
         .get<Array<{ id: number }>>('/schedules', { params: { status } })
         .then(({ data }) => {
-          if (alive) setScheduleBadge(data.length)
+          if (alive) setScheduleCount(data.length)
         })
         .catch(() => {})
     void fetchCount()
@@ -306,21 +309,31 @@ function AppShell() {
     }
   }, [user])
 
+  // 打开出货排程页 = 已查看，把当前数量记为已读
+  useEffect(() => {
+    if (location.pathname === '/schedules') setScheduleSeen(scheduleCount)
+  }, [location.pathname, scheduleCount])
+
   const menuItems: MenuProps['items'] = useMemo(
     () =>
       navItems
         .filter((item) => user && item.roles.includes(user.role))
         .map((item) => ({
           key: item.path,
-          icon: item.icon,
-          label:
+          icon:
             item.path === '/schedules' && scheduleBadge > 0 ? (
-              <Badge count={scheduleBadge} size="small" offset={[8, 0]} title={user?.role === 'warehouse' ? '待备货' : '已备好待出货'}>
-                {item.label}
+              <Badge
+                count={scheduleBadge}
+                size="small"
+                offset={[6, -2]}
+                title={user?.role === 'warehouse' ? '待备货' : '已备好待出货'}
+              >
+                {item.icon}
               </Badge>
             ) : (
-              item.label
+              item.icon
             ),
+          label: item.label,
         })),
     [user, scheduleBadge],
   )
