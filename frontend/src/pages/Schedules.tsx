@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'antd'
+import { Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'antd'
 import { CheckOutlined, DeleteOutlined, EditOutlined, PlusOutlined, PrinterOutlined, StopOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
@@ -62,6 +62,36 @@ export default function Schedules() {
   const [editTarget, setEditTarget] = useState<ScheduleRow | null>(null)
   const [editForm] = Form.useForm<{ qty?: number; hubId?: number; needByDate?: string; promisedDate?: string; note?: string }>()
   const [editSaving, setEditSaving] = useState(false)
+  // 提醒「知道了」：按角色持久化已读数，未读>0 时显示横幅
+  const [ackedCount, setAckedCount] = useState(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('erp-schedule-seen') ?? '{}') as Record<string, number>
+      return role ? (raw[role] ?? 0) : 0
+    } catch {
+      return 0
+    }
+  })
+  // 打印出货计划：勾选行 + 装运方式
+  const [printOpen, setPrintOpen] = useState(false)
+  const [printSelected, setPrintSelected] = useState<number[]>([])
+  const [printMode, setPrintMode] = useState('拼柜/不打板')
+
+  const reminderCount = role === 'warehouse' ? rows.filter((r) => r.status === 'pending').length : role === 'sales' ? rows.filter((r) => r.status === 'picked').length : 0
+  const unacked = Math.max(0, reminderCount - ackedCount)
+
+  function ackReminder() {
+    if (!role) return
+    try {
+      const raw = JSON.parse(localStorage.getItem('erp-schedule-seen') ?? '{}') as Record<string, number>
+      raw[role] = reminderCount
+      localStorage.setItem('erp-schedule-seen', JSON.stringify(raw))
+    } catch {
+      /* ignore */
+    }
+    setAckedCount(reminderCount)
+    window.dispatchEvent(new CustomEvent('schedule-ack'))
+    message.success('已收到，红点已清除')
+  }
 
   async function load() {
     setLoading(true)
@@ -255,10 +285,17 @@ export default function Schedules() {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   }
 
-  function printShipPlan() {
-    const active = rows.filter((r) => r.status !== 'cancelled')
+  const PRINT_MODES = ['拼柜/不打板', '整柜/不打板', '空运/打板']
+
+  // 打开打印弹窗：默认勾选未出货排程（已出货/已取消不打印），销售自行勾选 + 选装运方式
+  function openPrint() {
+    setPrintSelected(rows.filter((r) => r.status === 'pending' || r.status === 'picked').map((r) => r.id))
+    setPrintOpen(true)
+  }
+
+  function printShipPlan(list: ScheduleRow[], mode: string) {
     const byDate = new Map<string, ScheduleRow[]>()
-    for (const r of active) {
+    for (const r of list) {
       const d = r.promisedDate ? String(r.promisedDate).slice(0, 10) : '未定'
       byDate.set(d, [...(byDate.get(d) ?? []), r])
     }
@@ -279,7 +316,7 @@ export default function Schedules() {
     const html =
       '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
       '<style>body{font-family:SimSun,Arial,sans-serif;margin:24px}h2{text-align:center}table{border-collapse:collapse;width:100%}td,th{border:1px solid #000;padding:4px 6px;font-size:12px}th{background:#f0f0f0}tr.sub td{font-weight:bold;background:#fafafa}@media print{h2{margin-top:0}}</style>' +
-      '</head><body><h2>' + esc(title) + '</h2><table><thead><tr><th>序号</th><th>出货日期</th><th>目的地</th><th>订单号</th><th>品名</th><th>中文品名</th><th>数量</th><th>箱数</th><th>体积</th><th>重量</th></tr></thead><tbody>' +
+      '</head><body><h2>' + esc(title) + '</h2><p style="text-align:center;margin:2px 0 12px;font-size:14px">装运方式：' + esc(mode) + '</p><table><thead><tr><th>序号</th><th>出货日期</th><th>目的地</th><th>订单号</th><th>品名</th><th>中文品名</th><th>数量</th><th>箱数</th><th>体积</th><th>重量</th></tr></thead><tbody>' +
       trs +
       '</tbody></table><script>window.onload=function(){window.print()}<\/script></body></html>'
     const w = window.open('', '_blank', 'width=1000,height=700')
@@ -341,7 +378,7 @@ export default function Schedules() {
   return (
     <Card
       title="出货排程（客户 OPO 表录入 → 仓库备货 → 出货）"
-      extra={canCreate ? <Button icon={<PrinterOutlined />} onClick={printShipPlan}>打印出货计划</Button> : null}
+      extra={canCreate ? <Button icon={<PrinterOutlined />} onClick={openPrint}>打印出货计划</Button> : null}
     >
       {canCreate ? (
         <Form form={form} layout="inline" onFinish={handleCreate} style={{ marginBottom: 16, rowGap: 8, flexWrap: 'wrap' }}>
@@ -422,6 +459,23 @@ export default function Schedules() {
       ) : (
         <p style={{ marginBottom: 12 }}>仓库角色：对「待备货」的排程点击「已备好」，销售即可在出货页安排装车。</p>
       )}
+      {unacked > 0 ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={
+            role === 'warehouse'
+              ? '有 ' + unacked + ' 条排程待你备货'
+              : '仓库已备好 ' + unacked + ' 条排程，请安排出货'
+          }
+          action={
+            <Button size="small" onClick={ackReminder}>
+              知道了
+            </Button>
+          }
+        />
+      ) : null}
       {orderDetail ? (
         <Table
           size="small"
@@ -465,6 +519,56 @@ export default function Schedules() {
             <Input />
           </Form.Item>
         </Form>
+      </Modal>
+      <Modal
+        title="打印出货计划（勾选要打印的排程）"
+        open={printOpen}
+        onCancel={() => setPrintOpen(false)}
+        onOk={() => {
+          const list = rows.filter((r) => printSelected.includes(r.id))
+          if (list.length === 0) {
+            message.warning('请勾选至少一条排程')
+            return
+          }
+          printShipPlan(list, printMode)
+          setPrintOpen(false)
+        }}
+        okText="打印"
+        width={760}
+      >
+        <div style={{ marginBottom: 12 }}>
+          装运方式：
+          <Select
+            style={{ width: 170, marginLeft: 8 }}
+            value={printMode}
+            onChange={(v) => setPrintMode(v)}
+            options={PRINT_MODES.map((m) => ({ value: m, label: m }))}
+          />
+          <span style={{ marginLeft: 16, color: '#888', fontSize: 12 }}>已出货/已取消的排程不在列表内</span>
+        </div>
+        <Table<ScheduleRow>
+          rowKey="id"
+          size="small"
+          pagination={false}
+          dataSource={rows.filter((r) => r.status === 'pending' || r.status === 'picked')}
+          rowSelection={{ selectedRowKeys: printSelected, onChange: (keys) => setPrintSelected(keys as number[]) }}
+          columns={[
+            { title: '承诺日(PD)', dataIndex: 'promisedDate', key: 'pd', render: dateStr },
+            { title: '订单号', key: 'o', render: (_: unknown, r: ScheduleRow) => r.salesOrder.orderNo },
+            { title: '成品', key: 'p', render: (_: unknown, r: ScheduleRow) => r.product.sku + ' ' + r.product.name },
+            { title: '数量', dataIndex: 'qty', key: 'qty', width: 70 },
+            { title: '到货仓', key: 'h', render: (_: unknown, r: ScheduleRow) => r.hub.name },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              key: 'st',
+              render: (v: string) => {
+                const t = STATUS_TAG[v] ?? { color: 'default', label: v }
+                return <Tag color={t.color}>{t.label}</Tag>
+              },
+            },
+          ]}
+        />
       </Modal>
     </Card>
   )
