@@ -47,6 +47,8 @@ const orderItemSchema = z.object({
     .number({ error: '单价必填' })
     .nonnegative({ error: '单价必须为非负数' })
     .max(9999999999.99, { error: '单价超出允许范围' }),
+  // 客户PO行号 Line#（销售手动录入，照客户采购单抄，可选）
+  lineNo: z.number({ error: 'Line# 必须为数字' }).int().positive().max(9999).optional(),
   // 交期在明细行级：同一张订单里不同成品可以有不同的交期
   customerDeliveryDate: dateSchema('客户交期'),
   zrhDeliveryDate: dateSchema('ZRH交货日期'),
@@ -153,6 +155,7 @@ export function ordersRoutes(app: FastifyInstance) {
             productId: item.productId,
             qty: item.qty,
             unitPrice: item.unitPrice,
+            ...(item.lineNo !== undefined ? { lineNo: item.lineNo } : {}),
             customerDeliveryDate: new Date(item.customerDeliveryDate),
             zrhDeliveryDate: new Date(item.zrhDeliveryDate),
           },
@@ -473,6 +476,7 @@ export function ordersRoutes(app: FastifyInstance) {
               productId: item.productId,
               qty: item.qty,
               unitPrice: item.unitPrice,
+              ...(item.lineNo !== undefined ? { lineNo: item.lineNo } : {}),
               customerDeliveryDate: new Date(item.customerDeliveryDate),
               zrhDeliveryDate: new Date(item.zrhDeliveryDate),
             },

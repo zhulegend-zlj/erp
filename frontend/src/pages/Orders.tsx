@@ -24,6 +24,7 @@ interface OrderItem {
   productId: number
   qty: number
   unitPrice: string
+  lineNo?: number | null
   customerDeliveryDate?: string | null
   zrhDeliveryDate?: string | null
   product: { id: number; sku: string; name: string }
@@ -53,6 +54,7 @@ interface OrderItemField {
   productId?: number
   qty?: number | null
   unitPrice?: number | null
+  lineNo?: number | null
   customerDeliveryDate?: string
   zrhDeliveryDate?: string
 }
@@ -108,6 +110,10 @@ function OrderItemsFields({ products }: { products: Product[] }) {
                 style={{ width: 90, marginBottom: 0 }}
               >
                 <InputNumber min={0} placeholder="单价" style={{ width: 90 }} />
+              </Form.Item>
+              <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>Line#</span>
+              <Form.Item name={[field.name, 'lineNo']} style={{ marginBottom: 0 }}>
+                <InputNumber min={1} max={9999} precision={0} placeholder="行号" style={{ width: 70 }} />
               </Form.Item>
               <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>客户交期</span>
               <Form.Item
@@ -215,6 +221,7 @@ export default function Orders() {
           productId: Number(it.productId ?? 0),
           qty: Number(it.qty ?? 0),
           unitPrice: Number(it.unitPrice ?? 0),
+          ...(it.lineNo ? { lineNo: Number(it.lineNo) } : {}),
           customerDeliveryDate: it.customerDeliveryDate,
           zrhDeliveryDate: it.zrhDeliveryDate,
         })),
@@ -285,6 +292,7 @@ export default function Orders() {
         productId: it.productId,
         qty: it.qty,
         unitPrice: Number(it.unitPrice),
+        lineNo: it.lineNo ?? undefined,
         customerDeliveryDate: it.customerDeliveryDate ? String(it.customerDeliveryDate).slice(0, 10) : undefined,
         zrhDeliveryDate: it.zrhDeliveryDate ? String(it.zrhDeliveryDate).slice(0, 10) : undefined,
       })),
@@ -305,6 +313,7 @@ export default function Orders() {
           productId: Number(it.productId ?? 0),
           qty: Number(it.qty ?? 0),
           unitPrice: Number(it.unitPrice ?? 0),
+          ...(it.lineNo ? { lineNo: Number(it.lineNo) } : {}),
           customerDeliveryDate: it.customerDeliveryDate,
           zrhDeliveryDate: it.zrhDeliveryDate,
         })),
@@ -611,6 +620,12 @@ export default function Orders() {
           pagination={false}
           dataSource={detailTarget?.items ?? []}
           columns={[
+            {
+              title: 'Line#',
+              key: 'lineNo',
+              width: 70,
+              render: (_: unknown, it: OrderItem) => (it.lineNo != null ? it.lineNo : '-'),
+            },
             { title: '成品', key: 'p', render: (_: unknown, it: OrderItem) => it.product.name + '（' + it.product.sku + '）' },
             { title: '数量', dataIndex: 'qty', key: 'qty', width: 80 },
             {
