@@ -141,11 +141,19 @@ function ReceiptForm({ parts, suppliers, onDone }: { parts: Part[]; suppliers: S
   const [poLoading, setPoLoading] = useState(false)
   const [form] = Form.useForm<{ purchaseOrderId?: number | 'self'; items?: ReceiptRow[] }>()
 
+  // 收货后立刻重拉采购单列表（下拉里的 已收 X/Y 进度即时刷新，反馈：缓存导致进度不同步）
+  async function refreshPos() {
+    try {
+      const { data } = await api.get<PurchaseOrderOption[]>('/purchase-orders')
+      setPurchaseOrders(data)
+    } catch (err) {
+      notifyError(err)
+    }
+  }
+
   useEffect(() => {
-    api
-      .get<PurchaseOrderOption[]>('/purchase-orders')
-      .then(({ data }) => setPurchaseOrders(data))
-      .catch(notifyError)
+    void refreshPos()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const watchedPo = Form.useWatch('purchaseOrderId', form)
@@ -209,6 +217,7 @@ function ReceiptForm({ parts, suppliers, onDone }: { parts: Part[]; suppliers: S
       message.success('收货入库成功')
       form.resetFields()
       setPoLedger(null)
+      await refreshPos()
       onDone?.()
     } catch (err) {
       notifyError(err)
@@ -580,8 +589,8 @@ function QcPanel({ refreshToken, onDone }: { refreshToken: number; onDone?: () =
 interface IssueContext {
   orderNo: string
   status: string
-  purchaseOrders: { id: number; orderNo: string; supplierName: string; items: { partId: number; sku: string; name: string; onHand: number }[] }[]
-  bomParts: { partId: number; sku: string; name: string; onHand: number }[]
+  purchaseOrders: { id: number; orderNo: string; supplierName: string; items: { partId: number; sku: string; name: string; onHand: number; purchasedQty: number }[] }[]
+  bomParts: { partId: number; sku: string; name: string; onHand: number; purchasedQty: number }[]
 }
 
 interface IssueRow {
@@ -589,13 +598,14 @@ interface IssueRow {
   sku?: string
   name?: string
   onHand?: number
+  purchasedQty?: number
   qty?: number | null
 }
 
 function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Part[]; onDone?: () => void }) {
   const [submitting, setSubmitting] = useState(false)
   const [context, setContext] = useState<IssueContext | null>(null)
-  const [boundPos, setBoundPos] = useState<{ orderNo: string; supplierName: string; items: { partId: number; sku: string; name: string; onHand: number }[] }[]>([])
+  const [boundPos, setBoundPos] = useState<{ orderNo: string; supplierName: string; items: { partId: number; sku: string; name: string; onHand: number; purchasedQty: number }[] }[]>([])
   const [form] = Form.useForm<{
     salesOrderId?: number
     poOrderNo?: string[]
@@ -630,15 +640,23 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
     }
     if (pos.length === 0) return
     setBoundPos(pos)
-    // 合并选中采购单的零件行（按 partId 去重，保留 sku/name/onHand），仓库只需填数量（可删行）
-    const merged = new Map<number, { partId: number; sku: string; name: string; onHand: number }>()
+    // 合并选中采购单的零件行（按 partId 去重，保留 sku/name/onHand/采购数量）
+    const merged = new Map<number, { partId: number; sku: string; name: string; onHand: number; purchasedQty: number }>()
     for (const po of pos) {
       for (const it of po.items) {
         if (!merged.has(it.partId)) merged.set(it.partId, it)
       }
     }
     form.setFieldsValue({
-      items: [...merged.values()].map((it) => ({ partId: it.partId, sku: it.sku, name: it.name, onHand: it.onHand, qty: undefined })),
+      // 数量默认填采购数量（可改，填 0 跳过提交）
+      items: [...merged.values()].map((it) => ({
+        partId: it.partId,
+        sku: it.sku,
+        name: it.name,
+        onHand: it.onHand,
+        purchasedQty: it.purchasedQty,
+        qty: it.purchasedQty > 0 ? it.purchasedQty : undefined,
+      })),
     })
   }
 
@@ -762,8 +780,8 @@ function IssueForm({ orders, parts, onDone }: { orders: SalesOrder[]; parts: Par
                       <Form.Item name={[field.name, 'partId']} hidden>
                         <Input />
                       </Form.Item>
-                      <div style={{ width: 300, lineHeight: '32px' }}>
-                        {it?.sku}　{it?.name}　<span style={{ color: '#999' }}>库存 {it?.onHand ?? 0}</span>
+                      <div style={{ width: 360, lineHeight: '32px' }}>
+                        {it?.sku}　{it?.name}　<span style={{ color: '#999' }}>库存 {it?.onHand ?? 0}｜采购 {it?.purchasedQty ?? 0}</span>
                       </div>
                     </>
                   ) : (

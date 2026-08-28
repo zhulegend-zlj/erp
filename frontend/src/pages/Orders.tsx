@@ -528,7 +528,7 @@ export default function Orders() {
         onCancel={() => setModalOpen(false)}
         onOk={() => form.submit()}
         confirmLoading={submitting}
-        width={820}
+        width={960}
         destroyOnClose
       >
         <Form form={form} layout="vertical" onFinish={handleCreate}>
@@ -579,7 +579,7 @@ export default function Orders() {
         onCancel={() => setEditingTarget(null)}
         onOk={() => editForm.submit()}
         confirmLoading={editSubmitting}
-        width={820}
+        width={960}
       >
         <Form form={editForm} layout="vertical" onFinish={handleUpdate}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px' }}>

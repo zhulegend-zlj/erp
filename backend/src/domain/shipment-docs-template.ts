@@ -78,7 +78,8 @@ function totalAmount(d: ShipmentDocData): number {
 
 function paymentDays(terms: string | null | undefined): number | null {
   if (!terms) return null
-  const m = /NET\s*(\d+)/i.exec(terms)
+  // 支持 NET 60 / N60 两种写法
+  const m = /(?:NET|N)\s*(\d+)/i.exec(terms)
   if (!m) return null
   const days = Number(m[1])
   return Number.isFinite(days) && days >= 0 ? days : null
@@ -99,6 +100,13 @@ function excelSerial(d: Date): number {
 function setNumFmt(ws: ExcelJS.Worksheet, addr: string, fmt: string) {
   const cell = ws.getCell(addr)
   cell.style = { ...cell.style, numFmt: fmt }
+}
+
+/** 税率显示：纯数字补百分号（模板为 0%，库内存 0） */
+function taxRateText(v: string | null | undefined): string | null {
+  const s = (v ?? '').trim()
+  if (!s) return null
+  return /^\d+(\.\d+)?$/.test(s) ? s + '%' : s
 }
 
 /** 运输说明：出货时未填则按明细自动生成（SKU 数量 pcs, ...） */
@@ -144,7 +152,7 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
   // 右上角日期与发票号
   const d2 = ws.getCell('M2')
   d2.value = excelDate(d.shipment.shippedAt)
-  setNumFmt(ws, 'M2', 'm/d/yy') // 与 Due Date 同款美式日期（如 8/14/26）
+  // 不再覆盖 M2 数字格式：保留模板原格式（如 14/Aug/26，老板要求）
   setVal(ws, 'M3', d.shipment.invoiceNo ?? '')
 
   // 抬头（Issuer）
@@ -196,7 +204,8 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
     } else {
       dueCell.value = { formula: 'M2+' + days, result: excelSerial(d.shipment.shippedAt) + days } as ExcelJS.CellFormulaValue
     }
-    setVal(ws, addr('M', row), l.remark ?? '')
+    // Remark 无内容时回填付款条件（如 N60），保证该列有数据
+    setVal(ws, addr('M', row), l.remark ?? d.shipment.paymentTerms ?? '')
   }
   for (let i = k; i < capacity; i++) {
     clearCells(ws, dataStart + i, ['A', 'B', 'C', 'D', 'H', 'I', 'J', 'K', 'L', 'M'])
@@ -246,7 +255,7 @@ function fillOfficialSheet(ws: ExcelJS.Worksheet, d: ShipmentDocData) {
     ['2.Shipping instructions:', shippingInstructionsText(d)],
     ['3.Payment terms:', d.shipment.paymentTerms ?? ''],
     ['4.VAT identification number:', d.company.vatNo],
-    ['5.Tax rate:', d.shipment.taxRate || d.company.taxRate],
+    ['5.Tax rate:', taxRateText(d.shipment.taxRate || d.company.taxRate)],
   ]
   for (const [label, value] of footerMap) {
     const r = findRowByText(ws, label, 'A')

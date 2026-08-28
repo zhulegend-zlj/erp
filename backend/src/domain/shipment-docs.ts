@@ -98,10 +98,10 @@ function excelDate(d: Date): Date {
   return out
 }
 
-/** 付款条件 NET 60 → 60 天；识别不出返回 null */
+/** 付款条件 NET 60 / N60 → 60 天；识别不出返回 null */
 export function paymentDays(terms: string | null | undefined): number | null {
   if (!terms) return null
-  const m = /NET\s*(\d+)/i.exec(terms)
+  const m = /(?:NET|N)\s*(\d+)/i.exec(terms)
   if (!m) return null
   const days = Number(m[1])
   return Number.isFinite(days) && days >= 0 ? days : null
@@ -194,7 +194,8 @@ export function buildOfficialInvoice(d: ShipmentDocData): ExcelJS.Workbook {
   for (const l of d.lines) {
     const row = ws.getRow(r)
     const ext = Math.round((l.qty * (num(l.unitPrice) ?? 0)) * 100) / 100
-    const vals = [noMap.get(l.product.sku) ?? '', l.customerPoNo ?? '', l.product.sku, descriptionOf(l), '', '', '', l.qty, num(l.unitPrice) ?? '', ext, ext, '', l.remark ?? '', '', '', '']
+    // Remark 无内容时回填付款条件（如 N60），保证该列有数据
+    const vals = [noMap.get(l.product.sku) ?? '', l.customerPoNo ?? '', l.product.sku, descriptionOf(l), '', '', '', l.qty, num(l.unitPrice) ?? '', ext, ext, '', l.remark ?? d.shipment.paymentTerms ?? '', '', '', '']
     row.values = vals
     const due = dueDateFor(d.shipment.shippedAt, d.shipment.paymentTerms)
     if (due) {
@@ -249,7 +250,7 @@ export function buildOfficialInvoice(d: ShipmentDocData): ExcelJS.Workbook {
     ['2.Shipping instructions:', d.shipment.shippingInstructions ?? '', false],
     ['3.Payment terms:', d.shipment.paymentTerms ?? '', false],
     ['4.VAT identification number:', d.company.vatNo, true],
-    ['5.Tax rate:', d.shipment.taxRate || d.company.taxRate, false],
+    ['5.Tax rate:', (d.shipment.taxRate || d.company.taxRate).trim() === '' ? '' : /^\d+(\.\d+)?$/.test((d.shipment.taxRate || d.company.taxRate).trim()) ? (d.shipment.taxRate || d.company.taxRate).trim() + '%' : (d.shipment.taxRate || d.company.taxRate).trim(), false],
     ['6.Collecting bank:', d.company.bankName, true],
   ]
   for (const [k, v, merge] of footers) {

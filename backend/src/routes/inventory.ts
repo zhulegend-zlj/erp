@@ -913,6 +913,13 @@ export function inventoryRoutes(app: FastifyInstance) {
     })
     const onHandMap = new Map(stockRows.map((s) => [s.itemId, s.qtyOnHand]))
     const onHandOf = (partId: number) => onHandMap.get(partId) ?? 0
+    // 该订单每零件的累计采购数量（跨全部采购单汇总，领料默认填采购数量）
+    const purchasedMap = new Map<number, number>()
+    for (const po of purchaseOrders) {
+      for (const it of po.items) {
+        purchasedMap.set(it.partId, (purchasedMap.get(it.partId) ?? 0) + it.qty)
+      }
+    }
     return {
       orderNo: order.orderNo,
       status: order.status,
@@ -920,9 +927,19 @@ export function inventoryRoutes(app: FastifyInstance) {
         id: po.id,
         orderNo: po.orderNo,
         supplierName: po.supplier?.name ?? '',
-        items: po.items.map((it) => ({ partId: it.partId, sku: it.part.sku, name: it.part.name, onHand: onHandOf(it.partId) })),
+        items: po.items.map((it) => ({
+          partId: it.partId,
+          sku: it.part.sku,
+          name: it.part.name,
+          onHand: onHandOf(it.partId),
+          purchasedQty: purchasedMap.get(it.partId) ?? 0,
+        })),
       })),
-      bomParts: [...bomPartMap.values()].map((p) => ({ ...p, onHand: onHandOf(p.partId) })),
+      bomParts: [...bomPartMap.values()].map((p) => ({
+        ...p,
+        onHand: onHandOf(p.partId),
+        purchasedQty: purchasedMap.get(p.partId) ?? 0,
+      })),
     }
   })
 }

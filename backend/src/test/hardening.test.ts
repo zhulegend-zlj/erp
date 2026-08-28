@@ -899,9 +899,9 @@ describe('hardening（加固回归）', () => {
       expect(body.purchaseOrders[0]).toMatchObject({
         orderNo: 'PO-IC',
         supplierName: '供应商-IC',
-        items: [{ partId: part.id, sku: 'P-IC', onHand: 0 }],
+        items: [{ partId: part.id, sku: 'P-IC', onHand: 0, purchasedQty: 10 }],
       })
-      expect(body.bomParts).toEqual([{ partId: part.id, sku: 'P-IC', name: '零件IC', onHand: 0 }])
+      expect(body.bomParts).toEqual([{ partId: part.id, sku: 'P-IC', name: '零件IC', onHand: 0, purchasedQty: 10 }])
     })
   })
 
