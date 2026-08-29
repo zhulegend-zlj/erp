@@ -44,6 +44,149 @@ interface Props {
   onCreated: () => void
 }
 
+// 需求表供应商分组样式：组间 2px 蓝色分界线 + 组首行供应商加粗
+const REQ_GROUP_CSS =
+  '.po-group-start > td { border-top: 2px solid #1677ff !important; } ' +
+  '.po-group-start > td:first-child { font-weight: 600; }'
+
+/**
+ * 需求表按供应商分组（老板反馈：选完订单也要按供应商区分）——
+ * 供应商放最左合并单元格、每组只显示一次，组间加 2px 蓝色分界线。
+ */
+function RequirementGroupedTable(props: {
+  requirements: Requirement[]
+  loading: boolean
+  suppliers: Supplier[]
+}) {
+  const { requirements, loading, suppliers } = props
+  // 按供应商分组排序（未设置供应商的组排最后），组内保持原始顺序
+  const sorted: Requirement[] = []
+  const groups: { key: string; name: string; size: number }[] = []
+  const seen = new Map<string, Requirement[]>()
+  for (const r of requirements) {
+    const key = r.supplierId == null ? '__none__' : String(r.supplierId)
+    const list = seen.get(key) ?? []
+    list.push(r)
+    seen.set(key, list)
+  }
+  for (const [key, list] of seen) {
+    if (key === '__none__') continue
+    groups.push({ key, name: list[0]!.supplierName || suppliers.find((s) => String(s.id) === key)?.name || '未设置供应商', size: list.length })
+    sorted.push(...list)
+  }
+  const noneList = seen.get('__none__')
+  if (noneList && noneList.length > 0) {
+    groups.push({ key: '__none__', name: '未设置供应商', size: noneList.length })
+    sorted.push(...noneList)
+  }
+  // 供应商列 rowSpan：每组首行=组大小，其余 0；组首行标记分界线 class
+  const groupStartRow = new Set<string>()
+  const rowSpans = new Map<string, number>()
+  {
+    let idx = 0
+    for (const g of groups) {
+      for (let i = 0; i < g.size; i++) {
+        const key = g.key + ':' + i
+        rowSpans.set(key, i === 0 ? g.size : 0)
+        if (i === 0) groupStartRow.add(key)
+        idx++
+      }
+    }
+  }
+  let rowIdx = 0
+  const rowKeyOf = (r: Requirement) => {
+    const key = (r.supplierId == null ? '__none__' : String(r.supplierId)) + ':' + sorted.findIndex((x) => x === r)
+    return key
+  }
+  const rowSpanFor = (r: Requirement) => {
+    const g = (r.supplierId == null ? '__none__' : String(r.supplierId))
+    const pos = sorted.filter((x) => (x.supplierId == null ? '__none__' : String(x.supplierId)) === g).indexOf(r)
+    return pos === 0 ? (groups.find((x) => x.key === g)?.size ?? 1) : 0
+  }
+  const isGroupStart = (r: Requirement) => {
+    const g = (r.supplierId == null ? '__none__' : String(r.supplierId))
+    const pos = sorted.filter((x) => (x.supplierId == null ? '__none__' : String(x.supplierId)) === g).indexOf(r)
+    return pos === 0
+  }
+  void rowKeyOf
+  void rowIdx
+  return (
+    <Table<Requirement>
+      rowKey={(r) => rowKeyOf(r)}
+      loading={loading}
+      dataSource={sorted}
+      pagination={false}
+      scroll={{ x: 1100 }}
+      rowClassName={(r) => (isGroupStart(r) ? 'po-group-start' : '')}
+      columns={[
+        {
+          title: '供应商',
+          key: 'supplier',
+          fixed: 'left' as const,
+          width: 180,
+          onCell: (r: Requirement) => ({ rowSpan: rowSpanFor(r) }),
+          render: (_: unknown, r: Requirement) => {
+            const g = r.supplierId == null ? '__none__' : String(r.supplierId)
+            const name = groups.find((x) => x.key === g)?.name ?? '-'
+            return r.supplierId == null ? <Tag color="orange">{name}</Tag> : name
+          },
+        },
+        {
+          title: '零件',
+          key: 'part',
+          render: (_: unknown, r: Requirement) => r.sku + '　' + r.partName,
+        },
+        {
+          title: '用量/台',
+          key: 'usage',
+          render: (_: unknown, r: Requirement) => r.usageText ?? (r.usage === 0 || r.usage == null ? '-' : r.usage),
+        },
+        { title: '需求数量', dataIndex: 'requiredQty', key: 'requiredQty' },
+        { title: '现有库存', dataIndex: 'onHand', key: 'onHand' },
+        {
+          title: '缺口',
+          dataIndex: 'gapQty',
+          key: 'gapQty',
+          render: (v: number) => (v > 0 ? <Tag color="red">{v}</Tag> : v),
+        },
+        {
+          title: 'MOQ（起订量）',
+          dataIndex: 'moq',
+          key: 'moq',
+          render: (v: number | null | undefined, r: Requirement) =>
+            v != null ? (r.gapQty > 0 && r.gapQty < v ? <Tag color="gold">{v}</Tag> : v) : '-',
+        },
+        {
+          title: '安全库存',
+          dataIndex: 'safetyStock',
+          key: 'safetyStock',
+          render: (v: number | null | undefined) => v ?? '-',
+        },
+        {
+          title: '共用料',
+          dataIndex: 'isCommonPart',
+          key: 'isCommonPart',
+          render: (v: boolean) => (v ? <Tag color="geekblue">共用料</Tag> : '-'),
+        },
+        {
+          title: '建议采购量',
+          dataIndex: 'suggestedQty',
+          key: 'suggestedQty',
+          render: (v: number, r: Requirement) => {
+            const diff = v !== r.gapQty
+            return (
+              <span style={diff ? { color: '#1677ff', fontWeight: 600 } : undefined}>
+                {v}
+                {diff ? '（含安全库存补货）' : ''}
+              </span>
+            )
+          },
+        },
+      ]}
+    />
+  )
+}
+
 export default function GeneratePoTab(props: Props) {
   const {
     user,
@@ -261,72 +404,11 @@ export default function GeneratePoTab(props: Props) {
         <Alert type="success" message="所选订单当前无零件缺口" showIcon />
       ) : null}
 
-      <Table<Requirement>
-        rowKey="partId"
+      <style>{REQ_GROUP_CSS}</style>
+      <RequirementGroupedTable
+        requirements={requirements}
         loading={reqLoading}
-        dataSource={requirements}
-        pagination={false}
-        scroll={{ x: 1100 }}
-        columns={[
-          {
-            title: '零件',
-            key: 'part',
-            fixed: 'left' as const,
-            render: (_: unknown, r: Requirement) => r.sku + '　' + r.partName,
-          },
-          {
-            title: '供应商',
-            dataIndex: 'supplierName',
-            key: 'supplierName',
-            render: (v: string) => v || '-',
-          },
-          {
-            title: '用量/台',
-            key: 'usage',
-            render: (_: unknown, r: Requirement) => r.usageText ?? (r.usage === 0 || r.usage == null ? '-' : r.usage),
-          },
-          { title: '需求数量', dataIndex: 'requiredQty', key: 'requiredQty' },
-          { title: '现有库存', dataIndex: 'onHand', key: 'onHand' },
-          {
-            title: '缺口',
-            dataIndex: 'gapQty',
-            key: 'gapQty',
-            render: (v: number) => (v > 0 ? <Tag color="red">{v}</Tag> : v),
-          },
-          {
-            title: 'MOQ（起订量）',
-            dataIndex: 'moq',
-            key: 'moq',
-            render: (v: number | null | undefined, r: Requirement) =>
-              v != null ? (r.gapQty > 0 && r.gapQty < v ? <Tag color="gold">{v}</Tag> : v) : '-',
-          },
-          {
-            title: '安全库存',
-            dataIndex: 'safetyStock',
-            key: 'safetyStock',
-            render: (v: number | null | undefined) => v ?? '-',
-          },
-          {
-            title: '共用料',
-            dataIndex: 'isCommonPart',
-            key: 'isCommonPart',
-            render: (v: boolean) => (v ? <Tag color="geekblue">共用料</Tag> : '-'),
-          },
-          {
-            title: '建议采购量',
-            dataIndex: 'suggestedQty',
-            key: 'suggestedQty',
-            render: (v: number, r: Requirement) => {
-              const diff = v !== r.gapQty
-              return (
-                <span style={diff ? { color: '#1677ff', fontWeight: 600 } : undefined}>
-                  {v}
-                  {diff ? '（含安全库存补货）' : ''}
-                </span>
-              )
-            },
-          },
-        ]}
+        suppliers={suppliers}
       />
 
       <GeneratePoModal
