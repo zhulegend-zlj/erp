@@ -22,6 +22,7 @@ import {
 import {
   AccountBookOutlined,
   BarChartOutlined,
+  CalculatorOutlined,
   DatabaseOutlined,
   HomeOutlined,
   InboxOutlined,
@@ -40,6 +41,7 @@ import ShippingPage from './pages/Shipping'
 import MastersPage from './pages/Masters'
 import PurchasingPage from './pages/Purchasing'
 import InventoryPage from './pages/Inventory'
+import MaterialCalcPage from './pages/MaterialCalc'
 import FinancePage from './pages/Finance'
 import SchedulesPage from './pages/Schedules'
 import FeedbackWidget from './components/FeedbackWidget'
@@ -109,8 +111,16 @@ const navItems: NavItem[] = [
     key: '/inventory',
     label: '库存',
     path: '/inventory',
-    roles: ['warehouse', 'boss'],
+    roles: ['warehouse', 'purchase', 'boss'],
     icon: <InboxOutlined />,
+  },
+  {
+    // 仓库要求：物料计算独立成菜单，放在左侧「库存」下面（不在库存页里混着）
+    key: '/material-calc',
+    label: '物料计算',
+    path: '/material-calc',
+    roles: ['purchase', 'warehouse', 'boss'],
+    icon: <CalculatorOutlined />,
   },
   {
     key: '/finance',
@@ -613,8 +623,16 @@ export default function App() {
         <Route
           path="/inventory"
           element={
-            <RequireRole roles={['warehouse', 'boss']}>
+            <RequireRole roles={['warehouse', 'purchase', 'boss']}>
               <InventoryPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/material-calc"
+          element={
+            <RequireRole roles={['purchase', 'warehouse', 'boss']}>
+              <MaterialCalcPage />
             </RequireRole>
           }
         />

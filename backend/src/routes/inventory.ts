@@ -410,7 +410,7 @@ export function inventoryRoutes(app: FastifyInstance) {
   })
 
   // 订单物料计算：按销售订单号统计零件需求、已出库、差值（参考用户 Excel 布局）
-  app.get('/api/inventory/order-materials', { preHandler: requireRole('warehouse', 'boss') }, async (req, reply) => {
+  app.get('/api/inventory/order-materials', { preHandler: requireRole('warehouse', 'purchase', 'boss') }, async (req, reply) => {
     const raw = (req.query as { orderNo?: string }).orderNo
     if (!raw || !raw.trim()) {
       return reply.code(400).send({ error: 'orderNo 必填' })

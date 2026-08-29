@@ -625,4 +625,24 @@ describe('inventory', () => {
     const total = await prisma.productionEntry.aggregate({ where: { salesOrderId: order.id }, _sum: { qty: true } })
     expect(total._sum.qty).toBe(12)
   })
+
+  it('采购可登记退补货，撤销仍仅仓库/老板（反馈方案A）', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商-PRR' } })
+    const part = await prisma.part.create({ data: { sku: 'P-PRR', name: '采购退补货', supplierId: supplier.id } })
+    await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 10 } })
+    const app = buildApp()
+    const purchase = await loginCookie(app, 'purchase')
+    const created = await app.inject({
+      method: 'POST', url: '/api/return-replenishments', headers: { cookie: purchase },
+      payload: { partId: part.id, supplierId: supplier.id, returnQty: 2, replenishQty: 0 },
+    })
+    expect(created.statusCode).toBe(200)
+    const rrId = created.json().id
+    // 撤销仍仅仓库/老板
+    const undoDenied = await app.inject({ method: 'DELETE', url: '/api/return-replenishments/' + rrId, headers: { cookie: purchase } })
+    expect(undoDenied.statusCode).toBe(403)
+    const wh = await loginCookie(app, 'warehouse')
+    const undoOk = await app.inject({ method: 'DELETE', url: '/api/return-replenishments/' + rrId, headers: { cookie: wh } })
+    expect(undoOk.statusCode).toBe(200)
+  })
 })

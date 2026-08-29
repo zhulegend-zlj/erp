@@ -59,7 +59,7 @@ export function returnReplenishRoutes(app: FastifyInstance) {
     return pagedResult(rows, total, page)
   })
 
-  app.post('/api/return-replenishments', { preHandler: requireRole('warehouse') }, async (req, reply) => {
+  app.post('/api/return-replenishments', { preHandler: requireRole('warehouse', 'purchase') }, async (req, reply) => {
     const data = parseBody(returnReplenishSchema, req.body, reply)
     if (data === null) return
 
