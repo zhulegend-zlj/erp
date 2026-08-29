@@ -21,6 +21,7 @@ import { useAuth } from '../auth'
 import { useKeepAliveState } from './keepAlive'
 import { notifyError } from './common'
 import type { Paged } from './common'
+import { CompanyHeadersTab } from './CompanyHeadersTab'
 
 interface CrudField {
   key: string
@@ -191,6 +192,13 @@ const RESOURCES: CrudResource[] = [
     fields: [
       { key: 'name', label: '名称' },
       { key: 'contact', label: '联系人' },
+      { key: 'contactPerson', label: '联系人ATTN' },
+      { key: 'phone', label: '电话' },
+      { key: 'fax', label: '传真' },
+      { key: 'email', label: '邮箱' },
+      { key: 'defaultPaymentTerms', label: '默认付款方式' },
+      { key: 'defaultHeaderName', label: '默认抬头' },
+      { key: 'taxPoint', label: '加税点数', type: 'number' },
     ],
   },
   {
@@ -220,7 +228,11 @@ const RESOURCES: CrudResource[] = [
       { key: 'dimensions', label: '尺寸规格' },
       { key: 'finish', label: '表面处理' },
       { key: 'drawingsUrl', label: '图档', type: 'drawing' },
+      { key: 'moq', label: '起订量', type: 'number' },
+      { key: 'leadTime', label: '交货周期' },
+      { key: 'safetyStock', label: '安全库存', type: 'number' },
       { key: 'price', label: '价格', type: 'number' },
+      { key: 'priceInclTax', label: '含税参考价', type: 'number' },
       { key: 'supplierId', label: '供应商', type: 'supplier' },
     ],
   },
@@ -257,6 +269,7 @@ function CrudTab({
   const [linkingRow, setLinkingRow] = useState<CrudRow | null>(null)
   const [linkSupplierId, setLinkSupplierId] = useState<number | undefined>()
   const [linkPrice, setLinkPrice] = useState<number | null>(null)
+  const [linkPriceInclTax, setLinkPriceInclTax] = useState<number | null>(null)
   const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [form] = Form.useForm<Record<string, any>>()
   // 零件页默认每页 100 条（按老板反馈），其他基础资料页默认 10 条
@@ -346,7 +359,7 @@ function CrudTab({
         payload[f.key] = v === '' || v === null || v === undefined ? null : Number(v)
       } else if (
         f.type === 'image' ||
-        ['spec', 'drawingsUrl', 'tooling', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode', 'defaultPaymentTerms', 'defaultIncoterm', 'defaultMark', 'defaultTaxRate'].includes(f.key)
+        ['spec', 'drawingsUrl', 'tooling', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode', 'defaultPaymentTerms', 'defaultIncoterm', 'defaultMark', 'defaultTaxRate', 'contactPerson', 'phone', 'fax', 'email', 'defaultHeaderName', 'leadTime'].includes(f.key)
       ) {
         if (payload[f.key] === '') payload[f.key] = null
       }
@@ -384,6 +397,8 @@ function CrudTab({
     setLinkSupplierId(typeof v === 'number' ? v : undefined)
     const p = row.price
     setLinkPrice(p === null || p === undefined || p === '' ? null : Number(p))
+    const pit = row.priceInclTax
+    setLinkPriceInclTax(pit === null || pit === undefined || pit === '' ? null : Number(pit))
     setLinkOpen(true)
   }
 
@@ -394,6 +409,7 @@ function CrudTab({
       await api.put(resource.path + '/' + linkingRow.id, {
         supplierId: linkSupplierId ?? null,
         price: linkPrice ?? null,
+        priceInclTax: linkPriceInclTax ?? null,
       })
       message.success('供应商/价格已更新')
       setLinkOpen(false)
@@ -549,7 +565,7 @@ function CrudTab({
                 f.type === 'image' ||
                 f.type === 'number' ||
                 f.type === 'textarea' ||
-                ['spec', 'drawingsUrl', 'tooling', 'country', 'contact', 'unit', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode', 'defaultPaymentTerms', 'defaultIncoterm', 'defaultMark', 'defaultTaxRate'].includes(f.key)
+                ['spec', 'drawingsUrl', 'tooling', 'country', 'contact', 'unit', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode', 'defaultPaymentTerms', 'defaultIncoterm', 'defaultMark', 'defaultTaxRate', 'contactPerson', 'phone', 'fax', 'email', 'defaultHeaderName', 'leadTime'].includes(f.key)
                   ? []
                   : [{ required: true, message: '请输入' + f.label }]
               }
@@ -567,6 +583,12 @@ function CrudTab({
               ) : f.type === 'number' ? (
                 f.key === 'moq' ? (
                   <InputNumber min={1} precision={0} step={1} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
+                ) : f.key === 'safetyStock' ? (
+                  <InputNumber min={0} precision={0} step={1} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
+                ) : f.key === 'priceInclTax' ? (
+                  <InputNumber min={0} precision={4} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
+                ) : f.key === 'taxPoint' ? (
+                  <InputNumber min={0} max={100} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
                 ) : (
                   <InputNumber min={0} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
                 )
@@ -606,6 +628,15 @@ function CrudTab({
           placeholder="价格"
           value={linkPrice ?? undefined}
           onChange={(v) => setLinkPrice(typeof v === 'number' ? v : null)}
+        />
+        <div style={{ margin: '12px 0 8px' }}>含税参考价</div>
+        <InputNumber
+          min={0}
+          precision={4}
+          style={{ width: '100%' }}
+          placeholder="含税参考价"
+          value={linkPriceInclTax ?? undefined}
+          onChange={(v) => setLinkPriceInclTax(typeof v === 'number' ? v : null)}
         />
       </Modal>
     </>
@@ -1092,13 +1123,14 @@ export default function Masters() {
                 resource={RESOURCES[3]!}
                 canWrite={canWriteEngineering}
                 linkSupplierOnly={linkSupplierOnly}
-                omitFields={role === 'engineer' ? ['price', 'supplierId'] : undefined}
-                hideFields={role === 'engineer' ? ['price'] : undefined}
+                omitFields={role === 'engineer' ? ['price', 'priceInclTax', 'supplierId'] : undefined}
+                hideFields={role === 'engineer' ? ['price', 'priceInclTax'] : undefined}
               />
             ),
           },
           { key: 'bom', label: 'BOM 维护', children: <BomTab canWrite={canWriteEngineering} /> },
           { key: 'company', label: '公司资料', children: <CompanyProfileTab canWrite={role === 'boss' || role === 'sales'} /> },
+          { key: 'companyHeaders', label: '公司抬头', children: <CompanyHeadersTab canWrite={role === 'boss' || role === 'purchase'} /> },
           { key: 'hubs', label: '到货仓', children: <HubTab canWrite={role === 'boss' || role === 'sales'} /> },
         ]}
       />

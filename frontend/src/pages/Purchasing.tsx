@@ -1,629 +1,142 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import {
-  Alert,
-  Button,
-  Card,
-  Form,
-  InputNumber,
-  Modal,
-  Select,
-  Space,
-  Table,
-  Tag,
-  message,
-} from 'antd'
-import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Tabs } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { dateStr, dateTimeStr, money, notifyError, orderPhaseLabel, statusLabel } from './common'
-import type { Paged } from './common'
+import { notifyError } from './common'
 import { useKeepAliveState } from './keepAlive'
+import GeneratePoTab from './purchasing/GeneratePoTab'
+import PoListTab from './purchasing/PoListTab'
+import SparePoModal from './purchasing/SparePoModal'
+import PlaceholderTab from './purchasing/PlaceholderTab'
+import type {
+  CompanyHeader,
+  PoItemField,
+  Requirement,
+  SalesOrderDetail,
+  Supplier,
+} from './purchasing/types'
 
-interface SalesOrder {
-  id: number
-  orderNo: string
-  status: string
-  purchasing?: boolean
-  producing?: boolean
-  customer: { name: string }
-}
-
-interface SalesOrderDetail extends SalesOrder {
-  deliveryDate: string
-  items: {
-    id: number
-    productId: number
-    qty: number
-    unitPrice?: string
-    product: { sku: string; name: string }
-  }[]
-}
-
-interface Supplier {
-  id: number
-  name: string
-  contact: string | null
-}
-
-interface Requirement {
-  partId: number
-  sku: string
-  partName: string
-  supplierId: number | null
-  supplierName: string
-  price: number | null
-  usage: number | null
-  usageText?: string
-  requiredQty: number
-  onHand: number
-  gapQty: number
-}
-
-interface PoItemField {
-  partId?: number
-  qty?: number | null
-  unitPrice?: number | null
-  supplierId?: number | null
-}
-
-interface PoFormValues {
-  items?: PoItemField[]
-}
-
-interface PurchaseOrder {
-  id: number
-  orderNo: string
-  supplierId: number
-  salesOrderId: number | null
-}
-
-interface PurchaseOrderRow {
-  id: number
-  orderNo: string
-  status: string
-  supplierId: number
-  supplierName: string
-  salesOrderId: number | null
-  salesOrderNo?: string
-  totalAmount: number
-  paidAmount: number
-  outstanding: number
-  createdAt: string
-}
-
+// 采购页壳：7 页签 + 共享参考数据（供应商/公司抬头）+ keepAlive 状态提升到壳层。
+// 第一期页签：生成采购单 / 采购单列表 / 免费备品单；其余二期页签渲染占位。
 export default function Purchasing() {
   const { user } = useAuth()
-  const navigate = useNavigate()
-  const [orders, setOrders] = useState<SalesOrder[]>([])
-  const [pendingOrders, setPendingOrders] = useState<SalesOrder[]>([])
-  const [pendingOnly, setPendingOnly] = useState(false)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  // 关键上下文进会话缓存：切换页面回来继续操作（已选订单/明细/生成弹窗草稿）
-  const [orderId, setOrderId] = useKeepAliveState<number | undefined>('po.orderId', undefined)
+  const [companyHeaders, setCompanyHeaders] = useState<CompanyHeader[]>([])
+
+  // 关键上下文进会话缓存：切换页面/页签回来继续操作
+  const [activeTab, setActiveTab] = useKeepAliveState<string>('po.activeTab', 'generate')
+  const [orderIds, setOrderIds] = useKeepAliveState<number[]>('po.orderIds', [])
   const [requirements, setRequirements] = useKeepAliveState<Requirement[]>('po.requirements', [])
-  const [reqLoading, setReqLoading] = useState(false)
-  const [orderDetail, setOrderDetail] = useKeepAliveState<SalesOrderDetail | null>('po.orderDetail', null)
-  const [detailLoading, setDetailLoading] = useState(false)
+  const [orderDetails, setOrderDetails] = useKeepAliveState<SalesOrderDetail[]>('po.orderDetails', [])
   const [modalOpen, setModalOpen] = useKeepAliveState<boolean>('po.modalOpen', false)
   const [draftItems, setDraftItems] = useKeepAliveState<PoItemField[] | undefined>('po.draftItems', undefined)
-  const [submitting, setSubmitting] = useState(false)
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderRow[]>([])
-  const [poLoading, setPoLoading] = useState(false)
-  const [poPage, setPoPage] = useState(1)
-  const [poTotal, setPoTotal] = useState(0)
-  const [form] = Form.useForm<PoFormValues>()
-  const [poPageSize, setPoPageSize] = useState(10)
+  const [spareOpen, setSpareOpen] = useState(false)
+  const [listRefreshKey, setListRefreshKey] = useState(0)
 
-  // 恢复上次离开时的弹窗草稿（切换页面回来继续编辑）
   useEffect(() => {
-    if (draftItems) form.setFieldsValue({ items: draftItems })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void Promise.all([
+      api.get<Supplier[]>('/suppliers'),
+      api.get<CompanyHeader[]>('/company-headers'),
+    ])
+      .then(([s, h]) => {
+        setSuppliers(s.data)
+        setCompanyHeaders(h.data)
+      })
+      .catch(notifyError)
   }, [])
 
   const canCreate = user?.role === 'purchase'
 
-  async function loadPos(targetPage = 1, size?: number) {
-    setPoLoading(true)
-    try {
-      const ps = size ?? poPageSize
-      const { data } = await api.get<Paged<PurchaseOrderRow>>('/purchase-orders', {
-        params: { page: targetPage, pageSize: ps },
-      })
-      setPurchaseOrders(data.items)
-      setPoTotal(data.total)
-      setPoPage(data.page)
-    } catch (err) {
-      notifyError(err)
-    } finally {
-      setPoLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    void Promise.all([
-      api.get<SalesOrder[]>('/orders'),
-      api.get<SalesOrder[]>('/orders', { params: { pendingPurchase: 'true' } }),
-      api.get<Supplier[]>('/suppliers'),
-      loadPos(1),
-    ])
-      .then(([o, p, s]) => {
-        setOrders(o.data)
-        setPendingOrders(p.data)
-        setSuppliers(s.data)
-      })
-      .catch(notifyError)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    if (!orderId) {
-      setRequirements([])
-      setOrderDetail(null)
-      return
-    }
-    setReqLoading(true)
-    setDetailLoading(true)
-    void Promise.all([
-      api.get<Requirement[]>('/purchasing/requirements', { params: { orderId } }),
-      api.get<SalesOrderDetail>('/orders/' + orderId),
-    ])
-      .then(([r, d]) => {
-        setRequirements(r.data)
-        setOrderDetail(d.data)
-      })
-      .catch(notifyError)
-      .finally(() => {
-        setReqLoading(false)
-        setDetailLoading(false)
-      })
-  }, [orderId])
-
-  const gaps = requirements.filter((r) => r.gapQty > 0)
-
-  const watchedItems = Form.useWatch('items', form) as PoItemField[] | undefined
-  useEffect(() => {
-    setDraftItems(watchedItems)
-  }, [watchedItems, setDraftItems])
-  const supplierGroupMap = new Map<string, number>()
-  for (const it of watchedItems ?? []) {
-    const req = requirements.find((r) => r.partId === it.partId)
-    const chosen = suppliers.find((s) => s.id === it.supplierId)
-    const name = chosen?.name || req?.supplierName || '未设置供应商'
-    supplierGroupMap.set(name, (supplierGroupMap.get(name) ?? 0) + 1)
-  }
-  const supplierGroups = [...supplierGroupMap.entries()]
-
-  function openCreatePo() {
-    form.setFieldsValue({
-      items: gaps.map((g) => ({
-        partId: g.partId,
-        qty: g.gapQty,
-        unitPrice: g.price ?? undefined,
-        supplierId: g.supplierId ?? undefined,
-      })),
-    })
-    setModalOpen(true)
-  }
-
-  // 已生成过采购单的订单仍可继续生成（增补/补损），先确认再继续；新单会自动关联同一销售订单
-  function openCreatePoWithCheck() {
-    const selected = orders.find((o) => o.id === orderId)
-    // 草稿订单：销售还未确认，不能生成采购单——可一键提醒销售确认
-    if (selected?.status === 'draft') {
-      Modal.confirm({
-        title: '销售还未确认该订单',
-        content:
-          '订单 ' +
-          selected.orderNo +
-          ' 仍是草稿状态（销售未确认），暂不能生成采购单。是否提醒销售确认？',
-        okText: '提醒销售确认',
-        cancelText: '取消',
-        onOk: async () => {
-          try {
-            await api.patch('/orders/' + selected.id + '/remind-confirm')
-            message.success('已提醒销售确认，请等销售确认后再生成采购单')
-          } catch (err) {
-            notifyError(err)
-          }
-        },
-      })
-      return
-    }
-    const orderPos = purchaseOrders.filter((po) => po.salesOrderId === orderId)
-    if (orderPos.length === 0) {
-      openCreatePo()
-      return
-    }
-    Modal.confirm({
-      title: '该订单已生成过采购单',
-      content:
-        '已存在：' +
-        orderPos.map((p) => p.orderNo).join('、') +
-        '。确认继续生成新的采购单吗？新采购单会关联到同一销售订单，收货后一起计算采购进度。',
-      okText: '继续生成',
-      cancelText: '取消',
-      onOk: () => openCreatePo(),
-    })
-  }
-
-  async function handleCreate(values: PoFormValues) {
-    const rows = (values.items ?? []).map((it) => ({
-      partId: Number(it.partId ?? 0),
-      qty: Number(it.qty ?? 0),
-      unitPrice: Number(it.unitPrice ?? 0),
-      supplierId: it.supplierId ?? null,
-    }))
-    // 本次给原本没挂（或换了）供应商的零件选了供应商 → 询问是否同步回零件资料；
-    // 「仅本次生效」也会继续生成采购单，只是不写回零件资料
-    let syncAssignments = false
-    const assignments = rows.filter((r) => {
-      const req = requirements.find((x) => x.partId === r.partId)
-      return r.partId > 0 && r.supplierId != null && r.supplierId !== (req?.supplierId ?? null)
-    })
-    if (assignments.length > 0) {
-      const shouldSync = await new Promise<boolean>((resolve) => {
-        Modal.confirm({
-          title: '同步供应商到零件资料？',
-          content:
-            '本次为 ' +
-            assignments.length +
-            ' 个零件选择了供应商。是否同时更新到零件资料？选「仅本次生效」则只按本次采购单分组，不改零件资料。',
-          okText: '同步并生成采购单',
-          cancelText: '仅本次生效',
-          onOk: () => resolve(true),
-          onCancel: () => resolve(false),
-        })
-      })
-      syncAssignments = shouldSync
-    }
-    setSubmitting(true)
-    try {
-      if (syncAssignments && assignments.length > 0) {
-        await Promise.all(
-          assignments.map((a) => api.put('/parts/' + a.partId, { supplierId: a.supplierId })),
-        )
-      }
-      const { data } = await api.post<PurchaseOrder[]>('/purchase-orders/batch', {
-        salesOrderId: orderId,
-        items: rows.map((r) => ({
-          partId: r.partId,
-          qty: r.qty,
-          unitPrice: r.unitPrice,
-          supplierId: r.supplierId ?? undefined,
-        })),
-      })
-      message.success('已按供应商生成 ' + data.length + ' 张采购单：' + data.map((o) => o.orderNo).join('、'))
-      setModalOpen(false)
-      setDraftItems(undefined)
-      form.resetFields()
-      await loadPos(1)
-      if (orderId) {
-        void api
-          .get<Requirement[]>('/purchasing/requirements', { params: { orderId } })
-          .then(({ data: rd }) => setRequirements(rd))
-          .catch(notifyError)
-      }
-      // 生成采购单后刷新「待采购」横幅与订单下拉——该订单已有采购单，横幅自动消失，无需刷新页面
-      void Promise.all([
-        api.get<SalesOrder[]>('/orders'),
-        api.get<SalesOrder[]>('/orders', { params: { pendingPurchase: 'true' } }),
-      ])
-        .then(([o, p]) => {
-          setOrders(o.data)
-          setPendingOrders(p.data)
-          // 「只看待采购」模式下，当前订单已不在待采购列表 → 自动切回「显示全部订单」，避免下拉显示数字 ID
-          if (orderId != null && !p.data.some((x) => x.id === orderId)) {
-            setPendingOnly(false)
-          }
-        })
-        .catch(notifyError)
-    } catch (err) {
-      notifyError(err)
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
   return (
     <div>
-      <Card title="采购需求" style={{ marginBottom: 16 }}>
-        {orders.length === 0 ? (
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message="暂无销售订单"
-            description={
-              <span>
-                销售订单由销售或老板在「订单」页面创建；当前账号只能查看和基于订单生成采购单。
-                {user?.role === 'boss' ? (
-                  <Button type="link" style={{ paddingLeft: 8 }} onClick={() => navigate('/orders')}>
-                    去订单页
-                  </Button>
-                ) : (
-                  '请联系销售或老板先录入销售订单。'
-                )}
-              </span>
-            }
-          />
-        ) : null}
-        {pendingOrders.length > 0 ? (
-          <Alert
-            type="warning"
-            showIcon
-            style={{ marginBottom: 12 }}
-            message={'有 ' + pendingOrders.length + ' 个订单待生成采购单'}
-            action={
-              <Button size="small" type={pendingOnly ? 'primary' : 'default'} onClick={() => setPendingOnly((v) => !v)}>
-                {pendingOnly ? '显示全部订单' : '只看待采购'}
-              </Button>
-            }
-          />
-        ) : null}
-        <Space style={{ marginBottom: 16 }}>
-          <Select
-            placeholder={pendingOnly ? '选择待采购订单' : '选择销售订单'}
-            style={{ width: 360 }}
-            value={orderId}
-            onChange={(v) => setOrderId(v)}
-            options={(pendingOnly ? pendingOrders : orders).map((o) => ({
-              value: o.id,
-              label: o.orderNo + '（' + (o.customer?.name ?? '') + ' / ' + orderPhaseLabel(o) + '）',
-            }))}
-          />
-          {canCreate && orderId ? (
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePoWithCheck}>
-              生成采购单
+      <Card
+        title="采购管理"
+        extra={
+          canCreate ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setSpareOpen(true)}>
+              免费备品单
             </Button>
-          ) : null}
-        </Space>
-        {orderDetail ? (
-          <Card size="small" title={'销售订单明细：' + orderDetail.orderNo} style={{ marginBottom: 16 }} loading={detailLoading}>
-            <div>
-              <b>客户：</b>
-              {orderDetail.customer.name}　<b>交期：</b>
-              {dateStr(orderDetail.deliveryDate)}　<b>状态：</b>
-              {statusLabel(orderDetail.status)}
-            </div>
-            <div style={{ marginTop: 8 }}>
-              {orderDetail.items.map((it) => (
-                <div key={it.id}>
-                  {it.product.name}（{it.product.sku}）× {it.qty}
-                  {user?.role === 'boss' && it.unitPrice !== undefined ? '　单价 ¥' + money(it.unitPrice) : ''}
-                </div>
-              ))}
-            </div>
-          </Card>
-        ) : null}
-        {orderId && gaps.length === 0 && !reqLoading ? (
-          <Alert type="success" message="该订单当前无零件缺口" showIcon />
-        ) : null}
-        <Table<Requirement>
-          rowKey="partId"
-          loading={reqLoading}
-          dataSource={requirements}
-          pagination={false}
-          columns={[
+          ) : null
+        }
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
             {
-              title: '零件',
-              key: 'part',
-              render: (_: unknown, r: Requirement) => r.sku + '　' + r.partName,
-            },
-            {
-              title: '用量/台',
-              key: 'usage',
-              render: (_: unknown, r: Requirement) => r.usageText ?? (r.usage === 0 || r.usage == null ? '-' : r.usage),
-            },
-            { title: '需求数量', dataIndex: 'requiredQty', key: 'requiredQty' },
-            { title: '现有库存', dataIndex: 'onHand', key: 'onHand' },
-            {
-              title: '缺口',
-              dataIndex: 'gapQty',
-              key: 'gapQty',
-              render: (v: number) => (v > 0 ? <Tag color="red">{v}</Tag> : v),
-            },
-          ]}
-        />
-      </Card>
-
-      <Card title="采购单列表" style={{ marginBottom: 16 }}>
-        <Table<PurchaseOrderRow>
-          rowKey="id"
-          loading={poLoading}
-          dataSource={purchaseOrders}
-          pagination={{
-            current: poPage,
-            pageSize: poPageSize,
-            total: poTotal,
-            showSizeChanger: true,
-            pageSizeOptions: [10, 20, 50, 100],
-            onChange: (p, s) => {
-              if (s !== poPageSize) {
-                setPoPageSize(s)
-                void loadPos(1, s)
-              } else {
-                void loadPos(p)
-              }
-            },
-          }}
-          columns={[
-            { title: '采购单号', dataIndex: 'orderNo', key: 'orderNo' },
-            {
-              title: '销售订单',
-              dataIndex: 'salesOrderNo',
-              key: 'salesOrderNo',
-              render: (v: string | undefined) => v || '-',
-            },
-            { title: '供应商', dataIndex: 'supplierName', key: 'supplierName' },
-            {
-              title: '状态',
-              dataIndex: 'status',
-              key: 'status',
-              render: (v: string) => {
-                const map: Record<string, { label: string; color: string }> = {
-                  open: { label: '待收货', color: 'orange' },
-                  partial: { label: '部分收货', color: 'blue' },
-                  received: { label: '已收货', color: 'green' },
-                }
-                const item = map[v] ?? { label: v, color: 'default' }
-                return <Tag color={item.color}>{item.label}</Tag>
-              },
-            },
-            {
-              title: '金额',
-              dataIndex: 'totalAmount',
-              key: 'totalAmount',
-              align: 'right' as const,
-              render: (v: number) => '¥' + money(v),
-            },
-            {
-              title: '已付',
-              dataIndex: 'paidAmount',
-              key: 'paidAmount',
-              align: 'right' as const,
-              render: (v: number) => '¥' + money(v),
-            },
-            {
-              title: '未付',
-              dataIndex: 'outstanding',
-              key: 'outstanding',
-              align: 'right' as const,
-              render: (v: number) => (
-                <span style={{ color: v > 0 ? '#cf1322' : undefined }}>¥{money(v)}</span>
+              key: 'generate',
+              label: '生成采购单',
+              children: (
+                <GeneratePoTab
+                  user={user}
+                  canCreate={canCreate}
+                  orderIds={orderIds}
+                  setOrderIds={setOrderIds}
+                  requirements={requirements}
+                  setRequirements={setRequirements}
+                  orderDetails={orderDetails}
+                  setOrderDetails={setOrderDetails}
+                  modalOpen={modalOpen}
+                  setModalOpen={setModalOpen}
+                  draftItems={draftItems}
+                  setDraftItems={setDraftItems}
+                  suppliers={suppliers}
+                  companyHeaders={companyHeaders}
+                  onCreated={() => setListRefreshKey((k) => k + 1)}
+                />
               ),
             },
-            { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', render: dateTimeStr },
-          ]}
-        />
-      </Card>
-
-      <Card title="供应商跟催（联系人）">
-        <Table<Supplier>
-          rowKey="id"
-          dataSource={suppliers}
-          pagination={false}
-          columns={[
-            { title: '供应商', dataIndex: 'name', key: 'name' },
             {
-              title: '联系人',
-              dataIndex: 'contact',
-              key: 'contact',
-              render: (v: string | null) => v ?? '-',
+              key: 'po-list',
+              label: '采购单列表',
+              children: (
+                <PoListTab
+                  canCreate={canCreate}
+                  suppliers={suppliers}
+                  companyHeaders={companyHeaders}
+                  refreshKey={listRefreshKey}
+                />
+              ),
+            },
+            { key: 'follow', label: '采购跟进', children: <PlaceholderTab title="采购跟进" /> },
+            { key: 'overview', label: '订单采购总览', children: <PlaceholderTab title="订单采购总览" /> },
+            { key: 'incoming', label: '来料明细', children: <PlaceholderTab title="来料明细" /> },
+            { key: 'common-parts', label: '共用料库存', children: <PlaceholderTab title="共用料库存" /> },
+            {
+              key: 'spare',
+              label: '免费备品单',
+              children: (
+                <Card size="small">
+                  {canCreate ? (
+                    <>
+                      <p style={{ color: '#666' }}>
+                        给供应商的免费备品单：单价强制 0，备注自动填写「请给3‰免费备品」，编号自动生成为订单号+备品。
+                      </p>
+                      <Button type="primary" icon={<PlusOutlined />} onClick={() => setSpareOpen(true)}>
+                        新建免费备品单
+                      </Button>
+                    </>
+                  ) : (
+                    <Alert type="info" showIcon message="当前账号只读，无法新建免费备品单" />
+                  )}
+                </Card>
+              ),
             },
           ]}
         />
       </Card>
 
-      <Modal
-        title="生成采购单"
-        open={modalOpen}
-        onCancel={() => setModalOpen(false)}
-        onOk={() => form.submit()}
-        confirmLoading={submitting}
-        width={720}
-        destroyOnClose
-      >
-        <Form form={form} layout="vertical" onFinish={handleCreate}>
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message={'预计生成 ' + supplierGroups.length + ' 张采购单，单号 = 订单号-Z001/-Z002…'}
-            description={
-              supplierGroups.length > 0
-                ? supplierGroups.map(([name, count]) => name + '：' + count + ' 项').join('；')
-                : '当前订单无采购缺口（或为空），可点下方「添加明细」手动增补采购，系统将按零件供应商自动分组。'
-            }
-          />
-          <Form.List name="items">
-            {(fields, { add, remove }) => (
-              <>
-                {fields.map((field, index) => {
-                  const it = watchedItems?.[index]
-                  const req = requirements.find((r) => r.partId === it?.partId)
-                  const isDefaultSupplier = req?.supplierId != null && it?.supplierId === req.supplierId
-                  return (
-                    <div
-                      key={field.key}
-                      style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start', marginBottom: 8 }}
-                    >
-                      <Form.Item
-                        name={[field.name, 'partId']}
-                        rules={[{ required: true, message: '零件' }]}
-                        style={{ marginBottom: 0, width: 250 }}
-                      >
-                        <Select
-                          showSearch
-                          optionFilterProp="label"
-                          placeholder="零件（SKU + 名称）"
-                          onChange={(v) => {
-                            const r = requirements.find((x) => x.partId === v)
-                            form.setFields([
-                              { name: ['items', field.name, 'qty'], value: r?.gapQty ?? undefined },
-                              { name: ['items', field.name, 'unitPrice'], value: r?.price ?? undefined },
-                              { name: ['items', field.name, 'supplierId'], value: r?.supplierId ?? undefined },
-                            ])
-                          }}
-                          options={requirements.map((r) => ({
-                            value: r.partId,
-                            label: r.sku + '　' + r.partName,
-                          }))}
-                        />
-                      </Form.Item>
-                      <Form.Item
-                        name={[field.name, 'qty']}
-                        rules={[{ required: true, message: '数量' }]}
-                        style={{ marginBottom: 0 }}
-                      >
-                        <InputNumber min={1} precision={0} step={1} placeholder="数量" />
-                      </Form.Item>
-                      <Form.Item
-                        name={[field.name, 'unitPrice']}
-                        rules={[{ required: true, message: '单价' }]}
-                        style={{ marginBottom: 0 }}
-                      >
-                        <InputNumber min={0} placeholder="单价" style={{ width: 130 }} />
-                      </Form.Item>
-                      <Form.Item name={[field.name, 'supplierId']} style={{ marginBottom: 0 }}>
-                        <Select
-                          allowClear
-                          showSearch
-                          optionFilterProp="label"
-                          placeholder="供应商"
-                          style={{ width: 180 }}
-                          options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
-                        />
-                      </Form.Item>
-                      {req?.supplierId == null && it?.supplierId == null ? (
-                        <Tag color="orange" style={{ marginTop: 4 }}>未设置</Tag>
-                      ) : isDefaultSupplier ? (
-                        <Tag color="green" style={{ marginTop: 4 }}>默认</Tag>
-                      ) : it?.supplierId != null ? (
-                        <Tag color="blue" style={{ marginTop: 4 }}>本次改选</Tag>
-                      ) : null}
-                      <div style={{ lineHeight: '32px', color: '#8c8c8c', fontSize: 12 }}>
-                        {req
-                          ? '用量 ' + (req.usageText ?? req.usage ?? '-') + ' ｜需求 ' + req.requiredQty + ' ｜库存 ' + req.onHand + ' ｜需采购 ' + req.gapQty
-                          : ''}
-                      </div>
-                      <Button
-                        type="text"
-                        danger
-                        icon={<MinusCircleOutlined />}
-                        onClick={() => remove(field.name)}
-                      />
-                    </div>
-                  )
-                })}
-                <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                  添加明细
-                </Button>
-              </>
-            )}
-          </Form.List>
-        </Form>
-      </Modal>
+      <SparePoModal
+        open={spareOpen}
+        canCreate={canCreate}
+        suppliers={suppliers}
+        onCancel={() => setSpareOpen(false)}
+        onSuccess={() => {
+          setSpareOpen(false)
+          setListRefreshKey((k) => k + 1)
+        }}
+      />
     </div>
   )
 }
