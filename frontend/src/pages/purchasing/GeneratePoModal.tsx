@@ -92,6 +92,7 @@ export default function GeneratePoModal(props: Props) {
         }
       })
     form.setFieldsValue({ ...defaults, items })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   const watchedItems = Form.useWatch('items', form) as PoItemField[] | undefined
@@ -125,6 +126,36 @@ export default function GeneratePoModal(props: Props) {
     const letters = groups.map((_, i) => poLetter(i))
     return { count: groups.length, base, letters }
   }, [watchedItems, requirements, suppliers, selectedOrderNos])
+
+  // 按供应商分组（老板反馈：同供应商只显示一次、放最左边、组间有明显分界线）
+  // 组顺序 = 首次出现顺序；未设置供应商的归「未设置」组
+  const grouped = useMemo(() => {
+    const map = new Map<string, number[]>()
+    ;(watchedItems ?? []).forEach((it, i) => {
+      const key = it?.supplierId == null ? '__none__' : String(it.supplierId)
+      const list = map.get(key) ?? []
+      list.push(i)
+      map.set(key, list)
+    })
+    return [...map.entries()].map(([key, indices]) => {
+      const sup = key === '__none__' ? null : suppliers.find((s) => String(s.id) === key)
+      return { key, sup, supName: sup?.name ?? '未设置供应商', indices }
+    })
+  }, [watchedItems, suppliers])
+
+  function changeGroupSupplier(key: string, supplierId: number | undefined) {
+    const indices = grouped.find((g) => g.key === key)?.indices ?? []
+    const fields = indices.map((i) => ({
+      name: ['items', i, 'supplierId'] as ['items', number, 'supplierId'],
+      value: supplierId,
+    }))
+    if (fields.length > 0) form.setFields(fields)
+    // 组内各行按新供应商加税点重算含税价
+    indices.forEach((i) => {
+      const price = form.getFieldValue(['items', i, 'unitPrice']) as number | null | undefined
+      form.setFieldValue(['items', i, 'unitPriceInclTax'], calcInclTax(price, supplierTaxPoint(supplierId)))
+    })
+  }
 
   async function handleSubmit(values: PoFormValues) {
     const flat: {
@@ -281,196 +312,231 @@ export default function GeneratePoModal(props: Props) {
         <Form.List name="items">
           {(fields, { add, remove }) => (
             <>
-              {fields.map((field, index) => {
-                const it = watchedItems?.[index]
-                const req = requirements.find((r) => r.partId === it?.partId)
-                const isDefaultSupplier = req?.supplierId != null && it?.supplierId === req.supplierId
-                const hasSplit = it?.splits != null && it.splits.length > 0
+              {grouped.map((group) => {
+                const firstIdx = group.indices[0]
+                const firstIt = watchedItems?.[firstIdx]
+                const firstReq = requirements.find((r) => r.partId === firstIt?.partId)
+                const isDefaultSupplier =
+                  firstReq?.supplierId != null && firstIt?.supplierId === firstReq.supplierId
+                const isChanged = firstIt?.supplierId != null && !isDefaultSupplier
+                const isMissing = firstIt?.supplierId == null
                 return (
                   <div
-                    key={field.key}
+                    key={'group-' + group.key}
                     style={{
-                      border: '1px solid #f0f0f0',
-                      borderRadius: 6,
-                      padding: 12,
-                      marginBottom: 12,
+                      border: '2px solid #91caff',
+                      borderRadius: 8,
+                      marginBottom: 16,
+                      background: '#fafcff',
                     }}
                   >
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
-                      <Form.Item
-                        name={[field.name, 'partId']}
-                        rules={[{ required: true, message: '零件' }]}
-                        style={{ marginBottom: 0, width: 250 }}
-                      >
-                        <Select
-                          showSearch
-                          optionFilterProp="label"
-                          placeholder="零件（SKU + 名称）"
-                          onChange={(v) => {
-                            const r = requirements.find((x) => x.partId === v)
-                            const sup = suppliers.find((s) => s.id === r?.supplierId)
-                            form.setFields([
-                              { name: ['items', field.name, 'qty'], value: r?.suggestedQty ?? r?.gapQty ?? undefined },
-                              { name: ['items', field.name, 'unitPrice'], value: r?.price ?? undefined },
-                              { name: ['items', field.name, 'supplierId'], value: r?.supplierId ?? undefined },
-                              {
-                                name: ['items', field.name, 'unitPriceInclTax'],
-                                value: calcInclTax(r?.price, sup?.taxPoint ?? supplierTaxPoint(r?.supplierId)),
-                              },
-                              { name: ['items', field.name, 'usage'], value: r?.usage ?? undefined },
-                            ])
-                          }}
-                          options={requirements.map((r) => ({
-                            value: r.partId,
-                            label: r.sku + '　' + r.partName,
-                          }))}
-                        />
-                      </Form.Item>
-                      <Form.Item
-                        name={[field.name, 'qty']}
-                        rules={[{ required: !hasSplit, message: '数量' }]}
-                        style={{ marginBottom: 0 }}
-                      >
-                        <InputNumber min={1} precision={0} step={1} placeholder="数量" disabled={hasSplit} />
-                      </Form.Item>
-                      <Form.Item
-                        name={[field.name, 'unitPrice']}
-                        rules={[{ required: true, message: '不含税单价' }]}
-                        style={{ marginBottom: 0 }}
-                      >
-                        <InputNumber
-                          min={0}
-                          precision={4}
-                          placeholder="不含税单价"
-                          style={{ width: 130 }}
-                          onChange={(v) => {
-                            const supId = form.getFieldValue(['items', field.name, 'supplierId']) as number | null | undefined
-                            form.setFieldValue(
-                              ['items', field.name, 'unitPriceInclTax'],
-                              calcInclTax(v as number | null, supplierTaxPoint(supId)),
-                            )
-                          }}
-                        />
-                      </Form.Item>
-                      <Form.Item name={[field.name, 'unitPriceInclTax']} style={{ marginBottom: 0 }}>
-                        <InputNumber min={0} precision={2} placeholder="含税单价" style={{ width: 130 }} />
-                      </Form.Item>
-                      <Form.Item
-                        name={[field.name, 'supplierId']}
-                        rules={[{ required: true, message: '供应商' }]}
-                        style={{ marginBottom: 0 }}
-                      >
-                        <Select
-                          showSearch
-                          optionFilterProp="label"
-                          placeholder="供应商"
-                          style={{ width: 180 }}
-                          onChange={(v) => {
-                            const price = form.getFieldValue(['items', field.name, 'unitPrice']) as number | null | undefined
-                            form.setFieldValue(
-                              ['items', field.name, 'unitPriceInclTax'],
-                              calcInclTax(price, supplierTaxPoint(v as number | null)),
-                            )
-                          }}
-                          options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
-                        />
-                      </Form.Item>
-                      <Form.Item name={[field.name, 'note']} style={{ marginBottom: 0 }}>
-                        <Input placeholder="备注" style={{ width: 160 }} />
-                      </Form.Item>
-                      {req?.supplierId == null && it?.supplierId == null ? (
-                        <Tag color="orange" style={{ marginTop: 4 }}>未设置</Tag>
-                      ) : isDefaultSupplier ? (
-                        <Tag color="green" style={{ marginTop: 4 }}>默认</Tag>
-                      ) : it?.supplierId != null ? (
-                        <Tag color="blue" style={{ marginTop: 4 }}>本次改选</Tag>
-                      ) : null}
-                      <Button
-                        type="text"
-                        danger
-                        icon={<MinusCircleOutlined />}
-                        onClick={() => remove(field.name)}
+                    {/* 供应商分组头：供应商放最左、只显示一次、组间明显分界线 */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '8px 12px',
+                        background: '#e6f4ff',
+                        borderBottom: '2px solid #91caff',
+                        borderTopLeftRadius: 6,
+                        borderTopRightRadius: 6,
+                      }}
+                    >
+                      <span style={{ fontWeight: 700, fontSize: 14, minWidth: 160 }}>
+                        {group.supName}
+                      </span>
+                      <Select
+                        showSearch
+                        optionFilterProp="label"
+                        placeholder="改选供应商（整组生效）"
+                        style={{ width: 200 }}
+                        value={firstIt?.supplierId ?? undefined}
+                        onChange={(v) => changeGroupSupplier(group.key, v)}
+                        options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
                       />
-                    </div>
-                    <div style={{ color: '#8c8c8c', fontSize: 12, marginTop: 6 }}>
-                      {req
-                        ? '用量 ' +
-                          (req.usageText ?? req.usage ?? '-') +
-                          ' ｜需求 ' +
-                          req.requiredQty +
-                          ' ｜库存 ' +
-                          req.onHand +
-                          ' ｜缺口 ' +
-                          req.gapQty +
-                          (req.moq != null ? ' ｜MOQ ' + req.moq : '') +
-                          (req.safetyStock != null ? ' ｜安全库存 ' + req.safetyStock : '') +
-                          (req.isCommonPart ? ' ｜共用料' : '')
-                        : ''}
+                      {isMissing ? (
+                        <Tag color="orange">未设置供应商</Tag>
+                      ) : isDefaultSupplier ? (
+                        <Tag color="green">默认</Tag>
+                      ) : isChanged ? (
+                        <Tag color="blue">本次改选</Tag>
+                      ) : null}
+                      <span style={{ color: '#8c8c8c', fontSize: 12 }}>
+                        {group.indices.length} 项
+                      </span>
                     </div>
 
-                    <Form.List name={[field.name, 'splits']}>
-                      {(splitFields, splitOps) => (
-                        <div style={{ marginTop: 8, paddingLeft: 12, borderLeft: '3px solid #91caff' }}>
-                          {splitFields.length === 0 ? (
-                            <Button
-                              size="small"
-                              type="link"
-                              icon={<SplitCellsOutlined />}
-                              onClick={() => {
-                                splitOps.add({ qty: it?.qty ?? undefined, expectedDeliveryDate: undefined })
-                                splitOps.add({ qty: undefined, expectedDeliveryDate: undefined })
-                              }}
-                            >
-                              拆单
-                            </Button>
-                          ) : (
-                            <>
-                              <div style={{ marginBottom: 6, color: '#1677ff' }}>
-                                已拆单：{splitFields.length} 个子批次（splitNo {splitFields.map((_, i) => i).join('、')}），提交时同供应商同 splitNo 合成一张单
-                              </div>
-                              {splitFields.map((sf, si) => (
-                                <div key={sf.key} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                                  <Tag color="blue">批次 {si}</Tag>
-                                  <Form.Item
-                                    name={[sf.name, 'qty']}
-                                    rules={[{ required: true, message: '数量' }]}
-                                    style={{ marginBottom: 0 }}
-                                  >
-                                    <InputNumber min={1} precision={0} placeholder="数量" />
-                                  </Form.Item>
-                                  <Form.Item name={[sf.name, 'expectedDeliveryDate']} style={{ marginBottom: 0 }}>
-                                    <Input type="date" placeholder="预计交货日期" style={{ width: 170 }} />
-                                  </Form.Item>
-                                  <Button
-                                    type="text"
-                                    danger
-                                    size="small"
-                                    icon={<MinusCircleOutlined />}
-                                    onClick={() => splitOps.remove(sf.name)}
-                                  />
+                    {/* 组内明细行 */}
+                    <div style={{ padding: '4px 12px 12px' }}>
+                      {group.indices.map((index) => {
+                        const field = fields[index]!
+                        const it = watchedItems?.[index]
+                        const req = requirements.find((r) => r.partId === it?.partId)
+                        const hasSplit = it?.splits != null && it.splits.length > 0
+                        return (
+                          <div
+                            key={field.key}
+                            style={{
+                              borderTop: index !== group.indices[0] ? '1px dashed #d9d9d9' : 'none',
+                              paddingTop: index !== group.indices[0] ? 10 : 4,
+                              paddingBottom: 6,
+                            }}
+                          >
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
+                              <Form.Item
+                                name={[field.name, 'partId']}
+                                rules={[{ required: true, message: '零件' }]}
+                                style={{ marginBottom: 0, width: 250 }}
+                              >
+                                <Select
+                                  showSearch
+                                  optionFilterProp="label"
+                                  placeholder="零件（SKU + 名称）"
+                                  onChange={(v) => {
+                                    const r = requirements.find((x) => x.partId === v)
+                                    const sup = suppliers.find((s) => s.id === r?.supplierId)
+                                    form.setFields([
+                                      { name: ['items', field.name, 'qty'], value: r?.suggestedQty ?? r?.gapQty ?? undefined },
+                                      { name: ['items', field.name, 'unitPrice'], value: r?.price ?? undefined },
+                                      { name: ['items', field.name, 'supplierId'], value: r?.supplierId ?? undefined },
+                                      {
+                                        name: ['items', field.name, 'unitPriceInclTax'],
+                                        value: calcInclTax(r?.price, sup?.taxPoint ?? supplierTaxPoint(r?.supplierId)),
+                                      },
+                                      { name: ['items', field.name, 'usage'], value: r?.usage ?? undefined },
+                                    ])
+                                  }}
+                                  options={requirements.map((r) => ({
+                                    value: r.partId,
+                                    label: r.sku + '　' + r.partName,
+                                  }))}
+                                />
+                              </Form.Item>
+                              <Form.Item
+                                name={[field.name, 'qty']}
+                                rules={[{ required: !hasSplit, message: '数量' }]}
+                                style={{ marginBottom: 0 }}
+                              >
+                                <InputNumber min={1} precision={0} step={1} placeholder="数量" disabled={hasSplit} />
+                              </Form.Item>
+                              <Form.Item
+                                name={[field.name, 'unitPrice']}
+                                rules={[{ required: true, message: '不含税单价' }]}
+                                style={{ marginBottom: 0 }}
+                              >
+                                <InputNumber
+                                  min={0}
+                                  precision={4}
+                                  placeholder="不含税单价"
+                                  style={{ width: 130 }}
+                                  onChange={(v) => {
+                                    const supId = form.getFieldValue(['items', field.name, 'supplierId']) as number | null | undefined
+                                    form.setFieldValue(
+                                      ['items', field.name, 'unitPriceInclTax'],
+                                      calcInclTax(v as number | null, supplierTaxPoint(supId)),
+                                    )
+                                  }}
+                                />
+                              </Form.Item>
+                              <Form.Item name={[field.name, 'unitPriceInclTax']} style={{ marginBottom: 0 }}>
+                                <InputNumber min={0} precision={2} placeholder="含税单价" style={{ width: 130 }} />
+                              </Form.Item>
+                              <Form.Item name={[field.name, 'note']} style={{ marginBottom: 0 }}>
+                                <Input placeholder="备注" style={{ width: 160 }} />
+                              </Form.Item>
+                              <Button
+                                type="text"
+                                danger
+                                icon={<MinusCircleOutlined />}
+                                onClick={() => remove(field.name)}
+                              />
+                            </div>
+                            <div style={{ color: '#8c8c8c', fontSize: 12, marginTop: 6 }}>
+                              {req
+                                ? '用量 ' +
+                                  (req.usageText ?? req.usage ?? '-') +
+                                  ' ｜需求 ' +
+                                  req.requiredQty +
+                                  ' ｜库存 ' +
+                                  req.onHand +
+                                  ' ｜缺口 ' +
+                                  req.gapQty +
+                                  ' ｜建议采购 ' +
+                                  (req.suggestedQty ?? req.gapQty) +
+                                  (req.moq != null ? ' ｜MOQ ' + req.moq : '') +
+                                  (req.safetyStock != null ? ' ｜安全库存 ' + req.safetyStock : '') +
+                                  (req.isCommonPart ? ' ｜共用料' : '')
+                                : ''}
+                            </div>
+
+                            <Form.List name={[field.name, 'splits']}>
+                              {(splitFields, splitOps) => (
+                                <div style={{ marginTop: 8, paddingLeft: 12, borderLeft: '3px solid #91caff' }}>
+                                  {splitFields.length === 0 ? (
+                                    <Button
+                                      size="small"
+                                      type="link"
+                                      icon={<SplitCellsOutlined />}
+                                      onClick={() => {
+                                        splitOps.add({ qty: it?.qty ?? undefined, expectedDeliveryDate: undefined })
+                                        splitOps.add({ qty: undefined, expectedDeliveryDate: undefined })
+                                      }}
+                                    >
+                                      拆单
+                                    </Button>
+                                  ) : (
+                                    <>
+                                      <div style={{ marginBottom: 6, color: '#1677ff' }}>
+                                        已拆单：{splitFields.length} 个子批次，提交时同供应商同批次合成一张单
+                                      </div>
+                                      {splitFields.map((sf, si) => (
+                                        <div key={sf.key} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                                          <Tag color="blue">批次 {si}</Tag>
+                                          <Form.Item
+                                            name={[sf.name, 'qty']}
+                                            rules={[{ required: true, message: '数量' }]}
+                                            style={{ marginBottom: 0 }}
+                                          >
+                                            <InputNumber min={1} precision={0} placeholder="数量" />
+                                          </Form.Item>
+                                          <Form.Item name={[sf.name, 'expectedDeliveryDate']} style={{ marginBottom: 0 }}>
+                                            <Input type="date" placeholder="预计交货日期" style={{ width: 170 }} />
+                                          </Form.Item>
+                                          <Button
+                                            type="text"
+                                            danger
+                                            size="small"
+                                            icon={<MinusCircleOutlined />}
+                                            onClick={() => splitOps.remove(sf.name)}
+                                          />
+                                        </div>
+                                      ))}
+                                      <Space>
+                                        <Button
+                                          size="small"
+                                          type="dashed"
+                                          icon={<PlusOutlined />}
+                                          onClick={() => splitOps.add({ qty: undefined, expectedDeliveryDate: undefined })}
+                                        >
+                                          添加批次
+                                        </Button>
+                                        <Button
+                                          size="small"
+                                          onClick={() => splitOps.remove(splitFields.map((sf) => sf.name))}
+                                        >
+                                          取消拆单
+                                        </Button>
+                                      </Space>
+                                    </>
+                                  )}
                                 </div>
-                              ))}
-                              <Space>
-                                <Button
-                                  size="small"
-                                  type="dashed"
-                                  icon={<PlusOutlined />}
-                                  onClick={() => splitOps.add({ qty: undefined, expectedDeliveryDate: undefined })}
-                                >
-                                  添加批次
-                                </Button>
-                                <Button
-                                  size="small"
-                                  onClick={() => splitOps.remove(splitFields.map((sf) => sf.name))}
-                                >
-                                  取消拆单
-                                </Button>
-                              </Space>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </Form.List>
+                              )}
+                            </Form.List>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                 )
               })}
