@@ -154,6 +154,7 @@ export async function buildPoTemplate(data: PoDocData): Promise<Buffer> {
     set(c.material, line.material)
     if (tpl.isZrh) {
       set(c.usage, line.usage ?? '')
+      set(c.qty, line.qty)
       set(c.priceInclTax, line.unitPriceInclTax ?? '')
       ws.getCell(r, c.amount!).value = { formula: '=H' + r + '*G' + r }
       set(c.delivery, data.expectedDeliveryDate ?? '')
@@ -186,6 +187,8 @@ export async function buildPoTemplate(data: PoDocData): Promise<Buffer> {
   ws.getCell(totalRow, tpl.totalCol).value = {
     formula: '=SUM(' + amountCol + first + ':' + amountCol + last + ')',
   }
+  // 大写金额行：模板原公式 =I12 引用旧合计行，明细多行插入后行号已位移——重写为指向新合计行
+  ws.getCell(totalRow + 1, tpl.totalCol).value = { formula: '=' + amountCol + totalRow }
 
   // 5) 付款方式（1.2 行替换）
   if (data.paymentTerms) {
