@@ -49,7 +49,15 @@ model Customer {
 model Supplier {
   id                   Int               @id @default(autoincrement())
   name                 String
-  contact              String?
+  contact              String? // [旧] 联系人（保留兼容）
+  // 采购单头部字段：生成采购单时自动带出（第3轮口径）
+  contactPerson        String? // 联系人 ATTN
+  phone                String? // 电话
+  fax                  String? // 传真
+  email                String? // 邮箱
+  defaultPaymentTerms  String? // 默认付款方式（月结/月结30天/货到付款/现金…）
+  defaultHeaderName    String? // 默认抬头（智锐恒/锦名诚）
+  taxPoint             Decimal? @db.Decimal(5, 2) // 加税点数（如 7=加7个点；空=不含税口径）
   createdAt            DateTime          @default(now())
   purchaseOrders       PurchaseOrder[]
   supplierPayments     SupplierPayment[]
@@ -89,8 +97,11 @@ model Part {
   imageUrl             String?
   drawingsUrl          String?
   tooling              String?
-  moq                  Int?
+  moq                  Int? // 起订量 MOQ（采购下单提示，采购自己决定买多少）
   price                Decimal?            @db.Decimal(12, 4)
+  priceInclTax         Decimal?            @db.Decimal(12, 4) // 含税参考价（双价口径，采购维护）
+  leadTime             String? // 交货周期（选填，如 90天/7-10天，共用料视图显示）
+  safetyStock          Int? // 安全库存（低于安全线采购页提醒；下单会跌破线时自动补货到安全线）
   usedIn               String? // 用在何处（暂存未展示）
   process              String? // 生产工艺（暂存未展示）
   supplier             Supplier?           @relation(fields: [supplierId], references: [id])
@@ -134,6 +145,7 @@ model SalesOrder {
   createdAt            DateTime           @default(now())
   items                SalesOrderItem[]
   purchaseOrders       PurchaseOrder[]
+  purchaseOrderSalesOrders PurchaseOrderSalesOrder[]
   issues               Issue[]
   productionEntries    ProductionEntry[]
   shipments            Shipment[]
@@ -164,13 +176,26 @@ model PurchaseOrder {
   orderNo      String              @unique
   supplier     Supplier            @relation(fields: [supplierId], references: [id])
   supplierId   Int
+  // 主订单：兼容现有领料/相位/订单锁定逻辑；完整关联见 PurchaseOrderSalesOrder 中间表
   salesOrder   SalesOrder?         @relation(fields: [salesOrderId], references: [id])
   salesOrderId Int?
-  status       String              @default("open") // open/partial/received
+  status       String              @default("open") // open/partial/received 收货进度（仓库联动，不动）
+  // —— 采购流转状态（与收货进度独立，采购改）：pending 未下单/sent 已下单/printed 已打印/confirmed 已回签
+  poStatus     String              @default("pending")
+  poType       String              @default("normal") // normal 正常/spare 免费备品
+  orderDate    DateTime? // 下单日期
+  expectedDeliveryDate String? // 预计交货时间（文本口径，如 2026.03.01开始每周交1000套；Excel 原样）
+  paymentTerms String? // 付款方式（供应商默认带出可改）
+  termsNote    String? // 备注条款（打印用）
+  headerName   String? // 抬头（智锐恒/锦名诚）→ 决定打印模板口径
+  taxPoint     Decimal?            @db.Decimal(5, 2) // 加税点快照（供应商带出可改）
   createdAt    DateTime            @default(now())
   items        PurchaseOrderItem[]
   receipts     Receipt[]
   payments     SupplierPayment[]
+  salesOrders  PurchaseOrderSalesOrder[]
+  attachments  PurchaseOrderAttachment[]
+  editLogs     PurchaseOrderEditLog[]
 }
 
 model PurchaseOrderItem {
@@ -180,7 +205,11 @@ model PurchaseOrderItem {
   part            Part          @relation(fields: [partId], references: [id])
   partId          Int
   qty             Int
-  unitPrice       Decimal       @db.Decimal(12, 2)
+  unitPrice       Decimal       @db.Decimal(12, 2) // 不含税单价（成本口径，财务/看板沿用）
+  unitPriceInclTax Decimal?     @db.Decimal(12, 2) // 含税单价（展示/对账；含税=不含税×(1+加税点%)）
+  usage           Int? // 用量（BOM 带出可改，打印用）
+  note            String? // 备注（打印用，如 请给3‰免费备品）
+  supplierReplyDate DateTime? // 供应商回复交期（采购跟进里采购填）
 
   @@unique([purchaseOrderId, partId])
 }
@@ -198,6 +227,7 @@ model Receipt {
   lotNo           String?
   qcStatus        String?
   defectiveQty    Int            @default(0)
+  consigned       Boolean        @default(false) // 客供料：客户免费供料，不挂采购单/供应商、单价0，正常入库领用扣库存
   receivedAt      DateTime       @default(now())
   createdAt       DateTime       @default(now())
 }
@@ -390,4 +420,47 @@ model ReturnReplenish {
   lotNo           String?
   note            String?
   createdAt       DateTime  @default(now())
+}
+
+// 公司抬头（采购单 FROM 用，多抬头可选：智锐恒/锦名诚）——与 CompanyProfile（收款发票抬头）相互独立
+model CompanyHeader {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique // 抬头名（智锐恒/锦名诚）
+  address   String? // 地址（打印头部，可多行）
+  tel       String?
+  fax       String?
+  email     String?
+  createdAt DateTime @default(now())
+}
+
+// 采购单 ↔ 销售订单 多对多（一张采购单可合并多个客户 PO）
+model PurchaseOrderSalesOrder {
+  id              Int           @id @default(autoincrement())
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId Int
+  salesOrder      SalesOrder    @relation(fields: [salesOrderId], references: [id])
+  salesOrderId    Int
+
+  @@unique([purchaseOrderId, salesOrderId])
+}
+
+// 回签件附件（供应商回签扫描件/照片归档）
+model PurchaseOrderAttachment {
+  id              Int           @id @default(autoincrement())
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId Int
+  url             String
+  name            String
+  uploadedAt      DateTime      @default(now())
+}
+
+// 改单历史（对应 Excel 多 sheet 版本链：beforeJson/afterJson 快照）
+model PurchaseOrderEditLog {
+  id              Int           @id @default(autoincrement())
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId Int
+  beforeJson      String
+  afterJson       String
+  editedBy        String
+  editedAt        DateTime      @default(now())
 }

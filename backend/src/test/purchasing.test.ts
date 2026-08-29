@@ -125,7 +125,7 @@ describe('purchasing', () => {
       payload: { supplierId: supplier.id, items: [{ partId: part.id, qty: 100, unitPrice: 0.5 }] }
     })
     expect(res.statusCode).toBe(200)
-    expect(res.json().orderNo).toMatch(/^PO-\d{8}-\d{3}$/)
+    expect(res.json().orderNo).toMatch(/^PO-\d{8}-[A-Z]{2}$/)
     expect(res.json().items).toHaveLength(1)
   })
 
@@ -186,10 +186,10 @@ describe('purchasing', () => {
       payload: { supplierId: supplier.id, salesOrderId: order.id, items: [{ partId: part.id, qty: 10, unitPrice: 1 }] },
     })
     expect(res.statusCode).toBe(200)
-    expect(res.json().orderNo).toBe('PO-DRAFT-1-Z001')
+    expect(res.json().orderNo).toBe('PO-DRAFT-1A')
   })
 
-  it('挂销售订单的采购单号 = 订单PO号 + -Z001/-Z002 递增', async () => {
+  it('挂销售订单的采购单号 = 订单PO号 + 字母递增（A→B）', async () => {
     const customer = await prisma.customer.create({ data: { name: '客户Z' } })
     const order = await prisma.salesOrder.create({
       data: { orderNo: '265440545874390', customerId: customer.id, customerPoNo: '265440545874390', zrhDeliveryDate: new Date('2026-09-30'), status: 'confirmed' },
@@ -201,13 +201,13 @@ describe('purchasing', () => {
     const payload = { supplierId: supplier.id, salesOrderId: order.id, items: [{ partId: part.id, qty: 10, unitPrice: 1 }] }
     const r1 = await app.inject({ method: 'POST', url: '/api/purchase-orders', headers: { cookie }, payload })
     expect(r1.statusCode).toBe(200)
-    expect(r1.json().orderNo).toBe('265440545874390-Z001')
+    expect(r1.json().orderNo).toBe('265440545874390A')
     const r2 = await app.inject({ method: 'POST', url: '/api/purchase-orders', headers: { cookie }, payload })
     expect(r2.statusCode).toBe(200)
-    expect(r2.json().orderNo).toBe('265440545874390-Z002')
+    expect(r2.json().orderNo).toBe('265440545874390B')
   })
 
-  it('批量生成：同一订单按供应商分组自动排 Z001/Z002', async () => {
+  it('批量生成：同一订单按供应商分组自动排 A/B 字母', async () => {
     const customer = await prisma.customer.create({ data: { name: '客户B' } })
     const order = await prisma.salesOrder.create({
       data: { orderNo: 'PO-BATCH-9', customerId: customer.id, customerPoNo: 'PO-BATCH-9', zrhDeliveryDate: new Date('2026-09-30'), status: 'confirmed' },
@@ -233,7 +233,7 @@ describe('purchasing', () => {
     expect(res.statusCode).toBe(200)
     const orders = res.json()
     expect(orders).toHaveLength(2)
-    expect(orders.map((o: any) => o.orderNo).sort()).toEqual(['PO-BATCH-9-Z001', 'PO-BATCH-9-Z002'])
+    expect(orders.map((o: any) => o.orderNo).sort()).toEqual(['PO-BATCH-9A', 'PO-BATCH-9B'])
   })
 
   it('创建采购单 items 为空返回 400', async () => {
@@ -369,5 +369,249 @@ describe('purchasing', () => {
     expect(results.filter((r) => r.statusCode === 200)).toHaveLength(2)
     const receipts = await prisma.receipt.findMany({ where: { purchaseOrderId: po.id } })
     expect(receipts.reduce((s, r) => s + r.qty, 0)).toBe(2)
+  })
+
+  it('多订单合并生成采购单：编号=首PO-末PO+字母，中间表关联全部订单', async () => {
+    const customer = await prisma.customer.create({ data: { name: '客户MG' } })
+    const o1 = await prisma.salesOrder.create({
+      data: { orderNo: '259283', customerId: customer.id, customerPoNo: '259283', status: 'confirmed' },
+    })
+    const o2 = await prisma.salesOrder.create({
+      data: { orderNo: '259288', customerId: customer.id, customerPoNo: '259288', status: 'confirmed' },
+    })
+    const supplier = await prisma.supplier.create({ data: { name: '供应商MG' } })
+    const part = await prisma.part.create({ data: { sku: 'P-MG', name: '零件MG', supplierId: supplier.id } })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    const res = await app.inject({
+      method: 'POST', url: '/api/purchase-orders', headers: { cookie },
+      payload: {
+        supplierId: supplier.id,
+        salesOrderIds: [o1.id, o2.id],
+        items: [{ partId: part.id, qty: 10, unitPrice: 1, unitPriceInclTax: 1.07, usage: 2, note: '合并两单' }],
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { orderNo: string; salesOrderId: number }
+    expect(body.orderNo).toBe('259283-288A')
+    // 中间表关联两个订单
+    const links = await prisma.purchaseOrderSalesOrder.findMany({
+      where: { purchaseOrder: { orderNo: body.orderNo } },
+    })
+    expect(links.map((l) => l.salesOrderId).sort()).toEqual([o1.id, o2.id].sort())
+    // 双价与明细新字段落库
+    const po = await prisma.purchaseOrder.findUniqueOrThrow({
+      where: { orderNo: body.orderNo },
+      include: { items: true },
+    })
+    expect(po.items[0]!.unitPriceInclTax?.toNumber()).toBe(1.07)
+    expect(po.items[0]!.usage).toBe(2)
+    expect(po.items[0]!.note).toBe('合并两单')
+    // 两个订单都点亮采购中
+    const so1 = await prisma.salesOrder.findUnique({ where: { id: o1.id } })
+    const so2 = await prisma.salesOrder.findUnique({ where: { id: o2.id } })
+    expect(so1?.purchasing).toBe(true)
+    expect(so2?.purchasing).toBe(true)
+  })
+
+  it('拆单：同供应商同零件不同 splitNo 生成多张单，字母顺延', async () => {
+    const customer = await prisma.customer.create({ data: { name: '客户SP' } })
+    const order = await prisma.salesOrder.create({
+      data: { orderNo: '272750', customerId: customer.id, customerPoNo: '272750', status: 'confirmed' },
+    })
+    const supplier = await prisma.supplier.create({ data: { name: '供应商SP' } })
+    const part = await prisma.part.create({ data: { sku: 'P-SP', name: '零件SP', supplierId: supplier.id } })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    const res = await app.inject({
+      method: 'POST', url: '/api/purchase-orders/batch', headers: { cookie },
+      payload: {
+        salesOrderId: order.id,
+        items: [
+          { partId: part.id, qty: 4000, unitPrice: 0.24, splitNo: 0, expectedDeliveryDate: '2026-09-12' },
+          { partId: part.id, qty: 2672, unitPrice: 0.24, splitNo: 1, expectedDeliveryDate: '2026-09-30' },
+        ],
+        expectedDeliveryDate: '2026-09-12',
+      },
+    })
+    if (res.statusCode !== 200) console.log('SPLIT-DEBUG', res.body.slice(0, 300))
+    expect(res.statusCode).toBe(200)
+    const orders = res.json() as Array<{ orderNo: string }>
+    expect(orders).toHaveLength(2)
+    expect(orders.map((o) => o.orderNo).sort()).toEqual(['272750A', '272750B'])
+  })
+
+  it('免费备品单：poType=spare 单价必须为 0，编号=订单号+备品', async () => {
+    const customer = await prisma.customer.create({ data: { name: '客户SP2' } })
+    const order = await prisma.salesOrder.create({
+      data: { orderNo: '259203', customerId: customer.id, customerPoNo: '259203', status: 'confirmed' },
+    })
+    const supplier = await prisma.supplier.create({ data: { name: '供应商SP2' } })
+    const part = await prisma.part.create({ data: { sku: 'P-SP2', name: '零件SP2', supplierId: supplier.id } })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    // 单价>0 → 400
+    const bad = await app.inject({
+      method: 'POST', url: '/api/purchase-orders', headers: { cookie },
+      payload: { supplierId: supplier.id, salesOrderId: order.id, poType: 'spare', items: [{ partId: part.id, qty: 10, unitPrice: 5 }] },
+    })
+    expect(bad.statusCode).toBe(400)
+    // 正常备品单
+    const res = await app.inject({
+      method: 'POST', url: '/api/purchase-orders', headers: { cookie },
+      payload: {
+        supplierId: supplier.id, salesOrderId: order.id, poType: 'spare',
+        items: [{ partId: part.id, qty: 10, unitPrice: 0, note: '请给3‰免费备品' }],
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { orderNo: string; poType: string; poStatus: string }
+    expect(body.orderNo).toBe('259203备品')
+    // 再下一张 → -2
+    const res2 = await app.inject({
+      method: 'POST', url: '/api/purchase-orders', headers: { cookie },
+      payload: { supplierId: supplier.id, salesOrderId: order.id, poType: 'spare', items: [{ partId: part.id, qty: 5, unitPrice: 0 }] },
+    })
+    expect((res2.json() as { orderNo: string }).orderNo).toBe('259203备品-2')
+  })
+
+  it('手工编号：manualOrderNo 优先 + 唯一性校验', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商MN' } })
+    const part = await prisma.part.create({ data: { sku: 'P-MN', name: '零件MN', supplierId: supplier.id } })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    const res = await app.inject({
+      method: 'POST', url: '/api/purchase-orders', headers: { cookie },
+      payload: { supplierId: supplier.id, manualOrderNo: 'JMC20200475备品', items: [{ partId: part.id, qty: 10, unitPrice: 0 }] },
+    })
+    expect(res.statusCode).toBe(200)
+    expect((res.json() as { orderNo: string }).orderNo).toBe('JMC20200475备品')
+    // 重复编号 → 400
+    const dup = await app.inject({
+      method: 'POST', url: '/api/purchase-orders', headers: { cookie },
+      payload: { supplierId: supplier.id, manualOrderNo: 'JMC20200475备品', items: [{ partId: part.id, qty: 10, unitPrice: 0 }] },
+    })
+    expect(dup.statusCode).toBe(400)
+    expect(dup.json().error).toContain('已存在')
+  })
+
+  it('需求计算：多订单 orderIds 合并 + 安全库存补货 + MOQ/共用料标识', async () => {
+    const customer = await prisma.customer.create({ data: { name: '客户RQ' } })
+    const o1 = await prisma.salesOrder.create({
+      data: { orderNo: 'RQ-1', customerId: customer.id, customerPoNo: 'RQ-1', status: 'confirmed' },
+    })
+    const o2 = await prisma.salesOrder.create({
+      data: { orderNo: 'RQ-2', customerId: customer.id, customerPoNo: 'RQ-2', status: 'confirmed' },
+    })
+    const p1 = await prisma.product.create({ data: { sku: 'RQ-P1', name: '成品RQ1' } })
+    const p2 = await prisma.product.create({ data: { sku: 'RQ-P2', name: '成品RQ2' } })
+    const part = await prisma.part.create({ data: { sku: 'RQ-PART', name: '共用零件', moq: 5000, safetyStock: 200, leadTime: '90天' } })
+    // 共用料：挂在两个成品 BOM 里
+    await prisma.bom.create({ data: { productId: p1.id, partId: part.id, qty: 2 } })
+    await prisma.bom.create({ data: { productId: p2.id, partId: part.id, qty: 1 } })
+    await prisma.salesOrderItem.create({ data: { orderId: o1.id, productId: p1.id, qty: 1000, unitPrice: 10 } })
+    await prisma.salesOrderItem.create({ data: { orderId: o2.id, productId: p2.id, qty: 1000, unitPrice: 10 } })
+    await prisma.stock.create({ data: { itemType: 'part', itemId: part.id, qtyOnHand: 100 } })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    const res = await app.inject({
+      method: 'GET', url: '/api/purchasing/requirements?orderIds=' + o1.id + ',' + o2.id, headers: { cookie },
+    })
+    expect(res.statusCode).toBe(200)
+    const rows = res.json() as Array<{
+      partId: number; requiredQty: number; onHand: number; gapQty: number; suggestedQty: number
+      moq: number | null; safetyStock: number | null; leadTime: string | null; isCommonPart: boolean
+    }>
+    expect(rows).toHaveLength(1)
+    const row = rows[0]!
+    // 需求 = 2×1000 + 1×1000 = 3000；缺口 = 3000−100 = 2900
+    expect(row.requiredQty).toBe(3000)
+    expect(row.gapQty).toBe(2900)
+    // 安全库存补货：2900 缺口买完库存归零 < 安全线 200 → 补到线 = 3000−100+200 = 3100
+    expect(row.suggestedQty).toBe(3100)
+    expect(row.moq).toBe(5000)
+    expect(row.safetyStock).toBe(200)
+    expect(row.leadTime).toBe('90天')
+    expect(row.isCommonPart).toBe(true)
+  })
+
+  it('采购单状态流转：未下单→已下单→已打印→已回签 单向，只能向后', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商ST' } })
+    const part = await prisma.part.create({ data: { sku: 'P-ST', name: '零件ST', supplierId: supplier.id } })
+    const po = await prisma.purchaseOrder.create({
+      data: { orderNo: 'ST-1A', supplierId: supplier.id, items: { create: { partId: part.id, qty: 10, unitPrice: 1 } } },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    const go = async (poStatus: string) =>
+      app.inject({ method: 'PATCH', url: '/api/purchase-orders/' + po.id + '/status', headers: { cookie }, payload: { poStatus } })
+    expect((await go('sent')).statusCode).toBe(200)
+    // 不能跳级也不能回退
+    expect((await go('confirmed')).statusCode).toBe(400)
+    expect((await go('pending')).statusCode).toBe(400)
+    expect((await go('printed')).statusCode).toBe(200)
+    expect((await go('confirmed')).statusCode).toBe(200)
+    // 终点后不能再改
+    expect((await go('sent')).statusCode).toBe(400)
+    const saved = await prisma.purchaseOrder.findUnique({ where: { id: po.id } })
+    expect(saved?.poStatus).toBe('confirmed')
+    // 收货进度不受影响
+    expect(saved?.status).toBe('open')
+  })
+
+  it('改单留历史：未收货可改明细并写 EditLog；有收货后锁定', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商ED' } })
+    const part = await prisma.part.create({ data: { sku: 'P-ED', name: '零件ED', supplierId: supplier.id } })
+    const part2 = await prisma.part.create({ data: { sku: 'P-ED2', name: '零件ED2', supplierId: supplier.id } })
+    const po = await prisma.purchaseOrder.create({
+      data: { orderNo: 'ED-1A', supplierId: supplier.id, items: { create: { partId: part.id, qty: 10, unitPrice: 1 } } },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    const res = await app.inject({
+      method: 'PATCH', url: '/api/purchase-orders/' + po.id, headers: { cookie },
+      payload: {
+        expectedDeliveryDate: '2026-09-12',
+        items: [{ partId: part.id, qty: 20, unitPrice: 1.5 }, { partId: part2.id, qty: 5, unitPrice: 2 }],
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    const saved = await prisma.purchaseOrder.findUniqueOrThrow({ where: { id: po.id }, include: { items: true } })
+    expect(saved.expectedDeliveryDate).toBe('2026-09-12')
+    expect(saved.items.map((i) => i.qty)).toEqual([20, 5])
+    const logs = await prisma.purchaseOrderEditLog.findMany({ where: { purchaseOrderId: po.id } })
+    expect(logs).toHaveLength(1)
+    expect(logs[0]!.beforeJson).toContain('"qty":10')
+    // 收货后锁定
+    await prisma.receipt.create({ data: { purchaseOrderId: po.id, partId: part.id, qty: 1 } })
+    const locked = await app.inject({
+      method: 'PATCH', url: '/api/purchase-orders/' + po.id, headers: { cookie },
+      payload: { expectedDeliveryDate: '2026-10-01' },
+    })
+    expect(locked.statusCode).toBe(400)
+    expect(locked.json().error).toContain('不能再编辑')
+  })
+
+  it('回签件：上传/列表/删除', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商AT' } })
+    const part = await prisma.part.create({ data: { sku: 'P-AT', name: '零件AT', supplierId: supplier.id } })
+    const po = await prisma.purchaseOrder.create({
+      data: { orderNo: 'AT-1A', supplierId: supplier.id, items: { create: { partId: part.id, qty: 10, unitPrice: 1 } } },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    const created = await app.inject({
+      method: 'POST', url: '/api/purchase-orders/' + po.id + '/attachments', headers: { cookie },
+      payload: { url: '/uploads/po/AT-1A-回签.png', name: '供应商回签扫描件' },
+    })
+    expect(created.statusCode).toBe(200)
+    const attId = (created.json() as { id: number }).id
+    const list = await app.inject({ method: 'GET', url: '/api/purchase-orders/' + po.id + '/attachments', headers: { cookie } })
+    expect(list.statusCode).toBe(200)
+    expect((list.json() as unknown[]).length).toBe(1)
+    const del = await app.inject({ method: 'DELETE', url: '/api/purchase-orders/' + po.id + '/attachments/' + attId, headers: { cookie } })
+    expect(del.statusCode).toBe(200)
+    const list2 = await app.inject({ method: 'GET', url: '/api/purchase-orders/' + po.id + '/attachments', headers: { cookie } })
+    expect((list2.json() as unknown[]).length).toBe(0)
   })
 })

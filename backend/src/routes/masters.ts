@@ -50,7 +50,15 @@ const customerSchema = z.object({
 
 const supplierSchema = z.object({
   name: z.string({ error: '名称必填' }).min(1, '名称必填').max(200, '名称过长（最多 200 字）'),
-  contact: z.string().optional(),
+  contact: z.string().nullable().optional(),
+  // 采购单头部字段（2026-08-29 重构，生成采购单自动带出）
+  contactPerson: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  fax: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  defaultPaymentTerms: z.string().nullable().optional(),
+  defaultHeaderName: z.string().nullable().optional(),
+  taxPoint: z.number({ error: '加税点必须为数字' }).min(0).max(100).nullable().optional(),
 })
 
 const productSchema = z.object({
@@ -88,12 +96,17 @@ const partSchema = z.object({
     .nullable()
     .optional(),
   supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
+  // 重构新增（2026-08-29）：含税参考价归采购维护；交货周期/安全库存归工程维护
+  priceInclTax: z.number({ error: '含税价必须为数字' }).nonnegative().max(9999999999.99).nullable().optional(),
+  leadTime: z.string().nullable().optional(),
+  safetyStock: z.number({ error: '安全库存必须为整数' }).int().nonnegative().max(2147483647).nullable().optional(),
 })
 
-// 采购在零件上的写权限：供应商（挂链接）与价格；其余字段一律拒绝
+// 采购在零件上的写权限：供应商（挂链接）与价格（含含税参考价）；其余字段一律拒绝
 const purchasePartUpdateSchema = z.object({
   supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
   price: z.number({ error: '价格必须为数字' }).nonnegative({ error: '价格必须为非负数' }).nullable().optional(),
+  priceInclTax: z.number({ error: '含税价必须为数字' }).nonnegative({ error: '含税价必须为非负数' }).nullable().optional(),
 })
 
 const bomSchema = z.array(
@@ -455,11 +468,70 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
   })
 }
 
+const companyHeaderSchema = z.object({
+  name: z.string({ error: '抬头名称必填' }).min(1, '抬头名称必填').max(200, '抬头名称过长（最多 200 字）'),
+  address: z.string().nullable().optional(),
+  tel: z.string().nullable().optional(),
+  fax: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+})
+
 export function mastersRoutes(app: FastifyInstance) {
   registerCrud(app, { resource: 'customer', schema: customerSchema, writeRoles: CUSTOMER_WRITE_ROLES })
   registerCrud(app, { resource: 'supplier', schema: supplierSchema, writeRoles: SUPPLIER_WRITE_ROLES })
   registerCrud(app, { resource: 'product', schema: productSchema, writeRoles: PRODUCT_WRITE_ROLES })
   registerCrud(app, { resource: 'part', schema: partSchema, writeRoles: ENGINEER_WRITE_ROLES })
+
+  // 公司抬头（采购单 FROM 用，多抬头：智锐恒/锦名诚）——读全员，写 boss/purchase
+  const companyHeadersBase = '/api/company-headers'
+  app.get(companyHeadersBase, { preHandler: requireRole(...READ_ROLES) }, async () => {
+    return prisma.companyHeader.findMany({ orderBy: { id: 'asc' as const } })
+  })
+  app.post(companyHeadersBase, { preHandler: requireRole('boss', 'purchase') }, async (req, reply) => {
+    const data = parseBody(companyHeaderSchema, req.body, reply)
+    if (data === null) return
+    const exists = await prisma.companyHeader.findUnique({ where: { name: data.name } })
+    if (exists) return reply.code(400).send({ error: '抬头名称已存在' })
+    const created = await prisma.companyHeader.create({
+      data: {
+        name: data.name,
+        address: data.address ?? null,
+        tel: data.tel ?? null,
+        fax: data.fax ?? null,
+        email: data.email ?? null,
+      },
+    })
+    return reply.code(200).send(created)
+  })
+  app.put(companyHeadersBase + '/:id', { preHandler: requireRole('boss', 'purchase') }, async (req, reply) => {
+    const id = parseId(req as { params: { id: string } }, reply)
+    if (id === null) return
+    const data = parseBody(companyHeaderSchema, req.body, reply)
+    if (data === null) return
+    const exists = await prisma.companyHeader.findUnique({ where: { id } })
+    if (!exists) return reply.code(404).send({ error: '抬头不存在' })
+    const dup = await prisma.companyHeader.findUnique({ where: { name: data.name } })
+    if (dup && dup.id !== id) return reply.code(400).send({ error: '抬头名称已存在' })
+    const updated = await prisma.companyHeader.update({
+      where: { id },
+      data: {
+        name: data.name,
+        address: data.address ?? null,
+        tel: data.tel ?? null,
+        fax: data.fax ?? null,
+        email: data.email ?? null,
+      },
+    })
+    return reply.code(200).send(updated)
+  })
+  app.delete(companyHeadersBase + '/:id', { preHandler: requireRole('boss', 'purchase') }, async (req, reply) => {
+    const id = parseId(req as { params: { id: string } }, reply)
+    if (id === null) return
+    const exists = await prisma.companyHeader.findUnique({ where: { id } })
+    if (!exists) return reply.code(404).send({ error: '抬头不存在' })
+    await prisma.companyHeader.delete({ where: { id } })
+    return reply.code(200).send({ ok: true })
+  })
 
   app.get('/api/products/:id/bom', { preHandler: requireRole(...READ_ROLES) }, async (req, reply) => {
     const productId = parseId(req as { params: { id: string } }, reply)
