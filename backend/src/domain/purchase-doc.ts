@@ -99,7 +99,7 @@ const ZRH: TplPos = {
   totalRowOffset: 1,
   totalCol: 11,
   paymentRow: 17,
-  deliveryRow: 26,
+  deliveryRow: 25,
   isZrh: true,
 }
 
@@ -246,6 +246,17 @@ export async function buildPoTemplate(data: PoDocData): Promise<Buffer> {
     dText = (dRaw as { richText: Array<{ text: string }> }).richText.map((t) => t.text).join('')
   }
   dCell.value = dText.replace(/(预计交货时间|交货时间)[：:].*$/, '$1：' + (data.expectedDeliveryDate ?? ''))
+
+  // 7) 一页打印双保险：页面设置（部分打印软件不读模板 fitToPage，导出时显式再设）+ 打印区域（排除空白列/计算列）
+  const ps = ws.pageSetup
+  ps.fitToPage = true
+  ps.fitToWidth = 1
+  ps.fitToHeight = 1
+  ps.orientation = 'landscape'
+  ps.paperSize = 9 // A4
+  const maxRow = Math.max(tpl.deliveryRow, totalRow + 2) + 4
+  const printCol = tpl.isZrh ? 'R' : 'L'
+  ws.pageSetup.printArea = 'A1:' + printCol + maxRow
 
   return Buffer.from(await wb.xlsx.writeBuffer())
 }
