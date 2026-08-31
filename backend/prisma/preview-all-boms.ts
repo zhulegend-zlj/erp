@@ -264,6 +264,8 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
     if (/^(Materials Cost|Material Loss|Assembling|Overhead|Shipment\/Logistics|Profit)/i.test(r.en)) continue
     // 表内备注行（取消客供/修改BOM 等）不是零件
     if (/取消客供|取消下单|修改BOM/.test(r.cn)) continue
+    // 待定占位行（如 MPM 表里的「棉绳(黑色)待定」，实际不用）不是零件
+    if (/待定$/.test(r.cn)) continue
     const amountNum = Number(((r.amountRaw || '').replace(/[^\d].*$/, '').split('/')[0] ?? ''))
     let sku = ''
     let action: OutRow['action'] = '新建'
