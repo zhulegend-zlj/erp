@@ -31,7 +31,7 @@ import {
   poTypeLabel,
   RECEIPT_STATUS_META,
 } from './helpers'
-import type { CompanyHeader, PoAttachment, PoFormValues, PoPreview, PurchaseOrder, Supplier } from './types'
+import type { CompanyHeader, PoAttachment, PoFormValues, PoPreview, PurchaseOrder, SalesOrder, Supplier } from './types'
 
 interface Props {
   canCreate: boolean
@@ -48,7 +48,17 @@ export default function PoListTab(props: Props) {
   const [pageSize, setPageSize] = useState(10)
   const [total, setTotal] = useState(0)
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
+  const [salesOrderFilter, setSalesOrderFilter] = useState<number | undefined>(undefined)
   const [supplierFilter, setSupplierFilter] = useState<number | undefined>(undefined)
+  const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([])
+
+  // 销售单筛选下拉数据（不选=查全部，老板反馈 2026-08-31）
+  useEffect(() => {
+    api
+      .get<SalesOrder[]>('/orders')
+      .then(({ data }) => setSalesOrders(data))
+      .catch(() => setSalesOrders([]))
+  }, [])
 
   const [editing, setEditing] = useState<PurchaseOrder | null>(null)
   const [editForm] = Form.useForm<PoFormValues>()
@@ -70,7 +80,10 @@ export default function PoListTab(props: Props) {
           page: targetPage,
           pageSize: size,
           status: statusFilter || undefined,
+          salesOrderId: salesOrderFilter ?? undefined,
           supplierId: supplierFilter ?? undefined,
+          // 按编号 A、B、C… 排序（老板反馈 2026-08-31）
+          sort: 'orderNo',
         },
       })
       setRows(data.items)
@@ -86,7 +99,7 @@ export default function PoListTab(props: Props) {
   useEffect(() => {
     void loadPos(page, pageSize)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, statusFilter, supplierFilter, refreshKey])
+  }, [page, pageSize, statusFilter, salesOrderFilter, supplierFilter, refreshKey])
 
   async function advanceStatus(po: PurchaseOrder) {
     const next = nextPoStatus(po.poStatus)
@@ -247,6 +260,19 @@ export default function PoListTab(props: Props) {
       <Space style={{ marginBottom: 16 }} wrap>
         <Select
           allowClear
+          showSearch
+          placeholder="销售单筛选（不选=全部）"
+          style={{ width: 240 }}
+          value={salesOrderFilter}
+          optionFilterProp="label"
+          onChange={(v) => {
+            setSalesOrderFilter(v)
+            setPage(1)
+          }}
+          options={salesOrders.map((o) => ({ value: o.id, label: o.orderNo }))}
+        />
+        <Select
+          allowClear
           placeholder="供应商筛选"
           style={{ width: 220 }}
           value={supplierFilter}
@@ -293,26 +319,12 @@ export default function PoListTab(props: Props) {
           },
         }}
         columns={[
-          { title: '编号', dataIndex: 'orderNo', key: 'orderNo', fixed: 'left' as const },
-          { title: '供应商', dataIndex: 'supplierName', key: 'supplierName' },
-          {
-            title: '关联订单',
-            key: 'salesOrders',
-            render: (_: unknown, r: PurchaseOrder) =>
-              r.salesOrders && r.salesOrders.length > 0
-                ? r.salesOrders.map((o) => o.orderNo).join('、')
-                : r.salesOrderNo || '-',
-          },
-          {
-            title: '类型',
-            dataIndex: 'poType',
-            key: 'poType',
-            render: (v: string) => <Tag color={poTypeColor(v)}>{poTypeLabel(v)}</Tag>,
-          },
+          { title: '编号', dataIndex: 'orderNo', key: 'orderNo', width: 130, fixed: 'left' as const },
           {
             title: '流转状态',
             dataIndex: 'poStatus',
             key: 'poStatus',
+            width: 240,
             render: (v: string, r: PurchaseOrder) => {
               const meta = PO_STATUS_META[v] ?? { label: v, color: 'default' }
               const next = nextPoStatus(v)
@@ -333,10 +345,28 @@ export default function PoListTab(props: Props) {
               )
             },
           },
+          { title: '供应商', dataIndex: 'supplierName', key: 'supplierName', width: 170 },
+          {
+            title: '关联订单',
+            key: 'salesOrders',
+            width: 140,
+            render: (_: unknown, r: PurchaseOrder) =>
+              r.salesOrders && r.salesOrders.length > 0
+                ? r.salesOrders.map((o) => o.orderNo).join('、')
+                : r.salesOrderNo || '-',
+          },
+          {
+            title: '类型',
+            dataIndex: 'poType',
+            key: 'poType',
+            width: 90,
+            render: (v: string) => <Tag color={poTypeColor(v)}>{poTypeLabel(v)}</Tag>,
+          },
           {
             title: '收货进度',
             dataIndex: 'status',
             key: 'status',
+            width: 110,
             render: (v: string) => {
               const meta = RECEIPT_STATUS_META[v] ?? { label: v, color: 'default' }
               return <Tag color={meta.color}>{meta.label}</Tag>
@@ -346,6 +376,7 @@ export default function PoListTab(props: Props) {
             title: '金额',
             dataIndex: 'totalAmount',
             key: 'totalAmount',
+            width: 110,
             align: 'right' as const,
             render: (v: number | string) => '¥' + money(v),
           },
@@ -353,12 +384,14 @@ export default function PoListTab(props: Props) {
             title: '下单日期',
             dataIndex: 'orderDate',
             key: 'orderDate',
+            width: 120,
             render: (v: string | null | undefined) => dateStr(v),
           },
           {
             title: '预计交货',
             dataIndex: 'expectedDeliveryDate',
             key: 'expectedDeliveryDate',
+            width: 120,
             render: (v: string | null | undefined) => dateStr(v),
           },
           ...(canCreate
@@ -366,6 +399,7 @@ export default function PoListTab(props: Props) {
                 {
                   title: '操作',
                   key: 'actions',
+                  width: 260,
                   fixed: 'right' as const,
                   render: (_: unknown, r: PurchaseOrder) => (
                     <Space size={0} wrap>

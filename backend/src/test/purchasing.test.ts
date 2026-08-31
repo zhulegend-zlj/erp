@@ -302,6 +302,55 @@ describe('purchasing', () => {
     expect(row2.items[0].unitPrice).toBe(2.5)
   })
 
+  it('销售单筛选：合并下单的采购单按任一关联订单都能筛出（反馈 2026-08-31）', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商-SOFLT' } })
+    const part = await prisma.part.create({ data: { sku: 'P-SOFLT', name: '零件SOFLT', supplierId: supplier.id } })
+    const customer = await prisma.customer.create({ data: { name: '客户SOFLT' } })
+    const p1 = await prisma.product.create({ data: { sku: 'F-SOFLT1', name: '成品SOFLT1' } })
+    const p2 = await prisma.product.create({ data: { sku: 'F-SOFLT2', name: '成品SOFLT2' } })
+    const o1 = await prisma.salesOrder.create({
+      data: { orderNo: 'SO-FLT1', customerId: customer.id, status: 'confirmed', items: { create: { productId: p1.id, qty: 1, unitPrice: 1 } } },
+    })
+    const o2 = await prisma.salesOrder.create({
+      data: { orderNo: 'SO-FLT2', customerId: customer.id, status: 'confirmed', items: { create: { productId: p2.id, qty: 1, unitPrice: 1 } } },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    // 合并下单：一张采购单关联两个订单（主订单=o1）
+    const merged = await app.inject({
+      method: 'POST', url: '/api/purchase-orders', headers: { cookie },
+      payload: { supplierId: supplier.id, salesOrderIds: [o1.id, o2.id], manualOrderNo: 'PO-SO-MERGED', items: [{ partId: part.id, qty: 5, unitPrice: 1 }] },
+    })
+    expect(merged.statusCode).toBe(200)
+    // 单订单采购单只关联 o1
+    const single = await app.inject({
+      method: 'POST', url: '/api/purchase-orders', headers: { cookie },
+      payload: { supplierId: supplier.id, salesOrderIds: [o1.id], manualOrderNo: 'PO-SO-SINGLE', items: [{ partId: part.id, qty: 5, unitPrice: 1 }] },
+    })
+    expect(single.statusCode).toBe(200)
+    const r2 = await app.inject({ method: 'GET', url: '/api/purchase-orders?salesOrderId=' + o2.id, headers: { cookie } })
+    expect(r2.statusCode).toBe(200)
+    const nos = (r2.json() as Array<{ orderNo: string }>).map((x) => x.orderNo)
+    expect(nos).toContain('PO-SO-MERGED') // 合并单按第二关联订单也能筛出
+    expect(nos).not.toContain('PO-SO-SINGLE')
+  })
+
+  it('列表 sort=orderNo 按编号 A/B/C 升序（反馈 2026-08-31）', async () => {
+    const supplier = await prisma.supplier.create({ data: { name: '供应商-SORT' } })
+    const part = await prisma.part.create({ data: { sku: 'P-SORT', name: '零件SORT' } })
+    for (const orderNo of ['270991B', '270992A', '270991A']) {
+      await prisma.purchaseOrder.create({
+        data: { orderNo, supplierId: supplier.id, items: { create: { partId: part.id, qty: 1, unitPrice: 1 } } },
+      })
+    }
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    const res = await app.inject({ method: 'GET', url: '/api/purchase-orders?sort=orderNo', headers: { cookie } })
+    expect(res.statusCode).toBe(200)
+    const nos = (res.json() as Array<{ orderNo: string }>).map((x) => x.orderNo)
+    expect(nos).toEqual(['270991A', '270991B', '270992A'])
+  })
+
   it('需求计算仅 purchase/boss 可访问（403）', async () => {
     const app = buildApp()
     const cookie = await loginCookie(app, 'warehouse')

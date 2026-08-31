@@ -255,10 +255,10 @@ export function purchasingRoutes(app: FastifyInstance) {
     })
   })
 
-  // 采购单列表：5 角色均可查，可选按状态/供应商/销售订单过滤
+  // 采购单列表：5 角色均可查，可选按状态/供应商/销售订单过滤，sort=orderNo 时按编号排序
   app.get('/api/purchase-orders', { preHandler: requireRole(...READ_ROLES) }, async (req, reply) => {
-    const query = req.query as { status?: string; supplierId?: string; salesOrderId?: string }
-    const where: { status?: string; supplierId?: number; salesOrderId?: number } = {}
+    const query = req.query as { status?: string; supplierId?: string; salesOrderId?: string; sort?: string }
+    const where: Prisma.PurchaseOrderWhereInput = {}
     if (query.status) where.status = query.status
     if (query.supplierId) {
       const supplierId = Number(query.supplierId)
@@ -272,7 +272,8 @@ export function purchasingRoutes(app: FastifyInstance) {
       if (!Number.isInteger(salesOrderId) || salesOrderId <= 0) {
         return reply.code(400).send({ error: 'salesOrderId 必须为正整数' })
       }
-      where.salesOrderId = salesOrderId
+      // 主订单 + 关联中间表都匹配：合并下单的单子按任一关联订单都能筛出来（老板反馈 2026-08-31）
+      where.OR = [{ salesOrderId }, { salesOrders: { some: { salesOrderId } } }]
     }
 
     const pagination = parsePagination(req.query as Record<string, unknown>)
@@ -339,7 +340,8 @@ export function purchasingRoutes(app: FastifyInstance) {
       return rows.map((r) => toRow(r, receivedMap.get(r.id) ?? 0))
     }
 
-    const orderBy = { id: 'desc' as const }
+    // 默认新单在前；sort=orderNo 时按编号升序（A、B、C…，老板反馈 2026-08-31）
+    const orderBy = query.sort === 'orderNo' ? { orderNo: 'asc' as const } : { id: 'desc' as const }
     if (pagination.kind === 'none') {
       const rows = await prisma.purchaseOrder.findMany({ where, orderBy, include: PURCHASE_ORDER_INCLUDE })
       return enrich(rows)
