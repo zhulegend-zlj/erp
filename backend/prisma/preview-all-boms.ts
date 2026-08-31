@@ -31,7 +31,10 @@ interface ProductCfg {
 }
 
 const CFG: ProductCfg[] = [
-  { file: 'CS-MPM-BOM清单出货Endor.xlsx', productSku: 'CS-MPM', productName: 'CS-MPM 拨片组件（单独出货 Endor）', productNameEn: 'CS-MPM', miscPrefix: 'CSMPM-' },
+  {
+    // MPM 一族 = 同一款磁性拨片，按收货方录 3 个成品（老板 2026-08-31）：Endor 国外完整版 / JLD 不锁碳纤板 / JLD 减配
+    file: 'MPM/CS-MPM-BOM清单出货Endor.xlsx', productSku: 'CS-MPM-ENDOR', productName: 'CS MPM 拨片（Endor 出货）', productNameEn: 'CS MPM', miscPrefix: 'CSMPM-',
+  },
   { file: 'CSP_V3I清单-螺丝物料表.xlsx', skipReason: '已入库：CSP_V3I BOM 146 行即由本表导入（螺丝/电缆/标签/泡棉等零件均已在库内），本次跳过' },
   { file: 'CSP_V3_BPK清单-物料清单.xlsx', productSku: 'CSP_V3_BPK', productName: 'CSP V3 BPK 套装', productNameEn: 'CSP_V3_BPK', miscPrefix: 'BPK-' },
   { file: 'CSP_V3清单_物料明细.xlsx', skipReason: 'CSP_V3 成品已入库（零件 CSP-xxx 已在库内），本次跳过' },
@@ -49,11 +52,11 @@ const CFG: ProductCfg[] = [
     specialSkus: { 21: '6x0.7-卡簧', 22: 'M3-垫片', 23: 'M3x12-杯头', 24: 'M3x7-平头', 37: 'M3x7-平头', 38: 'M3x12-平头', 39: 'M5x14-杯头防松蓝胶' },
     shared: { 41: 'CSP-217', 50: 'CSP-322', 53: '49-002769', 55: 'CSS-116' },
   },
-  { file: 'RM-CS MPM RFCL-BOM清单-最新版.xlsx', productSku: 'RM-CS-MPM-RFCL', productName: 'RM-CS MPM 不锁碳纤板（单独出货）', productNameEn: 'RM-CS MPM RFCL', miscPrefix: 'RMMPM-' },
-  { file: 'RM-CS-MPM-BOM清单JLD.xlsx', productSku: 'RM-CS-MPM-JLD', productName: 'RM-CS MPM（JLD 出货）', productNameEn: 'RM-CS MPM JLD', miscPrefix: 'RMMPM-' },
+  { file: 'MPM/RM-CS MPM RFCL-BOM清单-最新版.xlsx', productSku: 'CS-MPM-JLD', productName: 'CS MPM 拨片（JLD 出货·不锁碳纤板）', productNameEn: 'CS MPM JLD', miscPrefix: 'CSMPM-' },
+  { file: 'MPM/RM-CS-MPM-BOM清单JLD.xlsx', productSku: 'CS-MPM-JLD-简', productName: 'CS MPM 拨片（JLD 出货·减配）', productNameEn: 'CS MPM JLD', miscPrefix: 'CSMPM-' },
   { file: 'APM/RM-P APM 出货JLD-BOM.xlsx', productSku: 'P_APM-JLD金', productName: 'P APM 拨片（JLD 出货·金色磁铁）', productNameEn: 'P APM JLD', miscPrefix: 'PAPM-', magnetColor: '金' },
   { file: 'APM/RM-P APM BLK 黑色磁铁JLD-BOM.xlsx', productSku: 'P_APM-JLD黑', productName: 'P APM 拨片（JLD 出货·黑色磁铁）', productNameEn: 'P APM JLD BLK', miscPrefix: 'PAPM-', magnetColor: '黑' },
-  { file: 'RM-P APM BLK-P1705 EVS-BOM.xlsx', productSku: 'P_APM-EVS黑', productName: 'P APM 拨片（EVS 出货·黑色磁铁）', productNameEn: 'P APM EVS', miscPrefix: 'PAPM-', magnetColor: '黑' },
+  { file: 'APM/RM-P APM BLK-P1705 EVS-BOM.xlsx', productSku: 'P_APM-EVS黑', productName: 'P APM 拨片（EVS 出货·黑色磁铁）', productNameEn: 'P APM EVS', miscPrefix: 'PAPM-', magnetColor: '黑' },
 ]
 
 const clean = (v: unknown) => String(v ?? '').replace(/\r/g, '').replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim()
@@ -255,6 +258,8 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
     if (!r.id && !r.en && !r.cn && !r.dims && !r.material && !r.finish) continue
     // 报价成本占位行（Materials Cost/Material Loss/Assembling/Overhead/Shipment/Profit）不是零件
     if (/^(Materials Cost|Material Loss|Assembling|Overhead|Shipment\/Logistics|Profit)/i.test(r.en)) continue
+    // 表内备注行（取消客供/修改BOM 等）不是零件
+    if (/取消客供|取消下单|修改BOM/.test(r.cn)) continue
     const amountNum = Number(((r.amountRaw || '').replace(/[^\d].*$/, '').split('/')[0] ?? ''))
     let sku = ''
     let action: OutRow['action'] = '新建'
