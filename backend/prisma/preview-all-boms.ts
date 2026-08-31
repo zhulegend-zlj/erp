@@ -26,6 +26,8 @@ interface ProductCfg {
   productNameEn?: string
   miscPrefix?: string
   magnetColor?: '金' | '黑' // 磁铁/离合片同名料号按颜色加后缀（BBUH-10495-金/-黑）
+  renameIds?: Record<string, string> // 同名料号但实为不同件的拆分（如 MPM 桨垫片 → P1806-10928-MPM）
+  nameOverride?: Record<string, string> // 无料号行按中文名指定共用（如 MPM 包装泡棉 → CSMPM-022）
   specialSkus?: Record<number, string> // 序号→拟定SKU（人工规则）
   shared?: Record<number, string> // 序号→库内已有SKU
 }
@@ -34,6 +36,7 @@ const CFG: ProductCfg[] = [
   {
     // MPM 一族 = 同一款磁性拨片，按收货方录 3 个成品（老板 2026-08-31）：Endor 国外完整版 / JLD 不锁碳纤板 / JLD 减配
     file: 'MPM/CS-MPM-BOM清单出货Endor.xlsx', productSku: 'CS-MPM-ENDOR', productName: 'CS MPM 拨片（Endor 出货）', productNameEn: 'CS MPM', miscPrefix: 'CSMPM-',
+    renameIds: { 'P1806-10928': 'P1806-10928-MPM' }, nameOverride: { '包装用 EVA泡棉': 'CSMPM-022' },
   },
   { file: 'CSP_V3I清单-螺丝物料表.xlsx', skipReason: '已入库：CSP_V3I BOM 146 行即由本表导入（螺丝/电缆/标签/泡棉等零件均已在库内），本次跳过' },
   { file: 'CSP_V3_BPK清单-物料清单.xlsx', productSku: 'CSP_V3_BPK', productName: 'CSP V3 BPK 套装', productNameEn: 'CSP_V3_BPK', miscPrefix: 'BPK-' },
@@ -52,8 +55,8 @@ const CFG: ProductCfg[] = [
     specialSkus: { 21: '6x0.7-卡簧', 22: 'M3-垫片', 23: 'M3x12-杯头', 24: 'M3x7-平头', 37: 'M3x7-平头', 38: 'M3x12-平头', 39: 'M5x14-杯头防松蓝胶' },
     shared: { 41: 'CSP-217', 50: 'CSP-322', 53: '49-002769', 55: 'CSS-116' },
   },
-  { file: 'MPM/RM-CS MPM RFCL-BOM清单-最新版.xlsx', productSku: 'CS-MPM-JLD', productName: 'CS MPM 拨片（JLD 出货·不锁碳纤板）', productNameEn: 'CS MPM JLD', miscPrefix: 'CSMPM-' },
-  { file: 'MPM/RM-CS-MPM-BOM清单JLD.xlsx', productSku: 'CS-MPM-JLD-简', productName: 'CS MPM 拨片（JLD 出货·减配）', productNameEn: 'CS MPM JLD', miscPrefix: 'CSMPM-' },
+  { file: 'MPM/RM-CS MPM RFCL-BOM清单-最新版.xlsx', productSku: 'CS-MPM-JLD', productName: 'CS MPM 拨片（JLD 出货·不锁碳纤板）', productNameEn: 'CS MPM JLD', miscPrefix: 'CSMPM-', renameIds: { 'P1806-10928': 'P1806-10928-MPM' } },
+  { file: 'MPM/RM-CS-MPM-BOM清单JLD.xlsx', productSku: 'CS-MPM-JLD-简', productName: 'CS MPM 拨片（JLD 出货·减配）', productNameEn: 'CS MPM JLD', miscPrefix: 'CSMPM-', renameIds: { 'P1806-10928': 'P1806-10928-MPM' } },
   { file: 'APM/RM-P APM 出货JLD-BOM.xlsx', productSku: 'P_APM-JLD金', productName: 'P APM 拨片（JLD 出货·金色磁铁）', productNameEn: 'P APM JLD', miscPrefix: 'PAPM-', magnetColor: '金' },
   { file: 'APM/RM-P APM BLK 黑色磁铁JLD-BOM.xlsx', productSku: 'P_APM-JLD黑', productName: 'P APM 拨片（JLD 出货·黑色磁铁）', productNameEn: 'P APM JLD BLK', miscPrefix: 'PAPM-', magnetColor: '黑' },
   { file: 'APM/RM-P APM BLK-P1705 EVS-BOM.xlsx', productSku: 'P_APM-EVS黑', productName: 'P APM 拨片（EVS 出货·黑色磁铁）', productNameEn: 'P APM EVS', miscPrefix: 'PAPM-', magnetColor: '黑' },
@@ -220,6 +223,7 @@ const dbSkuSet = new Set(dbParts.map((p) => p.sku))
 const usedSkus = new Set<string>(dbSkuSet) // 本批已占用的 SKU（含库内已有），杂项起号时跳过
 const globalIdSku = new Map<string, string>() // 表内料号 → 拟定SKU（跨产品共用）
 const miscCounters = new Map<string, number>()
+const miscNameSku = new Map<string, string>() // 同批同名杂项（名称|尺寸）→ SKU
 const glueSkuMap = new Map<string, { sku: string; product: string }>() // 乐泰/Loctite 胶水型号→SKU
 
 interface OutRow {
@@ -270,7 +274,8 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
     // 老板口径 2026-08-31：料号列有内容的，SKU 按料号原文照抄（多行合并成一行），不自起名；
     // 唯一例外：磁铁/离合片同名料号按颜色加后缀（金/黑）
     if (r.id) {
-      sku = r.id
+      sku = cfg.renameIds?.[r.id] ?? r.id
+      if (cfg.renameIds?.[r.id]) note.push('同名料号但材质不同，拆分为 ' + sku)
       if (r.id.includes('料号变更')) note.push('原表标「料号变更」')
       if (cfg.magnetColor && /磁铁|阳极/.test(r.cn)) {
         sku = r.id + '-' + cfg.magnetColor
@@ -280,6 +285,7 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
     else if (!r.id && cfg.specialSkus?.[r.seq]) { sku = cfg.specialSkus[r.seq]!; note.push('标准件按规格命名') }
     else if (!r.id && cfg.shared?.[r.seq]) { action = '共用'; sku = cfg.shared[r.seq]!; sharedFrom = '库内已有' }
     else if (stdSku) { sku = stdSku; note.push('标准件按规格命名') }
+    if (!sku && cfg.nameOverride?.[r.cn]) { sku = cfg.nameOverride[r.cn]!; note.push('按老板口径指定共用') }
     if (!sku) {
       const nameShared = NAME_SHARED.find((n) => n.re.test(r.cn))
       if (nameShared) { sku = nameShared.sku; note.push('常见物料按名称共用') }
@@ -305,6 +311,12 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
       if (dbByName) { sku = dbByName.sku; note.push('按名称共用库内已有') }
     }
     if (!sku) {
+      // 同批内同名同尺寸的杂项共用（如 MPM 三个版本里的圆形贴纸/隔板/周转箱）
+      const nameKey = r.cn + '|' + r.dims
+      const batchKnown = miscNameSku.get(nameKey)
+      if (batchKnown) { sku = batchKnown; note.push('同批同名物料共用') }
+    }
+    if (!sku) {
       const prefix = cfg.miscPrefix ?? 'MISC-'
       let n = miscCounters.get(prefix) ?? 0
       do {
@@ -314,6 +326,8 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
       sku = prefix + String(n).padStart(3, '0')
       note.push('表内无料号，内部编号')
     }
+    // 登记同名杂项 → SKU（供同批后续产品共用）
+    if (r.cn) miscNameSku.set(r.cn + '|' + r.dims, sku)
     usedSkus.add(sku)
     // 登记胶水型号→SKU（同型号中英文名共用同一零件）
     const glue2 = r.cn.match(/(?:乐泰|Loctite)\s*(638|7649)\s*([^ ]+)/)
