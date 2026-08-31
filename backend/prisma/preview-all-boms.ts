@@ -230,6 +230,13 @@ const NAME_SHARED: Array<{ re: RegExp; sku: string }> = [
 ]
 
 const OFFICIAL_RE = /^(BBUH|P1806|P1703|P1903|P1927|DD|ESTP|SUP|CSP|CSS|CS|PAPM|RMMPM|RPAPM)[-_]|^(47_|48_|49-)|^\d{2,}[A-Za-z]+/
+
+// 表面处理 → SKU 后缀简称（同规格不同表面处理时用）
+function finishTag(finish: string): string {
+  const tags = ['白镍', '黑镍', '白锌', '黑锌', '彩锌', '蓝白锌', '本色', '蓝胶', '黑', '白']
+  for (const t of tags) if (finish.includes(t)) return t
+  return '其他'
+}
 function isOfficialId(id: string): boolean {
   if (!id) return false
   if (/^(ISO|DIN|EN|GB\b)/i.test(id)) return false
@@ -307,16 +314,24 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
     else if (!r.id && cfg.shared?.[r.seq]) { action = '共用'; sku = cfg.shared[r.seq]!; sharedFrom = '库内已有' }
     else if (!r.id && cfg.nameOverride?.[r.cn]) { sku = cfg.nameOverride[r.cn]!; note.push('按老板口径指定共用') }
     else if (stdSku) {
-      // 标准件先按规格命名；规格名库里没有时按名称查库兜底（如 RFCL 的 M3x7 螺丝 → ESTP-9096）
+      // 标准件按规格+类型命名；库内已有同规格时比较表面处理：不同则加颜色/镀层后缀拆分（老板口径 2026-08-31）
       sku = stdSku
-      if (!dbSkuSet.has(sku)) {
+      const existing = await prisma.part.findUnique({ where: { sku } })
+      if (existing && (existing.finish ?? '') === r.finish) {
+        note.push('标准件按规格命名（库内已有，表面处理一致）')
+      } else if (existing) {
+        const tag = finishTag(r.finish)
+        const cand = stdSku + '-' + tag
+        const candPart = await prisma.part.findUnique({ where: { sku: cand } })
+        if (candPart) { sku = cand; note.push('表面处理不同，共用已拆分的 ' + cand) }
+        else { sku = cand; note.push('表面处理不同，拆分为 ' + cand) }
+      } else {
+        // 库里无该规格号 → 按名称查库兜底（如 RFCL 的 M3x7 螺丝 → ESTP-9096）
         const dbByName =
           (await prisma.part.findFirst({ where: { name: r.cn, dimensions: r.dims } })) ??
           (await prisma.part.findFirst({ where: { name: r.cn } }))
         if (dbByName) { sku = dbByName.sku; note.push('按名称共用库内已有') }
         else note.push('标准件按规格命名')
-      } else {
-        note.push('标准件按规格命名（库内已有）')
       }
     }
     else if (!r.id && !cfg.noNameShare?.includes(r.cn)) {
