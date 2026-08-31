@@ -293,6 +293,13 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
     }
     else if (!r.id && cfg.specialSkus?.[r.seq]) { sku = cfg.specialSkus[r.seq]!; note.push('标准件按规格命名') }
     else if (!r.id && cfg.shared?.[r.seq]) { action = '共用'; sku = cfg.shared[r.seq]!; sharedFrom = '库内已有' }
+    else if (!r.id) {
+      // 无料号行先按名称查库共用（防重复建号，如 RFCL 表里的 M3x7 螺丝 → ESTP-9096）
+      const dbByName =
+        (await prisma.part.findFirst({ where: { name: r.cn, dimensions: r.dims } })) ??
+        (await prisma.part.findFirst({ where: { name: r.cn } }))
+      if (dbByName) { sku = dbByName.sku; note.push('按名称共用库内已有') }
+    }
     else if (stdSku) { sku = stdSku; note.push('标准件按规格命名') }
     if (!sku && cfg.nameOverride?.[r.cn]) { sku = cfg.nameOverride[r.cn]!; note.push('按老板口径指定共用') }
     if (!sku) {
