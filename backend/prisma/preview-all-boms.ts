@@ -261,20 +261,19 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
     let sharedFrom = ''
     const note: string[] = []
     if (r.extraIds.length > 0) note.push('另标料号: ' + r.extraIds.join('、'))
-    const idFirst = r.id.split(' ')[0] ?? ''
     const stdSku = proposeStandardSku(r)
-    if (cfg.specialSkus?.[r.seq]) { sku = cfg.specialSkus[r.seq]!; note.push('标准件按规格命名') }
-    else if (cfg.shared?.[r.seq]) { action = '共用'; sku = cfg.shared[r.seq]!; sharedFrom = '库内已有' }
-    else if (stdSku && /^(ISO|DIN|ESTP)/i.test(idFirst)) { sku = stdSku; note.push('ISO/DIN/ESTP 标准件按规格命名') }
-    else if (idFirst && isOfficialId(idFirst)) {
-      sku = idFirst
+    // 老板口径 2026-08-31：料号列有内容的，SKU 按料号原文照抄（多行合并成一行），不自起名；
+    // 唯一例外：磁铁/离合片同名料号按颜色加后缀（金/黑）
+    if (r.id) {
+      sku = r.id
       if (r.id.includes('料号变更')) note.push('原表标「料号变更」')
-      // 磁铁/离合片同名料号按颜色区分（老板口径）
       if (cfg.magnetColor && /磁铁|阳极/.test(r.cn)) {
-        sku = idFirst + '-' + cfg.magnetColor
+        sku = r.id + '-' + cfg.magnetColor
         note.push('同名料号按颜色加后缀')
       }
     }
+    else if (!r.id && cfg.specialSkus?.[r.seq]) { sku = cfg.specialSkus[r.seq]!; note.push('标准件按规格命名') }
+    else if (!r.id && cfg.shared?.[r.seq]) { action = '共用'; sku = cfg.shared[r.seq]!; sharedFrom = '库内已有' }
     else if (stdSku) { sku = stdSku; note.push('标准件按规格命名') }
     if (!sku) {
       const nameShared = NAME_SHARED.find((n) => n.re.test(r.cn))
