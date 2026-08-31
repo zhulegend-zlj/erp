@@ -64,10 +64,10 @@ const CFG: ProductCfg[] = [
   { file: 'CSS_SQ黑色+USB清单-物料明细.xlsx', skipReason: 'CSS_SQ 成品已入库（零件 CSS-xxx 已在库内），本次跳过' },
   { file: 'TC小夹子/CS_TC小夹子-物料清单.xlsx', productSku: 'CS_TC', productName: 'CS TC 工作台小夹子', productNameEn: 'CS_TC', miscPrefix: 'CSTC-', nameOverride: { '包装泡棉': 'CSTC-011', '大外箱主标签': 'CSTC-009' } },
   { file: 'CS_USB/CS_USB出货PI-物料清单.xlsx', productSku: 'CS_USB', productName: 'CS USB（出货 PI）', productNameEn: 'CS_USB', miscPrefix: 'CSUSB-', noNameShare: ['大外箱主标签', '大外箱序号标签', '大外箱EAN标签'] },
-  { file: 'P1703离合器组件BOM-2024.xlsx', productSku: 'P1703', productName: 'P1703 离合器组件', productNameEn: 'P1703 CLUTCH', miscPrefix: 'P1703-' },
-  { file: 'P1903E_CSL-BOM_正常生产_20241025.xlsx', productSku: 'P1903E', productName: 'P1903E CSL 脚踏板', productNameEn: 'P1903E CSL', miscPrefix: 'P1903E-' },
-  { file: 'P1927-DAPM双电子开关BOM出货国内.xlsx', productSku: 'P1927-DAPM', productName: 'P1927 DAPM 双电子开关', productNameEn: 'P1927 DAPM', miscPrefix: 'P1927-' },
-  { file: 'PMB-DD支架-RFQ-BOM-2024.xlsx', productSku: 'PMB-DD', productName: 'PMB DD 支架（RFQ）', productNameEn: 'PMB DD BRACKET', miscPrefix: 'PMBDD-' },
+  { file: 'P1703离合器组件/P1703离合器组件BOM-2024.xlsx', productSku: 'P1703', productName: 'P1703 离合器组件', productNameEn: 'P1703 CLUTCH', miscPrefix: 'P1703-', noNameShare: ['周转泡棉', 'PE 袋'] },
+  { file: 'P1903E_CSL/P1903E_CSL-BOM_正常生产_20241025.xlsx', productSku: 'P1903E', productName: 'P1903E CSL 脚踏板', productNameEn: 'P1903E CSL', miscPrefix: 'P1903E-', noNameShare: ['彩盒', '牛皮外盒', '运输外箱', '牛皮盒、彩盒序号标签', '牛皮盒封口标签', '大外箱主标签', '大外箱序列号标签', '大外箱EAN标签'] },
+  { file: 'P1927-DAPM双电子开关/P1927-DAPM双电子开关BOM出货国内.xlsx', productSku: 'P1927-DAPM', productName: 'P1927 DAPM 双电子开关', productNameEn: 'P1927 DAPM', miscPrefix: 'P1927-', noNameShare: ['周转泡棉', '镭雕序列号', 'PE 袋'], nameOverride: { '乐泰 7649 促进剂': 'PAPM-020', '乐泰 638 胶水': 'PAPM-019' } },
+  { file: 'DD支架/PMB-DD支架-RFQ-BOM-2024.xlsx', productSku: 'PMB-DD', productName: 'PMB DD 支架（RFQ）', productNameEn: 'PMB DD BRACKET', miscPrefix: 'PMBDD-', noNameShare: ['运输外箱', '牛皮盒、彩盒序号标签', '大外箱主标签', '大外箱序列号标签', '大外箱EAN标签'] },
   {
     // APM 一族 = 同一款拨片，按客户+磁铁颜色录 4 个成品（老板 2026-08-31 口径：Endor 国外金磁 / JLD 国内金+黑 / EVS 国内黑）
     file: 'APM/P_APM出货Endor_BOM_20241015.xlsx', productSku: 'P_APM-ENDOR金', productName: 'P APM 拨片（Endor 出货·金色磁铁）', productNameEn: 'P APM', miscPrefix: 'PAPM-', magnetColor: '金',
@@ -293,6 +293,7 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
   const localSkuQty = new Map<string, { idx: number; qty: number }>()
   for (const r of rows) {
     if (cfg.excludeNames?.includes(r.cn)) continue
+    if (/取消/.test(r.amountRaw)) continue // 用量标「取消」的行（如 DAPM 的取消螺丝/桨）
     if (!r.id && !r.en && !r.cn && !r.dims && !r.material && !r.finish) continue
     if (!r.id && !r.en && !r.cn) continue // 没有任何名称的空模板行
     // 报价成本占位行（Materials Cost/Material Loss/Assembling/Overhead/Shipment/Profit）不是零件
