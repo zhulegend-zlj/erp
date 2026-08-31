@@ -62,7 +62,7 @@ const CFG: ProductCfg[] = [
     noNameShare: ['彩盒序列号标签', '大外箱主标签', '大外箱序列号标签', '大外箱EAN标签'],
   },
   { file: 'CSS_SQ黑色+USB清单-物料明细.xlsx', skipReason: 'CSS_SQ 成品已入库（零件 CSS-xxx 已在库内），本次跳过' },
-  { file: 'TC小夹子/CS_TC小夹子-物料清单.xlsx', productSku: 'CS_TC', productName: 'CS TC 工作台小夹子', productNameEn: 'CS_TC', miscPrefix: 'CSTC-', noNameShare: ['大外箱主标签', '包装泡棉'] },
+  { file: 'TC小夹子/CS_TC小夹子-物料清单.xlsx', productSku: 'CS_TC', productName: 'CS TC 工作台小夹子', productNameEn: 'CS_TC', miscPrefix: 'CSTC-', nameOverride: { '包装泡棉': 'CSTC-011', '大外箱主标签': 'CSTC-009' } },
   { file: 'CS_USB出货PI-物料清单.xlsx', productSku: 'CS_USB', productName: 'CS USB（出货 PI）', productNameEn: 'CS_USB', miscPrefix: 'CSUSB-' },
   { file: 'P1703离合器组件BOM-2024.xlsx', productSku: 'P1703', productName: 'P1703 离合器组件', productNameEn: 'P1703 CLUTCH', miscPrefix: 'P1703-' },
   { file: 'P1903E_CSL-BOM_正常生产_20241025.xlsx', productSku: 'P1903E', productName: 'P1903E CSL 脚踏板', productNameEn: 'P1903E CSL', miscPrefix: 'P1903E-' },
