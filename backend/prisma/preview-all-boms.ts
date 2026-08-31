@@ -46,7 +46,6 @@ const CFG: ProductCfg[] = [
       '大外箱EAN标签': 'CSMPM-026',
       'M3 x 12 平头内六角螺丝': 'ESTP-11186',
     },
-    qtyOverride: { 9: 1, 37: 1 },
   },
   { file: 'CSP_V3I清单-螺丝物料表.xlsx', skipReason: '已入库：CSP_V3I BOM 146 行即由本表导入（螺丝/电缆/标签/泡棉等零件均已在库内），本次跳过' },
   { file: 'CSP_V3_BPK清单-物料清单.xlsx', productSku: 'CSP_V3_BPK', productName: 'CSP V3 BPK 套装', productNameEn: 'CSP_V3_BPK', miscPrefix: 'BPK-' },
