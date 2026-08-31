@@ -52,6 +52,7 @@ export const ORDER_STATUS_LABELS: Record<string, string> = {
   ready: '待出货',
   shipped: '已出货',
   completed: '已完成',
+  split: '已拆分',
 }
 
 export function statusLabel(status: string): string {
@@ -62,6 +63,7 @@ export function statusLabel(status: string): string {
 // 进入运作环节后「已确认」隐藏（看板/订单/仓库统一口径）
 export function orderPhaseLabel(o: { status: string; purchasing?: boolean; producing?: boolean }): string {
   if (o.status === 'draft') return '草稿'
+  if (o.status === 'split') return '已拆分'
   if (o.status === 'ready') return '待出货'
   if (o.status === 'shipped') return '已出货'
   if (o.status === 'completed') return '已完成'
@@ -76,7 +78,7 @@ export function phaseTagColor(o: { status: string; purchasing?: boolean; produci
   if (o.status === 'ready') return 'warning'
   if (o.status === 'shipped') return 'cyan'
   if (o.status === 'completed') return 'success'
-  if (o.status === 'draft') return 'default'
+  if (o.status === 'draft' || o.status === 'split') return 'default'
   if (o.purchasing || o.producing) return 'processing'
   return 'blue'
 }
@@ -89,6 +91,7 @@ export function statusColor(status: string): string {
     ready: 'warning',
     shipped: 'cyan',
     completed: 'success',
+    split: 'default',
   }
   return map[status] ?? 'default'
 }

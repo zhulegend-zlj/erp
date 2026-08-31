@@ -138,6 +138,10 @@ model SalesOrder {
   // 双阶段标志（可同时为真）：采购中=存在未收齐的采购单；生产中=已开始成品入库但未收满
   purchasing           Boolean            @default(false)
   producing            Boolean            @default(false)
+  // 拆单链：拆出的子订单记录来源订单（2026-08-31 老板拆销售单需求）
+  parentOrderId   Int?
+  parentOrder     SalesOrder?  @relation("SalesOrderSplit", fields: [parentOrderId], references: [id])
+  childOrders     SalesOrder[] @relation("SalesOrderSplit")
   // 采购催销售确认：草稿订单无法生成采购单时一键提醒（销售确认订单后清空）
   confirmReminderAt    DateTime?
   confirmReminderBy    String?

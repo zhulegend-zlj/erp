@@ -74,6 +74,17 @@ const statusSchema = z.object({
   status: z.string({ error: '状态必填' }).min(1, '状态必填'),
 })
 
+// 拆销售单：每份套数（正整数），最多 20 份（老板反馈 2026-08-31）
+const splitOrderSchema = z.object({
+  splits: z
+    .array(
+      z.number({ error: '每份套数必填' }).int({ error: '每份套数必须为整数' }).positive({ error: '每份套数必须为正整数' }).max(2147483647, { error: '每份套数超出允许范围' }),
+      { error: '拆分份数必填' },
+    )
+    .min(1, '至少拆一份')
+    .max(20, '最多拆 20 份'),
+})
+
 // 编辑订单：明细与表头均可改（items 传了就必须 ≥1 行且每行带交期）
 const updateOrderSchema = z.object({
   customerId: z.number({ error: '客户必须为整数' }).int().positive().optional(),
@@ -110,6 +121,9 @@ const ITEMS_INCLUDE = {
     include: { product: { select: { id: true, sku: true, name: true } } },
     orderBy: { id: 'asc' as const },
   },
+  // 拆单链：来源订单（拆自 xx）与拆出的子单列表
+  parentOrder: { select: { id: true, orderNo: true } },
+  childOrders: { select: { id: true, orderNo: true }, orderBy: { id: 'asc' as const } },
 } as const
 
 // 销售单价仅销售与老板可见：purchase/warehouse/engineer 的订单数据不返回单价与其他费用
@@ -267,8 +281,27 @@ export function ordersRoutes(app: FastifyInstance) {
         if (orderId !== null) shippedMap.set(orderId, (shippedMap.get(orderId) ?? 0) + qty)
         if (orderId !== null) shippedByProduct.set(`${orderId}:${g.productId}`, qty)
       }
+      // 可拆单标记（拆销售单功能 2026-08-31）：无任何采购/生产/出货等业务痕迹且状态可拆
+      const blockedSplitIds = new Set<number>()
+      if (rows.length > 0) {
+        const ids = rows.map((o) => o.id)
+        const [poG, poLinkG, shipG, schedG, issueG, prodG, payG, ledgerG] = await Promise.all([
+          prisma.purchaseOrder.groupBy({ by: ['salesOrderId'], where: { salesOrderId: { in: ids } } }),
+          prisma.purchaseOrderSalesOrder.groupBy({ by: ['salesOrderId'], where: { salesOrderId: { in: ids } } }),
+          prisma.shipment.groupBy({ by: ['salesOrderId'], where: { salesOrderId: { in: ids } } }),
+          prisma.shipmentSchedule.groupBy({ by: ['salesOrderId'], where: { salesOrderId: { in: ids }, status: { not: 'cancelled' } } }),
+          prisma.issue.groupBy({ by: ['salesOrderId'], where: { salesOrderId: { in: ids } } }),
+          prisma.productionEntry.groupBy({ by: ['salesOrderId'], where: { salesOrderId: { in: ids } } }),
+          prisma.customerPayment.groupBy({ by: ['salesOrderId'], where: { salesOrderId: { in: ids } } }),
+          prisma.inventoryLedger.groupBy({ by: ['salesOrderId'], where: { salesOrderId: { in: ids } } }),
+        ])
+        for (const g of [...poG, ...poLinkG, ...shipG, ...schedG, ...issueG, ...prodG, ...payG, ...ledgerG]) {
+          if (g.salesOrderId !== null) blockedSplitIds.add(g.salesOrderId)
+        }
+      }
       return rows.map((o) => ({
         ...sanitizeOrderForRole(o, role),
+        splittable: !['shipped', 'completed', 'split'].includes(o.status) && !blockedSplitIds.has(o.id),
         shippedQty: shippedMap.get(o.id) ?? 0,
         totalQty: o.items.reduce((s, it) => s + it.qty, 0),
         // 列表展示用：本单最早的一行 ZRH交货日期（催货先看它）
@@ -487,6 +520,142 @@ export function ordersRoutes(app: FastifyInstance) {
     })
 
     return reply.code(200).send(updated)
+  })
+
+  // 拆销售单（老板反馈 2026-08-31）：按套数拆成多个子订单，原单数量扣减，拆空改「已拆分」。
+  // 权限：老板/销售/采购。可拆条件：没有任何采购单/生产入库/出货等业务痕迹。
+  app.post('/api/orders/:id/split', { preHandler: requireRole('boss', 'sales', 'purchase') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '订单 ID 必须为正整数' })
+    const data = parseBody(splitOrderSchema, req.body, reply)
+    if (data === null) return
+
+    try {
+      const children = await prisma.$transaction(async (tx) => {
+        const order = await tx.salesOrder.findUnique({
+          where: { id },
+          include: { items: { orderBy: { id: 'asc' as const } } },
+        })
+        if (!order) throw new Error('订单不存在')
+        if (order.status === 'shipped' || order.status === 'completed' || order.status === 'split') {
+          throw new Error('订单状态为「' + order.status + '」，不能拆分')
+        }
+
+        // 业务痕迹校验（口径与编辑/删除一致；采购单要同时查主关联与合并中间表）
+        const [purchaseOrders, poLinks, shipments, schedules, issues, productionEntries, payments, ledgers] =
+          await Promise.all([
+            tx.purchaseOrder.count({ where: { salesOrderId: id } }),
+            tx.purchaseOrderSalesOrder.count({ where: { salesOrderId: id } }),
+            tx.shipment.count({ where: { salesOrderId: id } }),
+            tx.shipmentSchedule.count({ where: { salesOrderId: id, status: { not: 'cancelled' } } }),
+            tx.issue.count({ where: { salesOrderId: id } }),
+            tx.productionEntry.count({ where: { salesOrderId: id } }),
+            tx.customerPayment.count({ where: { salesOrderId: id } }),
+            tx.inventoryLedger.count({ where: { salesOrderId: id } }),
+          ])
+        const blockers: string[] = []
+        if (purchaseOrders > 0 || poLinks > 0) blockers.push('采购单')
+        if (shipments > 0) blockers.push('出货单')
+        if (schedules > 0) blockers.push('出货排程')
+        if (issues > 0) blockers.push('领料')
+        if (productionEntries > 0) blockers.push('成品入库')
+        if (payments > 0) blockers.push('收款')
+        if (ledgers > 0) blockers.push('库存流水')
+        if (blockers.length > 0) throw new Error('订单已有业务记录，不能拆分：' + blockers.join('、'))
+
+        // 基准套数 = 数量最大的成品行；拆出总量不能超过基准套数
+        const baseQty = Math.max(...order.items.map((i) => i.qty))
+        const totalSplit = data.splits.reduce((s, q) => s + q, 0)
+        if (totalSplit > baseQty) {
+          throw new Error('拆出总量 ' + totalSplit + ' 套超过订单套数 ' + baseQty + ' 套')
+        }
+
+        // 子单编号 = 原单号 + -1/-2…，避开已占用编号（拆子单再拆同样适用）
+        const used = await tx.salesOrder.findMany({
+          where: { orderNo: { startsWith: order.orderNo + '-' } },
+          select: { orderNo: true },
+        })
+        const usedNos = new Set(used.map((o) => o.orderNo))
+        const childNos: string[] = []
+        let idx = 1
+        while (childNos.length < data.splits.length) {
+          const cand = order.orderNo + '-' + idx
+          idx += 1
+          if (!usedNos.has(cand)) childNos.push(cand)
+        }
+
+        // 按比例分摊每行数量：每份 round(行数 × 份套数 ÷ 基准套数)，四舍五入的差补到最后一份；
+        // 未拆出的部分留在原单（分摊为 0 的行不建子单明细）
+        const perSplit = data.splits.map((splitQty) =>
+          order.items.map((line) => Math.round((line.qty * splitQty) / baseQty)),
+        )
+        for (let li = 0; li < order.items.length; li++) {
+          const lineQty = order.items[li]!.qty
+          const roundedSum = perSplit.reduce((s, sp) => s + sp[li]!, 0)
+          const exactSplitTotal = Math.round((lineQty * totalSplit) / baseQty)
+          const lastIdx = perSplit.length - 1
+          perSplit[lastIdx]![li] = Math.max(0, perSplit[lastIdx]![li]! + exactSplitTotal - roundedSum)
+        }
+
+        // 创建子订单（复制客户/付款条件/下单日期/状态；子单 PO 号=新订单号，保持「订单号=客户PO号」口径）
+        const created: Array<{ id: number; orderNo: string; qty: number }> = []
+        for (let si = 0; si < data.splits.length; si++) {
+          const child = await tx.salesOrder.create({
+            data: {
+              orderNo: childNos[si]!,
+              customerId: order.customerId,
+              customerPoNo: childNos[si]!,
+              orderDate: order.orderDate,
+              paymentTerms: order.paymentTerms,
+              status: order.status,
+              parentOrderId: order.id,
+            },
+          })
+          for (let li = 0; li < order.items.length; li++) {
+            const qty = perSplit[si]![li]!
+            if (qty <= 0) continue
+            const line = order.items[li]!
+            await tx.salesOrderItem.create({
+              data: {
+                orderId: child.id,
+                productId: line.productId,
+                qty,
+                unitPrice: line.unitPrice,
+                ...(line.lineNo != null ? { lineNo: line.lineNo } : {}),
+                ...(line.customerDeliveryDate != null ? { customerDeliveryDate: line.customerDeliveryDate } : {}),
+                ...(line.zrhDeliveryDate != null ? { zrhDeliveryDate: line.zrhDeliveryDate } : {}),
+              },
+            })
+          }
+          created.push({ id: child.id, orderNo: child.orderNo, qty: data.splits[si]! })
+        }
+
+        // 原单扣减：每行减去拆出的合计；扣完删行；全部拆完 → 状态改「已拆分」关闭
+        for (let li = 0; li < order.items.length; li++) {
+          const line = order.items[li]!
+          const taken = perSplit.reduce((s, sp) => s + sp[li]!, 0)
+          const remain = line.qty - taken
+          if (remain <= 0) {
+            await tx.salesOrderItem.delete({ where: { id: line.id } })
+          } else {
+            await tx.salesOrderItem.update({ where: { id: line.id }, data: { qty: remain } })
+          }
+        }
+        const remainingItems = await tx.salesOrderItem.count({ where: { orderId: id } })
+        if (remainingItems === 0) {
+          await tx.salesOrder.update({
+            where: { id },
+            data: { status: 'split', purchasing: false, producing: false },
+          })
+        }
+        return created
+      })
+      return reply.code(200).send({ children })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '拆单失败'
+      const status = message === '订单不存在' ? 404 : 400
+      return reply.code(status).send({ error: message })
+    }
   })
 
   // 删除订单：仅 sales/boss。只允许删除没有任何业务痕迹的订单

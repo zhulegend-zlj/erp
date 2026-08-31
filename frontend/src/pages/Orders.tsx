@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, message } from 'antd'
-import { PlusOutlined, MinusCircleOutlined, DeleteOutlined, EditOutlined, UploadOutlined } from '@ant-design/icons'
+import { PlusOutlined, MinusCircleOutlined, DeleteOutlined, EditOutlined, UploadOutlined, SplitCellsOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { dateStr, notifyError, orderPhaseLabel, phaseTagColor, statusLabel } from './common'
@@ -35,6 +35,9 @@ interface SalesOrder {
   orderNo: string
   customerId: number
   customerPoNo: string | null
+  splittable?: boolean
+  parentOrder?: { id: number; orderNo: string } | null
+  childOrders?: Array<{ id: number; orderNo: string }>
   orderDate: string
   earliestZrhDate?: string | null
   paymentTerms: string | null
@@ -148,6 +151,136 @@ function OrderItemsFields({ products }: { products: Product[] }) {
   )
 }
 
+// 拆销售单弹窗：按套数拆成多个子订单，所有明细行按同一比例分摊、余数归最后一份（老板反馈 2026-08-31）
+function SplitOrderModal(props: {
+  order: SalesOrder | null
+  onCancel: () => void
+  onSuccess: () => void
+}) {
+  const { order, onCancel, onSuccess } = props
+  const [splits, setSplits] = useState<number[]>([])
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!order) return
+    const base = Math.max(...order.items.map((it) => it.qty))
+    if (base <= 1) {
+      setSplits([1])
+      return
+    }
+    const first = Math.ceil(base / 2)
+    setSplits([first, base - first])
+  }, [order])
+
+  if (!order) return null
+  const base = Math.max(...order.items.map((it) => it.qty))
+  const sum = splits.reduce((s, q) => s + (Number(q) || 0), 0)
+  const remain = base - sum
+  const invalid =
+    splits.length === 0 || splits.some((q) => !Number.isInteger(q) || q < 1) || sum > base
+
+  // 预览：与后端同一算法（每份 round 分摊，舍入差补到最后一份，剩余留在原单）
+  const previewRows = order.items.map((line) => {
+    const qs = splits.map((q) => Math.round((line.qty * q) / base))
+    if (qs.length > 0) {
+      const roundedSum = qs.reduce((s, q) => s + q, 0)
+      const exact = Math.round((line.qty * sum) / base)
+      qs[qs.length - 1] = Math.max(0, qs[qs.length - 1]! + exact - roundedSum)
+    }
+    const remainLine = line.qty - qs.reduce((s, q) => s + q, 0)
+    return { line, qs, remainLine }
+  })
+
+  async function submit() {
+    if (!order || invalid) return
+    setSaving(true)
+    try {
+      const { data } = await api.post<{ children: Array<{ id: number; orderNo: string; qty: number }> }>(
+        '/orders/' + order.id + '/split',
+        { splits },
+      )
+      message.success('已拆出 ' + data.children.length + ' 张子单：' + data.children.map((c) => c.orderNo).join('、'))
+      onSuccess()
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal
+      title={'拆单：' + order.orderNo}
+      open={order !== null}
+      onCancel={onCancel}
+      onOk={() => void submit()}
+      confirmLoading={saving}
+      okText="确认拆分"
+      okButtonProps={{ disabled: invalid }}
+      width={900}
+    >
+      <div style={{ marginBottom: 8 }}>
+        基准套数 <b>{base}</b>（数量最大的成品行）｜明细 {order.items.length} 行｜子单号 ={' '}
+        <b>{order.orderNo}-1、{order.orderNo}-2…</b>｜子单状态复制原单（当前「{statusLabel(order.status)}」）
+      </div>
+      <Space wrap style={{ marginBottom: 8 }}>
+        {splits.map((q, i) => (
+          <span key={i}>
+            第 {i + 1} 份：
+            <InputNumber
+              min={1}
+              max={base}
+              precision={0}
+              value={q}
+              onChange={(v) => {
+                const next = [...splits]
+                next[i] = Number(v ?? 0)
+                setSplits(next)
+              }}
+              style={{ width: 110 }}
+            />
+            <Button
+              type="text"
+              danger
+              icon={<MinusCircleOutlined />}
+              onClick={() => setSplits(splits.filter((_, si) => si !== i))}
+            />
+          </span>
+        ))}
+        <Button
+          type="dashed"
+          icon={<PlusOutlined />}
+          disabled={splits.length >= 20}
+          onClick={() => setSplits([...splits, 1])}
+        >
+          加一份
+        </Button>
+      </Space>
+      <div style={{ marginBottom: 8 }}>
+        拆出合计 <b>{sum}</b> 套｜留在原单 <b style={{ color: remain < 0 ? 'red' : undefined }}>{remain}</b> 套
+        {remain === 0 ? '（原单将变为「已拆分」）' : ''}
+      </div>
+      <Table<{ line: OrderItem; qs: number[]; remainLine: number }>
+        rowKey={(r) => String(r.line.productId)}
+        size="small"
+        pagination={false}
+        dataSource={previewRows}
+        columns={[
+          { title: '成品', key: 'p', render: (_: unknown, r) => r.line.product.name + '（' + r.line.product.sku + '）' },
+          { title: '原数量', key: 'q', width: 80, render: (_: unknown, r) => r.line.qty },
+          ...splits.map((_, si) => ({
+            title: '第 ' + (si + 1) + ' 份',
+            key: 's' + si,
+            width: 80,
+            render: (_: unknown, r: { qs: number[] }) => r.qs[si],
+          })),
+          { title: '留在原单', key: 'rem', width: 90, render: (_: unknown, r: { remainLine: number }) => r.remainLine },
+        ]}
+      />
+    </Modal>
+  )
+}
+
 export default function Orders() {
   const { user } = useAuth()
   const [orders, setOrders] = useState<SalesOrder[]>([])
@@ -170,9 +303,12 @@ export default function Orders() {
   const [parsingImage, setParsingImage] = useState(false)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [detailTarget, setDetailTarget] = useState<SalesOrder | null>(null)
+  const [splitTarget, setSplitTarget] = useState<SalesOrder | null>(null)
 
   const canCreate = user?.role === 'sales'
   const canAdvance = user?.role === 'sales' || user?.role === 'boss'
+  // 拆单权限：老板/销售/采购（老板口径 2026-08-31）
+  const canSplit = user?.role === 'boss' || user?.role === 'sales' || user?.role === 'purchase'
 
   async function load(targetPage: number = page, size?: number) {
     setLoading(true)
@@ -363,7 +499,18 @@ export default function Orders() {
 
   const columns = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
-    { title: '订单号', dataIndex: 'orderNo', key: 'orderNo' },
+    {
+      title: '订单号',
+      dataIndex: 'orderNo',
+      key: 'orderNo',
+      render: (_: unknown, r: SalesOrder) => (
+        <Space size={4}>
+          <span>{r.orderNo}</span>
+          {r.parentOrder ? <Tag color="geekblue">拆自 {r.parentOrder.orderNo}</Tag> : null}
+          {r.childOrders && r.childOrders.length > 0 ? <Tag color="purple">已拆 {r.childOrders.length} 单</Tag> : null}
+        </Space>
+      ),
+    },
     { title: '客户PO', dataIndex: 'customerPoNo', key: 'customerPoNo', render: (v: string | null) => v || '-' },
     {
       title: '客户',
@@ -422,13 +569,14 @@ export default function Orders() {
       title: '操作',
       key: 'action',
       render: (_: unknown, r: SalesOrder) => {
-        if (!canAdvance) return null
+        if (!canAdvance && !canSplit) return null
         const nextMap: Record<string, string> = { draft: 'confirmed', shipped: 'completed' }
         const prevMap: Record<string, string> = { confirmed: 'draft' }
         const bossPrev: Record<string, string> = { in_production: 'confirmed', ready: 'confirmed' }
         const isBoss = user?.role === 'boss'
-        const next = nextMap[r.status] ?? null
-        const prev = isBoss ? (bossPrev[r.status] ?? prevMap[r.status] ?? null) : (prevMap[r.status] ?? null)
+        // 推进/回退仅销售/老板；拆单权限独立（老板/销售/采购）
+        const next = canAdvance ? nextMap[r.status] ?? null : null
+        const prev = canAdvance ? (isBoss ? (bossPrev[r.status] ?? prevMap[r.status] ?? null) : (prevMap[r.status] ?? null)) : null
         return (
           <Space>
             {next ? (
@@ -459,23 +607,43 @@ export default function Orders() {
                 </Button>
               </Popconfirm>
             ) : null}
-            {r.status === 'draft' || r.status === 'confirmed' ? (
+            {canSplit ? (
+              <Tooltip
+                title={
+                  r.splittable === false
+                    ? '该订单已有采购/生产/出货等业务记录，不能拆分'
+                    : '按套数拆成多个子订单（原单扣减，子单独立采购）'
+                }
+              >
+                <Button
+                  size="small"
+                  icon={<SplitCellsOutlined />}
+                  disabled={r.splittable === false}
+                  onClick={() => setSplitTarget(r)}
+                >
+                  拆单
+                </Button>
+              </Tooltip>
+            ) : null}
+            {canAdvance && (r.status === 'draft' || r.status === 'confirmed') ? (
               <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>
                 编辑
               </Button>
             ) : null}
-            <Button
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              loading={deletingId === r.id}
-              onClick={() => {
-                setDeleteTarget(r)
-                setDeleteText('')
-              }}
-            >
-              删除
-            </Button>
+            {canAdvance ? (
+              <Button
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                loading={deletingId === r.id}
+                onClick={() => {
+                  setDeleteTarget(r)
+                  setDeleteText('')
+                }}
+              >
+                删除
+              </Button>
+            ) : null}
           </Space>
         )
       },
@@ -660,6 +828,14 @@ export default function Orders() {
           ]}
         />
       </Modal>
+      <SplitOrderModal
+        order={splitTarget}
+        onCancel={() => setSplitTarget(null)}
+        onSuccess={() => {
+          setSplitTarget(null)
+          void load()
+        }}
+      />
       <Modal
         title="删除订单"
         open={deleteTarget !== null}

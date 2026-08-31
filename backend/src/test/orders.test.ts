@@ -563,4 +563,165 @@ describe('orders', () => {
     expect(res.statusCode).toBe(400)
     expect(res.json().error).toContain('图片文件')
   })
+  it('拆单：按套数拆成子单，原单扣减、拆空改已拆分（反馈 2026-08-31）', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const p2 = await prisma.product.create({ data: { sku: 'F002', name: '成品B' } })
+    const created = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: {
+        customerId: customer.id, customerPoNo: '259203',
+        items: [
+          { productId: product.id, qty: 2168, unitPrice: 10, customerDeliveryDate: '2026-10-01', zrhDeliveryDate: '2026-10-01' },
+          { productId: p2.id, qty: 4336, unitPrice: 5, customerDeliveryDate: '2026-10-01', zrhDeliveryDate: '2026-10-01' },
+        ]
+      }
+    })
+    expect(created.statusCode).toBe(200)
+    const orderId = created.json().id as number
+
+    const split = await app.inject({
+      method: 'POST', url: '/api/orders/' + orderId + '/split', headers: { cookie },
+      payload: { splits: [1000, 1168] }
+    })
+    expect(split.statusCode).toBe(200)
+    const children = split.json().children as Array<{ id: number; orderNo: string; qty: number }>
+    expect(children.map((c) => c.orderNo)).toEqual(['259203-1', '259203-2'])
+    expect(children.map((c) => c.qty)).toEqual([1000, 1168])
+
+    // 子单明细按比例分摊：基准套数=4336（最大行），2168 行得 500/584，4336 行得 1000/1168
+    const c1 = await prisma.salesOrder.findUniqueOrThrow({ where: { id: children[0]!.id }, include: { items: true } })
+    const c2 = await prisma.salesOrder.findUniqueOrThrow({ where: { id: children[1]!.id }, include: { items: true } })
+    expect(c1.items.find((i) => i.productId === product.id)?.qty).toBe(500)
+    expect(c2.items.find((i) => i.productId === product.id)?.qty).toBe(584)
+    expect(c1.items.find((i) => i.productId === p2.id)?.qty).toBe(1000)
+    expect(c2.items.find((i) => i.productId === p2.id)?.qty).toBe(1168)
+    // 子单状态/客户复制原单（draft→draft，口径=复制原单状态），parentOrderId 指向原单
+    expect(c1.status).toBe('draft')
+    expect(c1.customerId).toBe(customer.id)
+    expect(c1.parentOrderId).toBe(orderId)
+    // 未拆空 → 原单保留剩余（2168-1084=1084、4336-2168=2168），状态不变
+    const orig = await prisma.salesOrder.findUniqueOrThrow({ where: { id: orderId } })
+    expect(orig.status).toBe('draft')
+    const origItems = await prisma.salesOrderItem.findMany({ where: { orderId } })
+    expect(origItems.find((i) => i.productId === product.id)?.qty).toBe(1084)
+    expect(origItems.find((i) => i.productId === p2.id)?.qty).toBe(2168)
+
+    // 继续拆光剩余（2168）：原单变「已拆分」，明细清空；子单编号接 -3
+    const split2 = await app.inject({
+      method: 'POST', url: '/api/orders/' + orderId + '/split', headers: { cookie },
+      payload: { splits: [2168] }
+    })
+    expect(split2.statusCode).toBe(200)
+    expect((split2.json().children as Array<{ orderNo: string }>).map((c) => c.orderNo)).toEqual(['259203-3'])
+    const orig2 = await prisma.salesOrder.findUniqueOrThrow({ where: { id: orderId } })
+    expect(orig2.status).toBe('split')
+    expect(await prisma.salesOrderItem.findMany({ where: { orderId } })).toHaveLength(0)
+  })
+
+  it('拆单：部分拆分剩余留在原单，数量比例分摊余数归最后一份', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const created = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: {
+        customerId: customer.id, customerPoNo: 'SP-PART',
+        items: [{ productId: product.id, qty: 100, unitPrice: 1, customerDeliveryDate: '2026-10-01', zrhDeliveryDate: '2026-10-01' }]
+      }
+    })
+    const orderId = created.json().id as number
+    const split = await app.inject({
+      method: 'POST', url: '/api/orders/' + orderId + '/split', headers: { cookie },
+      payload: { splits: [30, 40] }
+    })
+    expect(split.statusCode).toBe(200)
+    // 原单剩 30
+    const item = await prisma.salesOrderItem.findFirstOrThrow({ where: { orderId } })
+    expect(item.qty).toBe(30)
+    const orig = await prisma.salesOrder.findUniqueOrThrow({ where: { id: orderId } })
+    expect(orig.status).toBe('draft')
+  })
+
+  it('拆单：已有采购单/出货的订单拒绝拆分', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const created = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: {
+        customerId: customer.id, customerPoNo: 'SP-BLOCK',
+        items: [{ productId: product.id, qty: 100, unitPrice: 1, customerDeliveryDate: '2026-10-01', zrhDeliveryDate: '2026-10-01' }]
+      }
+    })
+    const orderId = created.json().id as number
+    // 直接造一张采购单挂上去
+    const supplier = await prisma.supplier.create({ data: { name: '供应商-SP' } })
+    const part = await prisma.part.create({ data: { sku: 'P-SP', name: '零件SP' } })
+    await prisma.purchaseOrder.create({ data: { orderNo: 'PO-SP-1', supplierId: supplier.id, salesOrderId: orderId, items: { create: { partId: part.id, qty: 1, unitPrice: 1 } } } })
+    const split = await app.inject({
+      method: 'POST', url: '/api/orders/' + orderId + '/split', headers: { cookie },
+      payload: { splits: [50] }
+    })
+    expect(split.statusCode).toBe(400)
+    expect(split.json().error).toContain('采购单')
+  })
+
+  it('拆单：超量拆分、非正整数、无权限、非法参数被拦截', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const created = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: {
+        customerId: customer.id, customerPoNo: 'SP-VAL',
+        items: [{ productId: product.id, qty: 50, unitPrice: 1, customerDeliveryDate: '2026-10-01', zrhDeliveryDate: '2026-10-01' }]
+      }
+    })
+    const orderId = created.json().id as number
+    // 超量
+    const over = await app.inject({ method: 'POST', url: '/api/orders/' + orderId + '/split', headers: { cookie }, payload: { splits: [60] } })
+    expect(over.statusCode).toBe(400)
+    expect(over.json().error).toContain('超过')
+    // 非正整数
+    const bad = await app.inject({ method: 'POST', url: '/api/orders/' + orderId + '/split', headers: { cookie }, payload: { splits: [0] } })
+    expect(bad.statusCode).toBe(400)
+    // 无权限：仓库
+    const whCookie = await loginCookie(app, 'warehouse')
+    const denied = await app.inject({ method: 'POST', url: '/api/orders/' + orderId + '/split', headers: { cookie: whCookie }, payload: { splits: [10] } })
+    expect(denied.statusCode).toBe(403)
+    // 不存在
+    const missing = await app.inject({ method: 'POST', url: '/api/orders/999999/split', headers: { cookie }, payload: { splits: [10] } })
+    expect(missing.statusCode).toBe(404)
+  })
+
+  it('拆单：采购角色可拆；列表返回 splittable 标记与拆单链', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const purchaseCookie = await loginCookie(app, 'purchase')
+    const created = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie: purchaseCookie } // 创建会 403，用 sales cookie
+    })
+    expect(created.statusCode).toBe(403)
+    // 用销售建单
+    const salesCreated = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: {
+        customerId: customer.id, customerPoNo: 'SP-PUR',
+        items: [{ productId: product.id, qty: 100, unitPrice: 1, customerDeliveryDate: '2026-10-01', zrhDeliveryDate: '2026-10-01' }]
+      }
+    })
+    const orderId = salesCreated.json().id as number
+    const split = await app.inject({
+      method: 'POST', url: '/api/orders/' + orderId + '/split', headers: { cookie: purchaseCookie },
+      payload: { splits: [40] }
+    })
+    expect(split.statusCode).toBe(200)
+    // 列表 splittable 标记
+    const list = await app.inject({ method: 'GET', url: '/api/orders', headers: { cookie: purchaseCookie } })
+    const rows = list.json() as Array<{ id: number; orderNo: string; splittable?: boolean; parentOrder?: { orderNo: string } | null; childOrders?: Array<{ orderNo: string }> }>
+    const parentRow = rows.find((r) => r.id === orderId)
+    expect(parentRow?.splittable).toBe(true) // 无业务痕迹仍可继续拆
+    expect(parentRow?.childOrders?.map((c) => c.orderNo)).toContain('SP-PUR-1')
+    const childRow = rows.find((r) => r.orderNo === 'SP-PUR-1')
+    expect(childRow?.parentOrder?.orderNo).toBe('SP-PUR')
+    expect(childRow?.splittable).toBe(true)
+  })
 })
