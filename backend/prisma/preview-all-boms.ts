@@ -25,6 +25,7 @@ interface ProductCfg {
   productName?: string
   productNameEn?: string
   miscPrefix?: string
+  magnetColor?: '金' | '黑' // 磁铁/离合片同名料号按颜色加后缀（BBUH-10495-金/-黑）
   specialSkus?: Record<number, string> // 序号→拟定SKU（人工规则）
   shared?: Record<number, string> // 序号→库内已有SKU
 }
@@ -43,16 +44,16 @@ const CFG: ProductCfg[] = [
   { file: 'P1927-DAPM双电子开关BOM出货国内.xlsx', productSku: 'P1927-DAPM', productName: 'P1927 DAPM 双电子开关', productNameEn: 'P1927 DAPM', miscPrefix: 'P1927-' },
   { file: 'PMB-DD支架-RFQ-BOM-2024.xlsx', productSku: 'PMB-DD', productName: 'PMB DD 支架（RFQ）', productNameEn: 'PMB DD BRACKET', miscPrefix: 'PMBDD-' },
   {
-    file: 'P_APM出货Endor_BOM_20241015.xlsx', productSku: 'P_APM', productName: 'P APM 耳朵拨片', productNameEn: 'P APM', miscPrefix: 'PAPM-',
+    // APM 一族 = 同一款拨片，按客户+磁铁颜色录 4 个成品（老板 2026-08-31 口径：Endor 国外金磁 / JLD 国内金+黑 / EVS 国内黑）
+    file: 'APM/P_APM出货Endor_BOM_20241015.xlsx', productSku: 'P_APM-ENDOR金', productName: 'P APM 拨片（Endor 出货·金色磁铁）', productNameEn: 'P APM', miscPrefix: 'PAPM-', magnetColor: '金',
     specialSkus: { 21: '6x0.7-卡簧', 22: 'M3-垫片', 23: 'M3x12-杯头', 24: 'M3x7-平头', 37: 'M3x7-平头', 38: 'M3x12-平头', 39: 'M5x14-杯头防松蓝胶' },
     shared: { 41: 'CSP-217', 50: 'CSP-322', 53: '49-002769', 55: 'CSS-116' },
   },
-  { file: 'P_APM出货Endor_BOM清单.xlsx', dupOf: 'P_APM出货Endor_BOM_20241015.xlsx' },
   { file: 'RM-CS MPM RFCL-BOM清单-最新版.xlsx', productSku: 'RM-CS-MPM-RFCL', productName: 'RM-CS MPM 不锁碳纤板（单独出货）', productNameEn: 'RM-CS MPM RFCL', miscPrefix: 'RMMPM-' },
   { file: 'RM-CS-MPM-BOM清单JLD.xlsx', productSku: 'RM-CS-MPM-JLD', productName: 'RM-CS MPM（JLD 出货）', productNameEn: 'RM-CS MPM JLD', miscPrefix: 'RMMPM-' },
-  { file: 'RM-P APM BLK 黑色磁铁JLD-BOM.xlsx', productSku: 'RM-P-APM-BLK', productName: 'RM-P APM 黑色磁铁（JLD）', productNameEn: 'RM-P APM BLK', miscPrefix: 'RPAPM-' },
-  { file: 'RM-P APM 出货JLD-BOM.xlsx', productSku: 'RM-P-APM', productName: 'RM-P APM（出货 JLD）', productNameEn: 'RM-P APM', miscPrefix: 'RPAPM-' },
-  { file: 'RM-P APM出货JLD-组装BOM.xlsx', dupOf: 'RM-P APM 出货JLD-BOM.xlsx' },
+  { file: 'APM/RM-P APM 出货JLD-BOM.xlsx', productSku: 'P_APM-JLD金', productName: 'P APM 拨片（JLD 出货·金色磁铁）', productNameEn: 'P APM JLD', miscPrefix: 'PAPM-', magnetColor: '金' },
+  { file: 'APM/RM-P APM BLK 黑色磁铁JLD-BOM.xlsx', productSku: 'P_APM-JLD黑', productName: 'P APM 拨片（JLD 出货·黑色磁铁）', productNameEn: 'P APM JLD BLK', miscPrefix: 'PAPM-', magnetColor: '黑' },
+  { file: 'RM-P APM BLK-P1705 EVS-BOM.xlsx', productSku: 'P_APM-EVS黑', productName: 'P APM 拨片（EVS 出货·黑色磁铁）', productNameEn: 'P APM EVS', miscPrefix: 'PAPM-', magnetColor: '黑' },
 ]
 
 const clean = (v: unknown) => String(v ?? '').replace(/\r/g, '').replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim()
@@ -259,6 +260,11 @@ function buildProduct(cfg: ProductCfg, file: string): OutRow[] {
     else if (idFirst && isOfficialId(idFirst)) {
       sku = idFirst
       if (r.id.includes('料号变更')) note.push('原表标「料号变更」')
+      // 磁铁/离合片同名料号按颜色区分（老板口径）
+      if (cfg.magnetColor && /磁铁|阳极/.test(r.cn)) {
+        sku = idFirst + '-' + cfg.magnetColor
+        note.push('同名料号按颜色加后缀')
+      }
     }
     else if (stdSku) { sku = stdSku; note.push('标准件按规格命名') }
     if (!sku) {
