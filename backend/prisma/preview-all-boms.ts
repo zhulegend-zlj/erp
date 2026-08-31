@@ -28,6 +28,8 @@ interface ProductCfg {
   magnetColor?: '金' | '黑' // 磁铁/离合片同名料号按颜色加后缀（BBUH-10495-金/-黑）
   renameIds?: Record<string, string> // 同名料号但实为不同件的拆分（如 MPM 桨垫片 → P1806-10928-MPM）
   nameOverride?: Record<string, string> // 无料号行按中文名指定共用（如 MPM 包装泡棉 → CSMPM-022）
+  noNameShare?: string[] // 禁止按名称共用的行（同名但本产品专属，如 BPK 的标签类）
+  excludeNames?: string[] // 整行排除不录（如工程标「取消」的 QC 贴）
   qtyOverride?: Record<number, number> // 表内用量空/「+」但老板已确认的用量，按文件行号（0基物理行）键定，如 MPM 棉绳/左桨基座 = 1
   specialSkus?: Record<number, string> // 序号→拟定SKU（人工规则）
   shared?: Record<number, string> // 序号→库内已有SKU
@@ -48,7 +50,12 @@ const CFG: ProductCfg[] = [
     },
   },
   { file: 'CSP_V3I清单-螺丝物料表.xlsx', skipReason: '已入库：CSP_V3I BOM 146 行即由本表导入（螺丝/电缆/标签/泡棉等零件均已在库内），本次跳过' },
-  { file: 'CSP_V3_BPK清单-物料清单.xlsx', productSku: 'CSP_V3_BPK', productName: 'CSP V3 BPK 套装', productNameEn: 'CSP_V3_BPK', miscPrefix: 'BPK-' },
+  {
+    file: 'BPK/CSP_V3_BPK清单-物料清单.xlsx', productSku: 'CSP_V3_BPK', productName: 'CSP V3 BPK 套装', productNameEn: 'CSP_V3_BPK', miscPrefix: 'BPK-',
+    nameOverride: { '锂基油': 'Lithium Grease' },
+    noNameShare: ['牛皮盒、彩盒序号标签', '牛皮盒封口标签', '大外箱主标签', '大外箱序列号标签', '大外箱EAN标签'],
+    excludeNames: ['QC PASS透明贴'],
+  },
   { file: 'CSP_V3清单_物料明细.xlsx', skipReason: 'CSP_V3 成品已入库（零件 CSP-xxx 已在库内），本次跳过' },
   { file: 'CSS_CKK碳纤球头包装_BOM.xlsx', productSku: 'CSS_CKK', productName: 'CSS CKK 碳纤球头包装', productNameEn: 'CSS CKK', miscPrefix: 'CKK-' },
   { file: 'CSS_SQ黑色+USB清单-物料明细.xlsx', skipReason: 'CSS_SQ 成品已入库（零件 CSS-xxx 已在库内），本次跳过' },
@@ -268,7 +275,9 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
   const out: OutRow[] = []
   const localSkuQty = new Map<string, { idx: number; qty: number }>()
   for (const r of rows) {
+    if (cfg.excludeNames?.includes(r.cn)) continue
     if (!r.id && !r.en && !r.cn && !r.dims && !r.material && !r.finish) continue
+    if (!r.id && !r.en && !r.cn) continue // 没有任何名称的空模板行
     // 报价成本占位行（Materials Cost/Material Loss/Assembling/Overhead/Shipment/Profit）不是零件
     if (/^(Materials Cost|Material Loss|Assembling|Overhead|Shipment\/Logistics|Profit)/i.test(r.en)) continue
     // 表内备注行（取消客供/修改BOM 等）不是零件
@@ -294,7 +303,7 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
     else if (!r.id && cfg.specialSkus?.[r.seq]) { sku = cfg.specialSkus[r.seq]!; note.push('标准件按规格命名') }
     else if (!r.id && cfg.shared?.[r.seq]) { action = '共用'; sku = cfg.shared[r.seq]!; sharedFrom = '库内已有' }
     else if (!r.id && cfg.nameOverride?.[r.cn]) { sku = cfg.nameOverride[r.cn]!; note.push('按老板口径指定共用') }
-    else if (!r.id) {
+    else if (!r.id && !cfg.noNameShare?.includes(r.cn)) {
       // 无料号行再按名称查库共用（防重复建号，如 RFCL 表里的 M3x7 螺丝 → ESTP-9096）
       const dbByName =
         (await prisma.part.findFirst({ where: { name: r.cn, dimensions: r.dims } })) ??
@@ -319,14 +328,7 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
         }
       }
     }
-    if (!sku) {
-      // 杂项先按「中文名+尺寸」查库共用（已导入产品里的杂项零件），尺寸列对不上再只按名称兜底
-      const dbByName =
-        (await prisma.part.findFirst({ where: { name: r.cn, dimensions: r.dims } })) ??
-        (await prisma.part.findFirst({ where: { name: r.cn } }))
-      if (dbByName) { sku = dbByName.sku; note.push('按名称共用库内已有') }
-    }
-    if (!sku) {
+    if (!sku && !cfg.noNameShare?.includes(r.cn)) {
       // 同批内同名同尺寸的杂项共用（如 MPM 三个版本里的圆形贴纸/隔板/周转箱）
       const nameKey = r.cn + '|' + r.dims
       const batchKnown = miscNameSku.get(nameKey)
@@ -343,7 +345,7 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
       note.push('表内无料号，内部编号')
     }
     // 登记同名杂项 → SKU（供同批后续产品共用）
-    if (r.cn) miscNameSku.set(r.cn + '|' + r.dims, sku)
+    if (r.cn && !cfg.noNameShare?.includes(r.cn)) miscNameSku.set(r.cn + '|' + r.dims, sku)
     usedSkus.add(sku)
     // 登记胶水型号→SKU（同型号中英文名共用同一零件）
     const glue2 = r.cn.match(/(?:乐泰|Loctite)\s*(638|7649)\s*([^ ]+)/)
