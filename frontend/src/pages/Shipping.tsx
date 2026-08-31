@@ -167,6 +167,11 @@ function LinesEditor({
         <Select
           showSearch optionFilterProp="label" placeholder="选择成品" style={{ width: '100%' }}
           value={r.productId}
+          onDropdownVisibleChange={(open) => {
+            if (open) {
+              void api.get<ProductOption[]>('/products').then(({ data }) => setProducts(data)).catch(() => {})
+            }
+          }}
           onChange={(v) => patch(r.key, { productId: v })}
           options={products.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
         />

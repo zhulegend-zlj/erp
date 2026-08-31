@@ -419,6 +419,7 @@ export default function Orders() {
   }
 
   function openEdit(r: SalesOrder) {
+    void loadOptions() // 成品下拉实时刷新（SKU 改名后同步）
     editForm.setFieldsValue({
       customerId: r.customerId,
       customerPoNo: r.customerPoNo ?? undefined,
@@ -661,6 +662,7 @@ export default function Orders() {
             onClick={() => {
               form.resetFields()
               form.setFieldsValue({ orderDate: todayStr() })
+              void loadOptions() // 成品下拉实时刷新（SKU 改名后同步）
               setModalOpen(true)
             }}
           >

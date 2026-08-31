@@ -922,6 +922,11 @@ function ProductionForm({ orders, products, onDone }: { orders: SalesOrder[]; pr
         >
           <Select
             placeholder="选择成品"
+            onDropdownVisibleChange={(open) => {
+              if (open) {
+                void api.get<Product[]>('/products').then(({ data }) => setProducts(data)).catch(() => {})
+              }
+            }}
             options={products.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
             onChange={(v) => {
               setSelectedProductId(v)

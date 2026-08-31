@@ -273,8 +273,8 @@ function CrudTab({
   const [linkPriceInclTax, setLinkPriceInclTax] = useState<number | null>(null)
   const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [form] = Form.useForm<Record<string, any>>()
-  // 零件页默认每页 100 条（按老板反馈），其他基础资料页默认 10 条
-  const [pageSize, setPageSize] = useState(resource.path === '/parts' ? 100 : 10)
+  // 零件页默认每页 100 条、成品页默认 50 条（按老板反馈），其他基础资料页默认 10 条
+  const [pageSize, setPageSize] = useState(resource.path === '/parts' ? 100 : resource.path === '/products' ? 50 : 10)
   const isPart = resource.path === '/parts'
   const isProduct = resource.path === '/products'
   // 上传时实时读取表单中的 SKU/名称（避免 useWatch 时序问题导致上下文丢失）
@@ -508,6 +508,14 @@ function CrudTab({
               void load(1, undefined, undefined, v)
             }}
             optionFilterProp="label"
+            onDropdownVisibleChange={(open) => {
+              if (open) {
+                void api
+                  .get<Array<{ id: number; sku: string; name: string; bomCount?: number }>>('/products')
+                  .then(({ data }) => setProducts(data))
+                  .catch(() => {})
+              }
+            }}
             options={products.map((p) => ({
               value: p.id,
               label: p.name + '（' + p.sku + '）' + (p.bomCount != null ? ' · ' + p.bomCount + ' 个零件' : ''),
