@@ -2,11 +2,15 @@ import ExcelJS from 'exceljs'
 import { resolve } from 'node:path'
 
 /**
- * 采购单打印模板填充（2026-08-29 老板拍板，两套模板）：
- * - PurchaseOrder-ZRH.xlsx：抬头=智锐恒 → 含税模板（单价(含税)+不含税两列，金额=H*G 公式）
- * - PurchaseOrder-JMC.xlsx：抬头=锦名诚 → 不含税模板（单价单列）
- * 模板为采购历史原件的 Excel 转换件（样式 100% 原样）；导出时打开模板只填内容，
- * 明细行数超过模板时复制样式行插入、合并单元格同步位移、合计公式重写覆盖范围。
+ * 采购单打印模板填充（2026-08-31 按老板要求重做模板，总结 590 张历史单的共有内容）：
+ * - PurchaseOrder-ZRH.xlsx：抬头=智锐恒 → 含税模板
+ *   表头：序号|产品编号|产品名称|规格|材质|表面处理|单位|用量|采购数量|单价(含税)|金额(含税)|备注|不含税
+ *   条款：1.1 人民币结算 / 1.2 付款方式（动态）/ 2.1 按工程图 / 2.2 检验+AQL / 3.1 两天回签 /
+ *         3.2 送货单注明 / 3.3 预计交货时间（动态）
+ * - PurchaseOrder-JMC.xlsx：抬头=锦名诚 → 不含税模板
+ *   表头：序号|产品编号|产品名称|规格|材质|表面处理|单位|用量|数量|产品单价|金额|备注
+ *   条款：1.1 / 1.2 付款方式（动态）/ 1.3 不含13%增值税 / 2.1 / 2.2+AQL / 3.1 / 3.2 / 3.3 / 3.4 交货时间（动态）
+ * 明细行数超过模板时复制样式行插入、合并单元格同步位移、合计/大写公式重写；模板已设一页打印（fitToPage 1×1 横向 A4）。
  */
 
 export const PO_TEMPLATE_DIR = resolve(process.cwd(), 'templates')
@@ -30,7 +34,7 @@ export interface PoDocLine {
 export interface PoDocData {
   headerName: string // 智锐恒 / 锦名诚 → 决定模板
   orderNo: string
-  orderDate: string // yyyy.mm.dd
+  orderDate: string // ISO 日期
   supplier: {
     name: string
     contactPerson: string | null
@@ -45,45 +49,77 @@ export interface PoDocData {
   lines: PoDocLine[]
 }
 
-const ZRH = {
+interface TplPos {
+  file: string
+  no: { col: number; row: number; prefix: string }
+  to: { col: number; row: number; prefix: string }
+  orderDate: { col: number; row: number; prefix: string }
+  attn: { col: number; row: number; prefix: string }
+  tel: { col: number; row: number; prefix: string }
+  fax: { col: number; row: number; prefix: string } | null
+  email: { col: number; row: number; prefix: string }
+  model: { col: number; row: number; prefix: string }
+  headerRow: number
+  firstDataRow: number
+  cols: {
+    seq: number
+    sku: number
+    name: number
+    spec: number
+    material: number
+    finish: number
+    unit: number
+    usage: number
+    qty: number
+    price: number
+    priceInclTax: number
+    amount: number
+    note: number
+  }
+  totalRowOffset: number
+  totalCol: number
+  paymentRow: number
+  deliveryRow: number
+  isZrh: boolean
+}
+
+const ZRH: TplPos = {
   file: PO_TEMPLATE_ZRH,
-  no: { col: 8, row: 2, prefix: '采购单编号：' },
+  no: { col: 10, row: 2, prefix: '采购单编号：' },
   to: { col: 1, row: 3, prefix: 'TO:' },
-  orderDate: { col: 8, row: 3, prefix: '下单日期：' },
+  orderDate: { col: 10, row: 4, prefix: '下单日期：' },
   attn: { col: 1, row: 4, prefix: 'ATTN:' },
   tel: { col: 1, row: 5, prefix: 'TEL:' },
-  fax: { col: 1, row: 6, prefix: 'FAX:' },
+  fax: null, // 智锐恒模板无 FAX 行（R6 为地址行）
   email: { col: 1, row: 7, prefix: 'E-mail:' },
-  model: { col: 8, row: 6, prefix: '适用机型：' },
+  model: { col: 10, row: 6, prefix: '适用机型：' },
   headerRow: 9,
   firstDataRow: 10,
-  // 明细列：产品编号/产品名称/规格/材质/用量/单位/采购数量/单价含税/金额含税/预计交货日期/(L)不含税
-  cols: { sku: 1, name: 2, spec: 3, material: 4, usage: 5, unit: 6, qty: 7, priceInclTax: 8, amount: 9, delivery: 10, price: 12 },
-  totalRowOffset: 2, // 明细最后一行 +2 = 合计行（模板明细1行时合计在 R12）
-  totalCol: 9,
-  paymentRow: 17, // 1.2 付款方式行
-  noteStartRow: 25, // 空行起点（写 3.3/3.4）
+  cols: { seq: 1, sku: 2, name: 3, spec: 4, material: 5, finish: 6, unit: 7, usage: 8, qty: 9, price: 15, priceInclTax: 10, amount: 11, note: 12 },
+  totalRowOffset: 1,
+  totalCol: 11,
+  paymentRow: 17,
+  deliveryRow: 25,
   isZrh: true,
 }
 
-const JMC = {
+const JMC: TplPos = {
   file: PO_TEMPLATE_JMC,
-  no: { col: 9, row: 2, prefix: '采购单编号：' },
+  no: { col: 10, row: 2, prefix: '采购单编号：' },
   to: { col: 1, row: 3, prefix: 'TO:' },
-  orderDate: { col: 9, row: 4, prefix: '下单日期：' },
+  orderDate: { col: 10, row: 3, prefix: '下单日期：' },
   attn: { col: 1, row: 4, prefix: 'ATTN:' },
   tel: { col: 1, row: 5, prefix: 'TEL:' },
   fax: { col: 1, row: 6, prefix: 'FAX:' },
   email: { col: 1, row: 7, prefix: 'E-mail:' },
-  model: { col: 9, row: 6, prefix: '适用机型：' },
+  model: { col: 10, row: 6, prefix: '适用机型：' },
   headerRow: 9,
   firstDataRow: 10,
-  // 明细列：序号/产品编号/产品名称/规格/材质/表面处理/单位/数量/产品单价/总价/备注
-  cols: { seq: 1, sku: 2, name: 3, spec: 4, material: 5, finish: 6, unit: 7, qty: 8, price: 9, amount: 10, note: 11 },
-  totalRowOffset: 2,
-  totalCol: 10,
-  paymentRow: 17, // 1.2 付款方式行
-  noteStartRow: 26, // 空行起点（写 3.3/3.4）
+  cols: { seq: 1, sku: 2, name: 3, spec: 4, material: 5, finish: 6, unit: 7, usage: 8, qty: 9, price: 10, priceInclTax: 0, amount: 11, note: 12 },
+  totalRowOffset: 1,
+  totalCol: 11,
+  paymentRow: 18,
+  deliveryRow: 29,
   isZrh: false,
 }
 
@@ -91,12 +127,22 @@ function pad(n: number) {
   return String(n).padStart(2, '0')
 }
 
-/** yyyy.mm.dd */
 function dotDate(d: string | Date | null | undefined): string {
   if (!d) return ''
   const dt = d instanceof Date ? d : new Date(d)
   if (Number.isNaN(dt.getTime())) return String(d)
   return dt.getFullYear() + '.' + pad(dt.getMonth() + 1) + '.' + pad(dt.getDate())
+}
+
+function colLetter(n: number): string {
+  let s = ''
+  let v = n
+  while (v > 0) {
+    const rem = (v - 1) % 26
+    s = String.fromCharCode(65 + rem) + s
+    v = Math.floor((v - 1) / 26)
+  }
+  return s
 }
 
 export async function buildPoTemplate(data: PoDocData): Promise<Buffer> {
@@ -106,122 +152,100 @@ export async function buildPoTemplate(data: PoDocData): Promise<Buffer> {
   const ws = wb.worksheets[0]!
   const n = Math.max(data.lines.length, 1)
   const first = tpl.firstDataRow
+  const slot = tpl.isZrh ? 2 : 3 // 模板自带明细行槽位数（智锐恒 2 行、锦名诚 3 行）
   const last = first + n - 1
+  const c = tpl.cols
 
-  // 1) 明细行数 > 模板行数：复制样式行插入（模板只有 1 行数据行）
-  if (n > 1) {
-    // 先记录插入前的合并块，随后整体下移
+  // 1) 明细行数超过模板槽位：复制样式行插入 + 合并单元格同步位移；
+  //    未超过时合计/大写行位置不变（模板原样）
+  if (n > slot) {
+    const insertCount = n - slot
     const merges = JSON.parse(JSON.stringify(ws.model.merges ?? [])) as Array<{ top: number; bottom: number }>
-    ws.duplicateRow(first, n - 1, true)
-    // 合并单元格同步位移（含数据行下方的备注/合计/签名等区块）
-    const shift = n - 1
+    ws.duplicateRow(first, insertCount, true)
     for (const m of merges) {
       if (m.top >= first) {
-        m.top += shift
-        m.bottom += shift
+        m.top += insertCount
+        m.bottom += insertCount
       }
     }
     ws.model.merges = merges as never
   }
 
   // 2) 头部
-  const setCell = (pos: { col: number; row: number }, prefix: string, value: string | null | undefined) => {
-    if (value == null || value === '') value = ''
+  const setCell = (pos: { col: number; row: number } | null, prefix: string, value: string | null | undefined) => {
+    if (!pos) return
     const cell = ws.getCell(pos.row, pos.col)
-    cell.value = prefix + value
+    cell.value = prefix + (value ?? '')
   }
   setCell(tpl.no, tpl.no.prefix, data.orderNo)
   setCell(tpl.to, tpl.to.prefix, data.supplier.name)
   setCell(tpl.orderDate, tpl.orderDate.prefix, dotDate(data.orderDate))
   setCell(tpl.attn, tpl.attn.prefix, data.supplier.contactPerson)
   setCell(tpl.tel, tpl.tel.prefix, data.supplier.phone)
-  setCell(tpl.fax, tpl.fax.prefix, data.supplier.fax)
+  setCell(tpl.fax, tpl.fax?.prefix ?? '', data.supplier.fax)
   setCell(tpl.email, tpl.email.prefix, data.supplier.email)
   setCell(tpl.model, tpl.model.prefix, data.model)
 
-  // 3) 明细行
+  // 3) 明细行（序号/料号/名称/规格/材质/表面处理/单位/用量/数量/单价/金额/备注/不含税）
   data.lines.forEach((line, i) => {
     const r = first + i
-    const c = tpl.cols as Record<string, number>
-    const set = (col: number | undefined, v: string | number | null | undefined) => {
+    const set = (col: number, v: string | number | null | undefined) => {
       if (!col) return
       ws.getCell(r, col).value = v == null || v === '' ? '' : v
     }
-    if (!tpl.isZrh) set(c.seq, i + 1)
+    set(c.seq, i + 1)
     set(c.sku, line.sku)
     set(c.name, line.name)
     set(c.spec, line.spec)
     set(c.material, line.material)
+    set(c.finish, line.finish)
+    set(c.unit, line.unit)
+    set(c.usage, line.usage ?? '')
+    set(c.qty, line.qty)
+    set(c.price, line.unitPrice)
+    set(c.note, line.note)
     if (tpl.isZrh) {
-      set(c.usage, line.usage ?? '')
-      set(c.qty, line.qty)
+      // 金额(含税) = 单价(含税) × 采购数量
       set(c.priceInclTax, line.unitPriceInclTax ?? '')
-      ws.getCell(r, c.amount!).value = { formula: '=H' + r + '*G' + r }
-      set(c.delivery, data.expectedDeliveryDate ?? '')
-      set(c.price, line.unitPrice)
-      // 含税 = 不含税 × (1+加税点%)：M 列隐藏计算列（原表 =L10*1.1）
+      ws.getCell(r, c.amount).value = { formula: '=J' + r + '*I' + r }
+      // 隐藏计算列 P：不含税×(1+税点)
       const tp = data.taxPoint ?? 0
-      ws.getCell(r, 13).value = { formula: '=L' + r + '*' + (1 + tp / 100) }
+      ws.getCell(r, 16).value = { formula: '=O' + r + '*' + (1 + tp / 100) }
     } else {
-      set(c.finish, line.finish)
-      set(c.qty, line.qty)
-      set(c.price, line.unitPrice)
-      ws.getCell(r, c.amount!).value = { formula: '=H' + r + '*I' + r }
-      set(c.note, line.note)
+      // 金额 = 数量 × 单价
+      ws.getCell(r, c.amount).value = { formula: '=I' + r + '*J' + r }
     }
   })
 
-  // 4) 合计公式覆盖全部明细行
-  const totalRow = first + n - 1 + tpl.totalRowOffset
-  const colLetter = (n: number) => {
-    let s = ''
-    let v = n
-    while (v > 0) {
-      const rem = (v - 1) % 26
-      s = String.fromCharCode(65 + rem) + s
-      v = Math.floor((v - 1) / 26)
-    }
-    return s
-  }
+  // 4) 合计公式覆盖全部明细行 + 大写金额行指向新合计行
+  const totalRow = first + Math.max(n, slot) - 1 + tpl.totalRowOffset
   const amountCol = colLetter(tpl.totalCol)
   ws.getCell(totalRow, tpl.totalCol).value = {
     formula: '=SUM(' + amountCol + first + ':' + amountCol + last + ')',
   }
-  // 大写金额行：模板原公式 =I12 引用旧合计行，明细多行插入后行号已位移——重写为指向新合计行
   ws.getCell(totalRow + 1, tpl.totalCol).value = { formula: '=' + amountCol + totalRow }
 
-  // 5) 付款方式（1.2 行替换）
+  // 5) 付款方式（1.2 行替换；模板文字可能是富文本，先转纯文本再替换）
   if (data.paymentTerms) {
     const cell = ws.getCell(tpl.paymentRow, 1)
-    const text = cell.value
-    const current = typeof text === 'string' ? text : ''
+    const raw = cell.value
+    let current = ''
+    if (typeof raw === 'string') current = raw
+    else if (raw && typeof raw === 'object' && (raw as { richText?: Array<{ text: string }> }).richText) {
+      current = (raw as { richText: Array<{ text: string }> }).richText.map((t) => t.text).join('')
+    }
     cell.value = current.replace(/付款方式[：:].*$/, '付款方式：' + data.paymentTerms + '；')
   }
 
-  // 6) 3.3 / 3.4 条款（模板无此行则写在空行，样式复制上一行）
-  if (data.expectedDeliveryDate) {
-    let row = ws.getRow(tpl.noteStartRow)
-    // 找到第一个空行（该区域模板为空）
-    while (row.getCell(1).value !== null && row.getCell(1).value !== '') {
-      row = ws.getRow(row.number + 1)
-    }
-    const base = ws.getRow(tpl.noteStartRow - 1)
-    const r1 = row.number
-    ws.getCell(r1, 1).value = '                   3.3 请务必在承诺交货时间前交货；'
-    base.eachCell({ includeEmpty: false }, (cell, col) => {
-      const target = ws.getCell(r1, col)
-      target.style = { ...cell.style }
-      if (cell.font) target.font = { ...cell.font }
-    })
-    const r2 = r1 + 1
-    ws.getCell(r2, 1).value = '                   3.4 预计交货时间：' + data.expectedDeliveryDate
-    const src2 = ws.getRow(tpl.noteStartRow - 1)
-    src2.eachCell({ includeEmpty: false }, (cell, col) => {
-      const target = ws.getCell(r2, col)
-      target.style = { ...cell.style }
-      if (cell.font) target.font = { ...cell.font }
-    })
+  // 6) 交货时间行（3.3/3.4 动态填值；无值时只留条款文字）
+  const dCell = ws.getCell(tpl.deliveryRow, 1)
+  const dRaw = dCell.value
+  let dText = ''
+  if (typeof dRaw === 'string') dText = dRaw
+  else if (dRaw && typeof dRaw === 'object' && (dRaw as { richText?: Array<{ text: string }> }).richText) {
+    dText = (dRaw as { richText: Array<{ text: string }> }).richText.map((t) => t.text).join('')
   }
+  dCell.value = dText.replace(/(预计交货时间|交货时间)[：:].*$/, '$1：' + (data.expectedDeliveryDate ?? ''))
 
   return Buffer.from(await wb.xlsx.writeBuffer())
 }
