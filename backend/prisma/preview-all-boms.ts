@@ -83,6 +83,7 @@ const COL_KEYS: Array<{ key: string; re: RegExp }> = [
 ]
 
 interface SrcRow {
+  fileRow: number
   seq: number
   id: string
   label: string
@@ -122,7 +123,10 @@ function parseFile(file: string): SrcRow[] {
   const g = (key: string, r: unknown[]) => (colMap.has(key) ? clean(r[colMap.get(key)!]) : '')
   const out: SrcRow[] = []
   let lastSeq = 0
-  for (const r of rows.slice(headerIdx + 1)) {
+  const dataRows = rows.slice(headerIdx + 1)
+  for (let ri = 0; ri < dataRows.length; ri++) {
+    const r = dataRows[ri]!
+    const fileRow = headerIdx + 1 + ri // 0 基物理行号（挂图按此归位）
     const seqRaw = g('seq', r)
     const seq = Number(seqRaw)
     const id = g('id', r)
@@ -132,7 +136,7 @@ function parseFile(file: string): SrcRow[] {
     if (Number.isInteger(seq) && seq > 0) {
       lastSeq = seq
       out.push({
-        seq, id, label: g('label', r), en, cn, weight: g('weight', r), rev: g('rev', r),
+        fileRow, seq, id, label: g('label', r), en, cn, weight: g('weight', r), rev: g('rev', r),
         material: g('material', r), dims, finish: g('finish', r),
         amountRaw: g('amount', r), useAt: g('useAt', r), art: g('art', r),
         vendor: g('vendor', r), comment: g('comment', r), extraIds: [],
@@ -141,7 +145,7 @@ function parseFile(file: string): SrcRow[] {
       // 原表无序号的行（螺丝表缺号行、尾部包装件）：按独立物料处理，序号按上一行+1 编
       lastSeq += 1
       out.push({
-        seq: lastSeq, id, label: g('label', r), en, cn, weight: g('weight', r), rev: g('rev', r),
+        fileRow, seq: lastSeq, id, label: g('label', r), en, cn, weight: g('weight', r), rev: g('rev', r),
         material: g('material', r), dims, finish: g('finish', r),
         amountRaw: g('amount', r), useAt: g('useAt', r), art: g('art', r),
         vendor: g('vendor', r), comment: g('comment', r), extraIds: ['原表无序号'],
@@ -217,6 +221,7 @@ const glueSkuMap = new Map<string, { sku: string; product: string }>() // 乐泰
 
 interface OutRow {
   productSku: string
+  fileRow: number
   seq: number
   id: string
   label: string
@@ -332,7 +337,7 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
       continue
     }
     const o: OutRow = {
-      productSku: cfg.productSku ?? '', seq: r.seq, id: r.id, label: r.label, sku, action, sharedFrom,
+      productSku: cfg.productSku ?? '', fileRow: r.fileRow, seq: r.seq, id: r.id, label: r.label, sku, action, sharedFrom,
       cn: r.cn, en: r.en, weight: r.weight.replace(/g$/i, '').trim(), rev: r.rev,
       material: r.material, dims: r.dims, finish: r.finish, amountRaw: r.amountRaw,
       amount: Number.isFinite(amountNum) ? amountNum : 0, art: r.art, useAt: r.useAt, vendor: r.vendor,
@@ -399,6 +404,7 @@ for (const sh of allSheets) {
     { header: '用量(拟定)', key: 'amount', width: 10 }, { header: '图号', key: 'art', width: 12 },
     { header: '用在何处', key: 'useAt', width: 20 }, { header: '供应商', key: 'vendor', width: 14 },
     { header: '备注', key: 'note', width: 34 },
+    { header: '文件行号', key: 'fileRow', width: 9 },
   ]
   for (const o of sh.rows) ws.addRow(o)
   ws.getRow(1).font = { bold: true }
