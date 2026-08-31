@@ -57,7 +57,11 @@ const CFG: ProductCfg[] = [
     excludeNames: ['QC PASS透明贴'],
   },
   { file: 'CSP_V3清单_物料明细.xlsx', skipReason: 'CSP_V3 成品已入库（零件 CSP-xxx 已在库内），本次跳过' },
-  { file: 'CSS_CKK碳纤球头包装_BOM.xlsx', productSku: 'CSS_CKK', productName: 'CSS CKK 碳纤球头包装', productNameEn: 'CSS CKK', miscPrefix: 'CKK-' },
+  {
+    file: 'CKK/CSS_CKK碳纤球头包装_BOM.xlsx', productSku: 'CSS_CKK', productName: 'CSS CKK 碳纤球头包装', productNameEn: 'CSS CKK', miscPrefix: 'CKK-',
+    excludeNames: ['快速指南 计划要取消改用电子版'],
+    noNameShare: ['彩盒序列号标签', '大外箱主标签', '大外箱序列号标签', '大外箱EAN标签'],
+  },
   { file: 'CSS_SQ黑色+USB清单-物料明细.xlsx', skipReason: 'CSS_SQ 成品已入库（零件 CSS-xxx 已在库内），本次跳过' },
   { file: 'CS_TC小夹子-物料清单.xlsx', productSku: 'CS_TC', productName: 'CS TC 工作台小夹子', productNameEn: 'CS_TC', miscPrefix: 'CSTC-' },
   { file: 'CS_USB出货PI-物料清单.xlsx', productSku: 'CS_USB', productName: 'CS USB（出货 PI）', productNameEn: 'CS_USB', miscPrefix: 'CSUSB-' },
