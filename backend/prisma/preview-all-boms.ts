@@ -28,6 +28,7 @@ interface ProductCfg {
   magnetColor?: '金' | '黑' // 磁铁/离合片同名料号按颜色加后缀（BBUH-10495-金/-黑）
   renameIds?: Record<string, string> // 同名料号但实为不同件的拆分（如 MPM 桨垫片 → P1806-10928-MPM）
   nameOverride?: Record<string, string> // 无料号行按中文名指定共用（如 MPM 包装泡棉 → CSMPM-022）
+  qtyOverride?: Record<number, number> // 表内用量空/「+」但老板已确认的用量（如 MPM 棉绳/左桨基座 = 1）
   specialSkus?: Record<number, string> // 序号→拟定SKU（人工规则）
   shared?: Record<number, string> // 序号→库内已有SKU
 }
@@ -36,7 +37,7 @@ const CFG: ProductCfg[] = [
   {
     // MPM 一族 = 同一款磁性拨片，按收货方录 3 个成品（老板 2026-08-31）：Endor 国外完整版 / JLD 不锁碳纤板 / JLD 减配
     file: 'MPM/CS-MPM-BOM清单出货Endor.xlsx', productSku: 'CS-MPM-ENDOR', productName: 'CS MPM 拨片（Endor 出货）', productNameEn: 'CS MPM', miscPrefix: 'CSMPM-',
-    renameIds: { 'P1806-10928': 'P1806-10928-MPM' }, nameOverride: { '包装用 EVA泡棉': 'CSMPM-022' },
+    renameIds: { 'P1806-10928': 'P1806-10928-MPM' }, nameOverride: { '包装用 EVA泡棉': 'CSMPM-022' }, qtyOverride: { 7: 1, 36: 1 },
   },
   { file: 'CSP_V3I清单-螺丝物料表.xlsx', skipReason: '已入库：CSP_V3I BOM 146 行即由本表导入（螺丝/电缆/标签/泡棉等零件均已在库内），本次跳过' },
   { file: 'CSP_V3_BPK清单-物料清单.xlsx', productSku: 'CSP_V3_BPK', productName: 'CSP V3 BPK 套装', productNameEn: 'CSP_V3_BPK', miscPrefix: 'BPK-' },
@@ -264,9 +265,7 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
     if (/^(Materials Cost|Material Loss|Assembling|Overhead|Shipment\/Logistics|Profit)/i.test(r.en)) continue
     // 表内备注行（取消客供/修改BOM 等）不是零件
     if (/取消客供|取消下单|修改BOM/.test(r.cn)) continue
-    // 待定占位行（如 MPM 表里的「棉绳(黑色)待定」，实际不用）不是零件
-    if (/待定$/.test(r.cn)) continue
-    const amountNum = Number(((r.amountRaw || '').replace(/[^\d].*$/, '').split('/')[0] ?? ''))
+    const amountNum = cfg.qtyOverride?.[r.seq] ?? Number(((r.amountRaw || '').replace(/[^\d].*$/, '').split('/')[0] ?? ''))
     let sku = ''
     let action: OutRow['action'] = '新建'
     let sharedFrom = ''
