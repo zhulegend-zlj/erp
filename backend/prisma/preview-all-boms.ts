@@ -210,8 +210,10 @@ function isOfficialId(id: string): boolean {
 // —— 主流程 ——
 const dbParts = await prisma.part.findMany({ select: { sku: true } })
 const dbSkuSet = new Set(dbParts.map((p) => p.sku))
+const usedSkus = new Set<string>(dbSkuSet) // 本批已占用的 SKU（含库内已有），杂项起号时跳过
 const globalIdSku = new Map<string, string>() // 表内料号 → 拟定SKU（跨产品共用）
 const miscCounters = new Map<string, number>()
+const glueSkuMap = new Map<string, { sku: string; product: string }>() // 乐泰/Loctite 胶水型号→SKU
 
 interface OutRow {
   productSku: string
@@ -240,12 +242,14 @@ const allSheets: Array<{ name: string; rows: OutRow[] }> = []
 const summary: Array<Record<string, string | number>> = []
 const skipNotes: string[] = []
 
-function buildProduct(cfg: ProductCfg, file: string): OutRow[] {
+async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
   const rows = parseFile(file)
   const out: OutRow[] = []
   const localSkuQty = new Map<string, { idx: number; qty: number }>()
   for (const r of rows) {
     if (!r.id && !r.en && !r.cn && !r.dims && !r.material && !r.finish) continue
+    // 报价成本占位行（Materials Cost/Material Loss/Assembling/Overhead/Shipment/Profit）不是零件
+    if (/^(Materials Cost|Material Loss|Assembling|Overhead|Shipment\/Logistics|Profit)/i.test(r.en)) continue
     const amountNum = Number(((r.amountRaw || '').replace(/[^\d].*$/, '').split('/')[0] ?? ''))
     let sku = ''
     let action: OutRow['action'] = '新建'
@@ -272,12 +276,39 @@ function buildProduct(cfg: ProductCfg, file: string): OutRow[] {
       if (nameShared) { sku = nameShared.sku; note.push('常见物料按名称共用') }
     }
     if (!sku) {
+      // 乐泰/Loctite 同一胶水：按型号（638/7649）+名称共用（中英文名不同但同物）
+      const glue = r.cn.match(/(?:乐泰|Loctite)\s*(638|7649)\s*([^ ]+)/)
+      if (glue) {
+        const key = glue[1] + ' ' + glue[2]
+        const known = glueSkuMap.get(key)
+        if (known) { sku = known.sku; action = '共用'; sharedFrom = '同批 ' + known.product; note.push('乐泰/Loctite 同胶合并') }
+        else {
+          const dbPart = await prisma.part.findFirst({ where: { name: { contains: key } } })
+          if (dbPart) { sku = dbPart.sku; action = '共用'; sharedFrom = '库内已有'; note.push('乐泰/Loctite 同胶合并') }
+        }
+      }
+    }
+    if (!sku) {
+      // 杂项先按「中文名+尺寸」查库共用（已导入产品里的杂项零件），尺寸列对不上再只按名称兜底
+      const dbByName =
+        (await prisma.part.findFirst({ where: { name: r.cn, dimensions: r.dims } })) ??
+        (await prisma.part.findFirst({ where: { name: r.cn } }))
+      if (dbByName) { sku = dbByName.sku; note.push('按名称共用库内已有') }
+    }
+    if (!sku) {
       const prefix = cfg.miscPrefix ?? 'MISC-'
-      const n = (miscCounters.get(prefix) ?? 0) + 1
+      let n = miscCounters.get(prefix) ?? 0
+      do {
+        n += 1
+      } while (usedSkus.has(prefix + String(n).padStart(3, '0')))
       miscCounters.set(prefix, n)
       sku = prefix + String(n).padStart(3, '0')
       note.push('表内无料号，内部编号')
     }
+    usedSkus.add(sku)
+    // 登记胶水型号→SKU（同型号中英文名共用同一零件）
+    const glue2 = r.cn.match(/(?:乐泰|Loctite)\s*(638|7649)\s*([^ ]+)/)
+    if (glue2) glueSkuMap.set(glue2[1] + ' ' + glue2[2], { sku, product: cfg.productSku ?? file })
     // 库内已有 → 共用
     if (dbSkuSet.has(sku)) { action = '共用'; sharedFrom = '库内已有' }
     else {
@@ -329,7 +360,7 @@ for (const cfg of CFG) {
       continue
     }
   }
-  const out = buildProduct(cfg, cfg.file)
+  const out = await buildProduct(cfg, cfg.file)
   const newCount = out.filter((o) => o.action === '新建').length
   const sharedDb = out.filter((o) => o.action === '共用' && o.sharedFrom === '库内已有').length
   const sharedBatch = out.filter((o) => o.action === '共用' && o.sharedFrom.startsWith('同批')).length
