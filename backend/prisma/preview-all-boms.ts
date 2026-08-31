@@ -37,7 +37,15 @@ const CFG: ProductCfg[] = [
   {
     // MPM 一族 = 同一款磁性拨片，按收货方录 3 个成品（老板 2026-08-31）：Endor 国外完整版 / JLD 不锁碳纤板 / JLD 减配
     file: 'MPM/CS-MPM-BOM清单出货Endor.xlsx', productSku: 'CS-MPM-ENDOR', productName: 'CS MPM 拨片（Endor 出货）', productNameEn: 'CS MPM', miscPrefix: 'CSMPM-',
-    renameIds: { 'P1806-10928': 'P1806-10928-MPM' }, nameOverride: { '包装用 EVA泡棉': 'CSMPM-022' }, qtyOverride: { 9: 1, 37: 1 },
+    renameIds: { 'P1806-10928': 'P1806-10928-MPM' },
+    nameOverride: {
+      '包装用 EVA泡棉': 'CSMPM-022',
+      '牛皮盒封口标签': 'CSMPM-023',
+      '大外箱主标签': 'CSMPM-024',
+      '大外箱序列号标签': 'CSMPM-025',
+      '大外箱EAN标签': 'CSMPM-026',
+    },
+    qtyOverride: { 9: 1, 37: 1 },
   },
   { file: 'CSP_V3I清单-螺丝物料表.xlsx', skipReason: '已入库：CSP_V3I BOM 146 行即由本表导入（螺丝/电缆/标签/泡棉等零件均已在库内），本次跳过' },
   { file: 'CSP_V3_BPK清单-物料清单.xlsx', productSku: 'CSP_V3_BPK', productName: 'CSP V3 BPK 套装', productNameEn: 'CSP_V3_BPK', miscPrefix: 'BPK-' },
