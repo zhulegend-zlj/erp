@@ -12,6 +12,7 @@ import {
   Space,
   Table,
   Tabs,
+  Tag,
   Upload,
   message,
 } from 'antd'
@@ -264,7 +265,7 @@ function CrudTab({
   const [total, setTotal] = useState(0)
   const [keyword, setKeyword] = useState('')
   const [productId, setProductId] = useState<number | undefined>()
-  const [products, setProducts] = useState<{ id: number; sku: string; name: string }[]>([])
+  const [products, setProducts] = useState<Array<{ id: number; sku: string; name: string; bomCount?: number }>>([])
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkingRow, setLinkingRow] = useState<CrudRow | null>(null)
   const [linkSupplierId, setLinkSupplierId] = useState<number | undefined>()
@@ -495,18 +496,22 @@ function CrudTab({
               新建{resource.label}
             </Button>
           ) : null}
+          <Tag color="blue">共 {total} 个零件</Tag>
           <Select
             allowClear
             showSearch
             placeholder="全部零件（可按成品筛选）"
-            style={{ width: 240 }}
+            style={{ width: 260 }}
             value={productId}
             onChange={(v) => {
               setProductId(v)
               void load(1, undefined, undefined, v)
             }}
             optionFilterProp="label"
-            options={products.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
+            options={products.map((p) => ({
+              value: p.id,
+              label: p.name + '（' + p.sku + '）' + (p.bomCount != null ? ' · ' + p.bomCount + ' 个零件' : ''),
+            }))}
           />
           <Input.Search
             placeholder="按料号/名称/英文品名/供应商/表面处理搜索"
@@ -648,6 +653,7 @@ interface Product {
   sku: string
   name: string
   unit: string
+  bomCount?: number
 }
 
 interface Part {
@@ -796,7 +802,10 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
           onDropdownVisibleChange={(open) => {
             if (open) void refreshProducts()
           }}
-          options={products.map((p) => ({ value: p.id, label: p.name + '（' + p.sku + '）' }))}
+          options={products.map((p) => ({
+            value: p.id,
+            label: p.name + '（' + p.sku + '）' + (p.bomCount != null ? ' · ' + p.bomCount + ' 个零件' : ''),
+          }))}
         />
         {canWrite ? (
           <Button type="primary" onClick={() => void save()} loading={saving} disabled={!productId}>
@@ -812,6 +821,7 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
         >
           导出表格
         </Button>
+        {productId ? <Tag color="blue">共 {rows.length} 个零件</Tag> : null}
       </Space>
       {canWrite && productId ? (
         <Space style={{ marginBottom: 8 }}>

@@ -326,8 +326,21 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
       return pagedResult(strip(rows as unknown[]), total, page)
     }
 
+    // 成品列表附带 BOM 零件数（老板反馈 2026-08-31：BOM 维护要看每个成品有多少零件）
+    async function withBomCount<T extends { id: number }>(rows: T[]): Promise<(T & { bomCount: number })[]> {
+      if (rows.length === 0) return rows as (T & { bomCount: number })[]
+      const counts = await prisma.bom.groupBy({
+        by: ['productId'],
+        where: { productId: { in: rows.map((r) => r.id) } },
+        _count: { _all: true },
+      })
+      const m = new Map(counts.map((c) => [c.productId, c._count._all]))
+      return rows.map((r) => ({ ...r, bomCount: m.get(r.id) ?? 0 }))
+    }
+
     if (pagination.kind === 'none') {
-      return delegate.findMany({ orderBy: { id: 'asc' } })
+      const rows = await delegate.findMany({ orderBy: { id: 'asc' } })
+      return spec.resource === 'product' ? withBomCount(rows as Array<{ id: number }>) : rows
     }
     const page = pagination.page
     const [rows, total] = await Promise.all([
@@ -338,6 +351,7 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
       }),
       delegate.count({}),
     ])
+    if (spec.resource === 'product') return pagedResult(await withBomCount(rows as Array<{ id: number }>), total, page)
     return pagedResult(rows as unknown[], total, page)
   })
 
