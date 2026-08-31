@@ -90,16 +90,16 @@ const ZRH: TplPos = {
   orderDate: { col: 10, row: 4, prefix: '下单日期：' },
   attn: { col: 1, row: 4, prefix: 'ATTN:' },
   tel: { col: 1, row: 5, prefix: 'TEL:' },
-  fax: null, // 智锐恒模板无 FAX 行（R6 为地址行）
+  fax: { col: 1, row: 6, prefix: 'FAX:' },
   email: { col: 1, row: 7, prefix: 'E-mail:' },
-  model: { col: 10, row: 6, prefix: '适用机型：' },
+  model: { col: 10, row: 6, prefix: '机型：' },
   headerRow: 9,
   firstDataRow: 10,
-  cols: { seq: 1, sku: 2, name: 3, spec: 4, material: 5, finish: 6, unit: 7, usage: 8, qty: 9, price: 15, priceInclTax: 10, amount: 11, note: 12 },
+  cols: { seq: 1, sku: 2, name: 3, spec: 4, material: 5, finish: 6, unit: 8, usage: 7, qty: 9, price: 18, priceInclTax: 10, amount: 11, note: 12 },
   totalRowOffset: 1,
   totalCol: 11,
   paymentRow: 17,
-  deliveryRow: 25,
+  deliveryRow: 26,
   isZrh: true,
 }
 
@@ -107,7 +107,7 @@ const JMC: TplPos = {
   file: PO_TEMPLATE_JMC,
   no: { col: 10, row: 2, prefix: '采购单编号：' },
   to: { col: 1, row: 3, prefix: 'TO:' },
-  orderDate: { col: 10, row: 3, prefix: '下单日期：' },
+  orderDate: { col: 10, row: 4, prefix: '下单日期：' },
   attn: { col: 1, row: 4, prefix: 'ATTN:' },
   tel: { col: 1, row: 5, prefix: 'TEL:' },
   fax: { col: 1, row: 6, prefix: 'FAX:' },
@@ -205,12 +205,12 @@ export async function buildPoTemplate(data: PoDocData): Promise<Buffer> {
     set(c.price, line.unitPrice)
     set(c.note, line.note)
     if (tpl.isZrh) {
-      // 金额(含税) = 单价(含税) × 采购数量
+      // 金额(含税) = 单价(含税)J × 采购数量I
       set(c.priceInclTax, line.unitPriceInclTax ?? '')
       ws.getCell(r, c.amount).value = { formula: '=J' + r + '*I' + r }
-      // 隐藏计算列 P：不含税×(1+税点)
+      // 隐藏计算列 S：不含税R×(1+税点)
       const tp = data.taxPoint ?? 0
-      ws.getCell(r, 16).value = { formula: '=O' + r + '*' + (1 + tp / 100) }
+      ws.getCell(r, 19).value = { formula: '=R' + r + '*' + (1 + tp / 100) }
     } else {
       // 金额 = 数量 × 单价
       ws.getCell(r, c.amount).value = { formula: '=I' + r + '*J' + r }

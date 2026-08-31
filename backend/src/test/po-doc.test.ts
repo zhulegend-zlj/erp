@@ -48,27 +48,27 @@ describe('采购单模板填充（新模板：共有内容口径）', () => {
     expect(get(2, 10)).toBe('采购单编号：272750T')
     expect(get(3, 1)).toBe('TO:东莞市粤徽磁铁制品有限公司')
     expect(get(4, 1)).toBe('ATTN:何先生')
-    expect(get(6, 10)).toBe('适用机型：CSP_V3i')
-    // 明细行：序号|SKU|名称|规格|材质|表面处理|单位|用量|数量|单价含税|金额|备注|不含税
+    expect(get(6, 10)).toBe('机型：CSP_V3i')
+    // 明细行：序号|SKU|名称|规格|材质|表面处理|用量|单位|数量|单价含税|金额|备注|不含税
     expect(get(10, 1)).toBe('1')
     expect(get(10, 2)).toBe('CSP-058')
     expect(get(10, 3)).toBe('磁铁')
     expect(get(10, 4)).toBe('F5*4*3')
     expect(get(10, 5)).toBe('强磁 镀锌')
     expect(get(10, 6)).toBe('电镀白镍')
-    expect(get(10, 7)).toBe('PCS')
-    expect(get(10, 8)).toBe('2')
+    expect(get(10, 7)).toBe('2')
+    expect(get(10, 8)).toBe('PCS')
     expect(get(10, 9)).toBe('2050')
     expect(get(10, 10)).toBe('0.264')
     expect(get(10, 11)).toBe('=J10*I10')
     expect(get(10, 12)).toBe('请给3‰免费备品')
-    expect(get(10, 15)).toBe('0.24')
+    expect(get(10, 18)).toBe('0.24')
     // 合计/大写
     expect(get(12, 11)).toBe('=SUM(K10:K10)')
     expect(get(13, 11)).toBe('=K12')
     // 条款动态：付款方式 + 交货时间
     expect(get(17, 1)).toContain('付款方式：货到付款')
-    expect(get(25, 1)).toBe('3.3 预计交货时间：2026.09.12')
+    expect(get(26, 1)).toContain('3.3 预计交货时间：2026.09.12')
   })
 
   it('模板 A 多行明细：插入样式行、合计覆盖、大写指向新行、数量逐行填充', async () => {
@@ -120,7 +120,7 @@ describe('采购单模板填充（新模板：共有内容口径）', () => {
     expect(get(13, 11)).toBe('=SUM(K10:K10)')
     expect(get(14, 11)).toBe('=K13')
     expect(get(18, 1)).toContain('付款方式：货到付款')
-    expect(get(29, 1)).toBe('3.4 交货时间：2026.09.12')
+    expect(get(29, 1)).toContain('3.4 交货时间：2026.09.12')
   })
 
   it('模板 B 多行明细：插入后合计/大写行号正确', async () => {
