@@ -49,6 +49,7 @@ model Customer {
 model Supplier {
   id                   Int               @id @default(autoincrement())
   name                 String
+  shortName            String? // 简称（采购单文件名/历史口径用，如 广祺/信杰/林洲）
   contact              String? // [旧] 联系人（保留兼容）
   // 采购单头部字段：生成采购单时自动带出（第3轮口径）
   contactPerson        String? // 联系人 ATTN
