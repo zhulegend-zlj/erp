@@ -14,8 +14,8 @@ import { join } from 'node:path'
 import { prisma } from '../src/db'
 
 const DIR = 'D:/AI/工程/成品bom数据'
-const OUT_XLSX = 'D:/AI/工程/成品BOM-汇总对照表-20260831.xlsx'
-const OUT_MD = 'D:/AI/工程/成品BOM-导入说明-20260831.md'
+const OUT_XLSX = process.env.OUT_XLSX ?? 'D:/AI/工程/成品BOM-汇总对照表-20260831.xlsx'
+const OUT_MD = process.env.OUT_MD ?? 'D:/AI/工程/成品BOM-导入说明-20260831.md'
 
 interface ProductCfg {
   file: string
@@ -31,7 +31,7 @@ interface ProductCfg {
 
 const CFG: ProductCfg[] = [
   { file: 'CS-MPM-BOM清单出货Endor.xlsx', productSku: 'CS-MPM', productName: 'CS-MPM 拨片组件（单独出货 Endor）', productNameEn: 'CS-MPM', miscPrefix: 'CSMPM-' },
-  { file: 'CSP_V3I清单-螺丝物料表.xlsx', productSku: 'CSP_V3I-螺丝补充', productName: '（补充）CSP V3I 螺丝物料表', miscPrefix: 'V3IS-' },
+  { file: 'CSP_V3I清单-螺丝物料表.xlsx', skipReason: '已入库：CSP_V3I BOM 146 行即由本表导入（螺丝/电缆/标签/泡棉等零件均已在库内），本次跳过' },
   { file: 'CSP_V3_BPK清单-物料清单.xlsx', productSku: 'CSP_V3_BPK', productName: 'CSP V3 BPK 套装', productNameEn: 'CSP_V3_BPK', miscPrefix: 'BPK-' },
   { file: 'CSP_V3清单_物料明细.xlsx', skipReason: 'CSP_V3 成品已入库（零件 CSP-xxx 已在库内），本次跳过' },
   { file: 'CSS_CKK碳纤球头包装_BOM.xlsx', productSku: 'CSS_CKK', productName: 'CSS CKK 碳纤球头包装', productNameEn: 'CSS CKK', miscPrefix: 'CKK-' },
