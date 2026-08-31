@@ -62,7 +62,7 @@ const CFG: ProductCfg[] = [
     noNameShare: ['彩盒序列号标签', '大外箱主标签', '大外箱序列号标签', '大外箱EAN标签'],
   },
   { file: 'CSS_SQ黑色+USB清单-物料明细.xlsx', skipReason: 'CSS_SQ 成品已入库（零件 CSS-xxx 已在库内），本次跳过' },
-  { file: 'TC小夹子/CS_TC小夹子-物料清单.xlsx', productSku: 'CS_TC', productName: 'CS TC 工作台小夹子', productNameEn: 'CS_TC', miscPrefix: 'CSTC-', noNameShare: ['大外箱主标签'] },
+  { file: 'TC小夹子/CS_TC小夹子-物料清单.xlsx', productSku: 'CS_TC', productName: 'CS TC 工作台小夹子', productNameEn: 'CS_TC', miscPrefix: 'CSTC-', noNameShare: ['大外箱主标签', '包装泡棉'] },
   { file: 'CS_USB出货PI-物料清单.xlsx', productSku: 'CS_USB', productName: 'CS USB（出货 PI）', productNameEn: 'CS_USB', miscPrefix: 'CSUSB-' },
   { file: 'P1703离合器组件BOM-2024.xlsx', productSku: 'P1703', productName: 'P1703 离合器组件', productNameEn: 'P1703 CLUTCH', miscPrefix: 'P1703-' },
   { file: 'P1903E_CSL-BOM_正常生产_20241025.xlsx', productSku: 'P1903E', productName: 'P1903E CSL 脚踏板', productNameEn: 'P1903E CSL', miscPrefix: 'P1903E-' },
@@ -306,14 +306,26 @@ async function buildProduct(cfg: ProductCfg, file: string): Promise<OutRow[]> {
     else if (!r.id && cfg.specialSkus?.[r.seq]) { sku = cfg.specialSkus[r.seq]!; note.push('标准件按规格命名') }
     else if (!r.id && cfg.shared?.[r.seq]) { action = '共用'; sku = cfg.shared[r.seq]!; sharedFrom = '库内已有' }
     else if (!r.id && cfg.nameOverride?.[r.cn]) { sku = cfg.nameOverride[r.cn]!; note.push('按老板口径指定共用') }
+    else if (stdSku) {
+      // 标准件先按规格命名；规格名库里没有时按名称查库兜底（如 RFCL 的 M3x7 螺丝 → ESTP-9096）
+      sku = stdSku
+      if (!dbSkuSet.has(sku)) {
+        const dbByName =
+          (await prisma.part.findFirst({ where: { name: r.cn, dimensions: r.dims } })) ??
+          (await prisma.part.findFirst({ where: { name: r.cn } }))
+        if (dbByName) { sku = dbByName.sku; note.push('按名称共用库内已有') }
+        else note.push('标准件按规格命名')
+      } else {
+        note.push('标准件按规格命名（库内已有）')
+      }
+    }
     else if (!r.id && !cfg.noNameShare?.includes(r.cn)) {
-      // 无料号行再按名称查库共用（防重复建号，如 RFCL 表里的 M3x7 螺丝 → ESTP-9096）
+      // 非标准无料号行按名称查库共用（防重复建号）
       const dbByName =
         (await prisma.part.findFirst({ where: { name: r.cn, dimensions: r.dims } })) ??
         (await prisma.part.findFirst({ where: { name: r.cn } }))
       if (dbByName) { sku = dbByName.sku; note.push('按名称共用库内已有') }
     }
-    else if (stdSku) { sku = stdSku; note.push('标准件按规格命名') }
     if (!sku) {
       const nameShared = NAME_SHARED.find((n) => n.re.test(r.cn))
       if (nameShared) { sku = nameShared.sku; note.push('常见物料按名称共用') }
