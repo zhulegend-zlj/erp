@@ -38,7 +38,7 @@ interface BomPart {
   id: number
   partId: number
   qty: number
-  part: { id: number; sku: string; name: string; sourcing: string; missingPrice: boolean }
+  part: { id: number; sku: string; name: string; sourcing: string; missingPrice: boolean; supplierId: number | null }
 }
 
 interface ItemField {
@@ -118,6 +118,23 @@ export default function BundleTab(props: { canCreate: boolean; suppliers: Suppli
 
   // 候选 BOM 零件（选成品后加载）
   const [bomParts, setBomParts] = useState<BomPart[]>([])
+
+  // 选供应商后：BOM 零件里属于该供应商的自动跟着选入套餐
+  const watchedSupplierId = Form.useWatch('supplierId', form) as number | undefined
+  function autoAddSupplierParts(bps: BomPart[], supId: number | undefined) {
+    if (!supId) return
+    const cur: ItemField[] = (form.getFieldValue('items') as ItemField[] | undefined) ?? []
+    const have = new Set(cur.filter((x) => x?.partId != null).map((x) => x.partId))
+    const add: ItemField[] = bps
+      .filter((bp) => bp.part.supplierId === supId && !have.has(bp.partId))
+      .map((bp) => ({ partId: bp.partId, sku: bp.part.sku, partName: bp.part.name, qty: bp.qty, unitPrice: undefined }))
+    if (add.length > 0) form.setFieldValue('items', [...cur, ...add])
+  }
+  useEffect(() => {
+    autoAddSupplierParts(bomParts, watchedSupplierId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedSupplierId])
+
   async function loadProductBom(productId: number | undefined) {
     if (!productId) {
       setBomParts([])
@@ -126,6 +143,8 @@ export default function BundleTab(props: { canCreate: boolean; suppliers: Suppli
     try {
       const r = await api.get<BomPart[]>('/products/' + productId + '/bom')
       setBomParts(r.data)
+      // 已选供应商时，自动带入该供应商的 BOM 零件
+      autoAddSupplierParts(r.data, form.getFieldValue('supplierId') as number | undefined)
     } catch (err) {
       notifyError(err)
     }
@@ -307,10 +326,19 @@ export default function BundleTab(props: { canCreate: boolean; suppliers: Suppli
                               value: x?.partId as number,
                               label: (x?.sku ?? '') + '　' + (x?.partName ?? ''),
                             }))
-                            const fromBom = bomParts.map((bp) => ({
-                              value: bp.partId,
-                              label: bp.part.sku + '　' + bp.part.name + (bp.part.sourcing !== 'purchased' ? '（' + (bp.part.sourcing === 'selfbuy' ? '自购' : '自制') + '）' : ''),
-                            }))
+                            const fromBom = bomParts.map((bp) => {
+                              const sup = suppliers.find((s) => s.id === bp.part.supplierId)
+                              const supLabel = sup ? (sup.shortName || sup.name) : ''
+                              return {
+                                value: bp.partId,
+                                label:
+                                  bp.part.sku +
+                                  '　' +
+                                  bp.part.name +
+                                  (bp.part.sourcing !== 'purchased' ? '（' + (bp.part.sourcing === 'selfbuy' ? '自购' : '自制') + '）' : '') +
+                                  (supLabel ? '　[' + supLabel + ']' : ''),
+                              }
+                            })
                             const merged = [...fromBom]
                             for (const c of curItems) if (!merged.some((m) => m.value === c.value)) merged.push(c)
                             return merged
