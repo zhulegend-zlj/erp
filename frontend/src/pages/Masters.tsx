@@ -29,6 +29,10 @@ interface CrudField {
   label: string
   type?: 'text' | 'textarea' | 'supplier' | 'image' | 'number' | 'drawing' | 'sourcing'
   required?: boolean
+  /** 列表列宽（px）；不设则自适应 */
+  width?: number
+  /** 不在列表显示（仅编辑表单可见），如起订量/交货周期/安全库存 */
+  hideInList?: boolean
 }
 
 interface CrudResource {
@@ -217,25 +221,26 @@ const RESOURCES: CrudResource[] = [
   {
     label: '零件',
     path: '/parts',
-    // 列布局按工程 CSP_V3 清单表格口径：去掉 Description-EN、用在何处、生产工艺、序号、用量、单位
+    // 列布局按工程 CSP_V3 清单表格口径：去掉 Description-EN、用在何处、生产工艺、序号、用量、单位；
+    // 2026-09-01 老板要求：起订量/交货周期/安全库存不在列表展示（仅编辑表单），列宽一屏能容下
     fields: [
-      { key: 'sku', label: '料号' },
-      { key: 'imageUrl', label: '图片', type: 'image' },
-      { key: 'nameEn', label: '英文品名' },
-      { key: 'name', label: '中文名称' },
-      { key: 'weight', label: '重量(g)' },
-      { key: 'revision', label: '版本' },
-      { key: 'material', label: '材质' },
-      { key: 'dimensions', label: '尺寸规格' },
-      { key: 'finish', label: '表面处理' },
-      { key: 'drawingsUrl', label: '图档', type: 'drawing' },
-      { key: 'moq', label: '起订量', type: 'number' },
-      { key: 'leadTime', label: '交货周期' },
-      { key: 'safetyStock', label: '安全库存', type: 'number' },
-      { key: 'price', label: '价格', type: 'number' },
-      { key: 'priceInclTax', label: '含税参考价', type: 'number' },
-      { key: 'sourcing', label: '采购方式', type: 'sourcing' },
-      { key: 'supplierId', label: '供应商', type: 'supplier' },
+      { key: 'sku', label: '料号', width: 150 },
+      { key: 'imageUrl', label: '图片', type: 'image', width: 76 },
+      { key: 'nameEn', label: '英文品名', width: 150 },
+      { key: 'name', label: '中文名称', width: 160 },
+      { key: 'weight', label: '重量(g)', width: 80 },
+      { key: 'revision', label: '版本', width: 70 },
+      { key: 'material', label: '材质', width: 130 },
+      { key: 'dimensions', label: '尺寸规格', width: 130 },
+      { key: 'finish', label: '表面处理', width: 130 },
+      { key: 'drawingsUrl', label: '图档', type: 'drawing', width: 80 },
+      { key: 'moq', label: '起订量', type: 'number', hideInList: true },
+      { key: 'leadTime', label: '交货周期', hideInList: true },
+      { key: 'safetyStock', label: '安全库存', type: 'number', hideInList: true },
+      { key: 'price', label: '价格', type: 'number', width: 90 },
+      { key: 'priceInclTax', label: '含税参考价', type: 'number', width: 100 },
+      { key: 'sourcing', label: '采购方式', type: 'sourcing', width: 92 },
+      { key: 'supplierId', label: '供应商', type: 'supplier', width: 150 },
     ],
   },
 ]
@@ -436,11 +441,15 @@ function CrudTab({
   }
 
   const columns = [
-    ...resource.fields.filter((f) => !hideFields?.includes(f.key)).map((f) => ({
-      title: f.label,
-      dataIndex: f.key,
-      key: f.key,
-      render: (v: unknown) => {
+    ...resource.fields
+      .filter((f) => !hideFields?.includes(f.key) && !f.hideInList)
+      .map((f) => ({
+        title: f.label,
+        dataIndex: f.key,
+        key: f.key,
+        width: f.width,
+        ellipsis: f.type !== 'image' && f.type !== 'drawing' ? { showTitle: false } : undefined,
+        render: (v: unknown) => {
         if (v === null || v === undefined || v === '') return '-'
         if (f.type === 'image') {
           return (
@@ -476,6 +485,8 @@ function CrudTab({
           {
             title: '套餐价',
             key: 'priceBundleId',
+            width: 130,
+            ellipsis: { showTitle: false },
             render: (_: unknown, row: CrudRow) => {
               const bid = row.priceBundleId
               if (bid == null || bid === '') return '-'
