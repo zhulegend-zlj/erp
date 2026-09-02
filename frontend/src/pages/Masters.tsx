@@ -471,17 +471,15 @@ function CrudTab({
         width: f.width,
         align: f.wrap ? undefined : ('center' as const),
         ellipsis: !f.wrap && f.type !== 'image' && f.type !== 'drawing' ? true : undefined,
-        onHeaderCell: f.wrap ? undefined : () => ({ style: { textAlign: 'center' as const } }),
-        onCell: f.wrap
-          ? () => ({
-              style: {
-                verticalAlign: 'top' as const,
-                whiteSpace: 'normal' as const,
-                wordBreak: 'break-word' as const,
-                lineHeight: '20px' as const,
-              },
-            })
-          : () => ({ style: { textAlign: 'center' as const, verticalAlign: 'middle' as const } }),
+        onHeaderCell: () => ({ className: 'pt-center' }),
+        onCell: (row: CrudRow) => {
+          if (!f.wrap) return { className: 'pt-center' }
+          // 内容短（一行放得下）→ 居中；内容长 → 左上角换行显示
+          const v = row[f.key]
+          const s = v == null || v === '' ? '' : String(v)
+          const est = [...s].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 255 ? 14 : 7.5), 0)
+          return { className: est > (f.width ?? 130) - 8 ? 'pt-wrap-cell' : 'pt-center' }
+        },
         render: (v: unknown) => {
         if (v === null || v === undefined || v === '') return '-'
         if (f.type === 'image') {
@@ -523,8 +521,8 @@ function CrudTab({
             fixed: 'right' as const,
             align: 'center' as const,
             ellipsis: true,
-            onHeaderCell: () => ({ style: { textAlign: 'center' as const } }),
-            onCell: () => ({ style: { textAlign: 'center' as const, verticalAlign: 'middle' as const } }),
+            onHeaderCell: () => ({ className: 'pt-center' }),
+            onCell: () => ({ className: 'pt-center' }),
             render: (_: unknown, row: CrudRow) => {
               const bid = row.priceBundleId
               if (bid == null || bid === '') return '-'
@@ -542,8 +540,8 @@ function CrudTab({
             width: 104,
             fixed: 'right' as const,
             align: 'center' as const,
-            onHeaderCell: () => ({ style: { textAlign: 'center' as const } }),
-            onCell: () => ({ style: { textAlign: 'center' as const, verticalAlign: 'middle' as const } }),
+            onHeaderCell: () => ({ className: 'pt-center' }),
+            onCell: () => ({ className: 'pt-center' }),
             render: (_: unknown, row: CrudRow) => (
               <Button size="small" icon={<LinkOutlined />} onClick={() => openLink(row)}>
                 供应商/价格
@@ -559,8 +557,8 @@ function CrudTab({
               width: 104,
               fixed: 'right' as const,
               align: 'center' as const,
-              onHeaderCell: () => ({ style: { textAlign: 'center' as const } }),
-              onCell: () => ({ style: { textAlign: 'center' as const, verticalAlign: 'middle' as const } }),
+              onHeaderCell: () => ({ className: 'pt-center' }),
+              onCell: () => ({ className: 'pt-center' }),
               render: (_: unknown, row: CrudRow) => (
                 <Space>
                   <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
@@ -580,6 +578,9 @@ function CrudTab({
 
   return (
     <>
+      {isPart ? (
+        <style>{'.pt-center { text-align: center !important; vertical-align: middle !important; } .pt-wrap-cell { text-align: left !important; vertical-align: top !important; white-space: normal !important; word-break: break-word !important; line-height: 20px !important; }'}</style>
+      ) : null}
       {isPart ? (
         <Space style={{ marginBottom: 16 }} wrap>
           {canWrite ? (
