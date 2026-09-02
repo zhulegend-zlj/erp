@@ -48,6 +48,8 @@ export default function Purchasing() {
   }, [])
 
   const canCreate = user?.role === 'purchase'
+  // 套餐价：老板与采购都可维护（采购单生成仍仅采购角色）
+  const canManageBundles = user?.role === 'purchase' || user?.role === 'boss'
 
   return (
     <div>
@@ -103,7 +105,7 @@ export default function Purchasing() {
             {
               key: 'bundle',
               label: '套餐价',
-              children: <BundleTab canCreate={canCreate} suppliers={suppliers} />,
+              children: <BundleTab canCreate={canManageBundles} suppliers={suppliers} />,
             },
             { key: 'follow', label: '采购跟进', children: <PlaceholderTab title="采购跟进" /> },
             { key: 'overview', label: '订单采购总览', children: <PlaceholderTab title="订单采购总览" /> },
