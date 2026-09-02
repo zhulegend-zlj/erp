@@ -254,7 +254,7 @@ const RESOURCES: CrudResource[] = [
       { key: 'material', label: '材质', width: 110, wrap: true },
       { key: 'dimensions', label: '尺寸规格', width: 110, wrap: true },
       { key: 'finish', label: '表面处理', width: 110, wrap: true },
-      { key: 'drawingsUrl', label: '图档', type: 'drawing', width: 80 },
+      { key: 'drawingsUrl', label: '图档', type: 'drawing', width: 60 },
       { key: 'moq', label: '起订量', type: 'number', hideInList: true },
       { key: 'leadTime', label: '交货周期', hideInList: true },
       { key: 'safetyStock', label: '安全库存', type: 'number', hideInList: true },
@@ -473,15 +473,12 @@ function CrudTab({
         ellipsis: !f.wrap && f.type !== 'image' && f.type !== 'drawing' ? true : undefined,
         onHeaderCell: () => ({ className: 'pt-center' }),
         onCell: (row: CrudRow) => {
-          if (!f.wrap) return { className: f.type === 'image' ? 'pt-center-img' : 'pt-center' }
-          // 动态对齐：短→居中；中长（两行内放不下但不算特别长）→ 居中单行+悬停看全文；特别长（如长URL）→ 左上换行
+          if (!f.wrap) return { className: 'pt-center' }
+          // 内容短（一行放得下）→ 居中；内容长 → 左上角换行显示
           const v = row[f.key]
           const s = v == null || v === '' ? '' : String(v)
-          const wrapW = (f.width ?? 130) - 16
           const est = [...s].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 255 ? 14 : 7.5), 0)
-          if (est <= wrapW) return { className: 'pt-center' }
-          if (est <= wrapW * 2) return { className: 'pt-center', title: s }
-          return { className: 'pt-wrap-cell' }
+          return { className: est > (f.width ?? 130) - 8 ? 'pt-wrap-cell' : 'pt-center' }
         },
         render: (v: unknown) => {
         if (v === null || v === undefined || v === '') return '-'
@@ -582,7 +579,7 @@ function CrudTab({
   return (
     <>
       {isPart ? (
-        <style>{'.pt-center { text-align: center !important; vertical-align: middle !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; } .pt-center-img { text-align: center !important; vertical-align: middle !important; white-space: normal !important; overflow: visible !important; } .pt-wrap-cell { text-align: left !important; vertical-align: top !important; white-space: normal !important; word-break: break-word !important; line-height: 20px !important; }'}</style>
+        <style>{'.pt-center { text-align: center !important; vertical-align: middle !important; } .pt-wrap-cell { text-align: left !important; vertical-align: top !important; white-space: normal !important; word-break: break-word !important; line-height: 20px !important; }'}</style>
       ) : null}
       {isPart ? (
         <Space style={{ marginBottom: 16 }} wrap>
