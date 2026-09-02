@@ -217,14 +217,14 @@ const RESOURCES: CrudResource[] = [
     label: '供应商',
     path: '/suppliers',
     fields: [
-      { key: 'name', label: '名称', width: 200, wrap: true },
-      { key: 'shortName', label: '简称', width: 70 },
-      { key: 'contact', label: '联系人', width: 64 },
-      { key: 'phone', label: '电话', width: 100 },
-      { key: 'fax', label: '传真', width: 100 },
-      { key: 'email', label: '邮箱', width: 170, wrap: true },
-      { key: 'defaultPaymentTerms', label: '付款方式', width: 80 },
-      { key: 'defaultHeaderName', label: '默认抬头', width: 80 },
+      { key: 'name', label: '名称', width: 160, wrap: true },
+      { key: 'shortName', label: '简称', width: 60 },
+      { key: 'contact', label: '联系人', width: 60 },
+      { key: 'phone', label: '电话', width: 90 },
+      { key: 'fax', label: '传真', width: 90 },
+      { key: 'email', label: '邮箱', width: 140, wrap: true },
+      { key: 'defaultPaymentTerms', label: '付款方式', width: 76 },
+      { key: 'defaultHeaderName', label: '默认抬头', width: 72 },
       { key: 'taxPoint', label: '加税点数', type: 'number', width: 72 },
     ],
   },
@@ -656,7 +656,7 @@ function CrudTab({
         dataSource={rows}
         loading={loading}
         size={isPart ? 'small' : undefined}
-        scroll={isPart ? { x: 'max-content' } : isSupplier ? { x: 1032 } : undefined}
+        scroll={isPart ? { x: 'max-content' } : isSupplier ? { x: 912 } : undefined}
         pagination={{
           current: page,
           pageSize,
