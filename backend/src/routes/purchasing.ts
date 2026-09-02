@@ -96,7 +96,7 @@ const PURCHASE_ORDER_INCLUDE = {
   salesOrder: { select: { id: true, orderNo: true } },
   salesOrders: { include: { salesOrder: { select: { id: true, orderNo: true } } } },
   items: {
-    include: { part: { select: { id: true, sku: true, name: true, unit: true } } },
+    include: { part: { select: { id: true, sku: true, name: true, unit: true, sourcing: true } } },
     orderBy: { id: 'asc' as const },
   },
   payments: true,
@@ -233,6 +233,22 @@ export function purchasingRoutes(app: FastifyInstance) {
       const onHand = stockMap.get(r.partId) ?? 0
       const usage = usageDisplay(usageByPart.get(r.partId), productSkuMap)
       const plan = planMap.get(r.partId)
+      // 采购方式口径（2026-09-01 老板设计）：外购总进采购单；自购仅库存不足时带入（提醒采购）；
+      // 自制永远不进采购单。需求表仍返回全部零件（前端标灰/标记）。
+      const sourcing = part?.sourcing ?? 'purchased'
+      const gapQty = plan?.gapQty ?? 0
+      let includeInPo = true
+      let excluded = false
+      let excludedReason = ''
+      if (sourcing === 'selfmade') {
+        includeInPo = false
+        excluded = true
+        excludedReason = '自制（工厂打印）'
+      } else if (sourcing === 'selfbuy' && gapQty <= 0) {
+        includeInPo = false
+        excluded = true
+        excludedReason = '自购·库存充足'
+      }
       return {
         partId: r.partId,
         sku: part?.sku ?? '',
@@ -245,10 +261,16 @@ export function purchasingRoutes(app: FastifyInstance) {
         leadTime: part?.leadTime ?? null,
         safetyStock: part?.safetyStock ?? null,
         isCommonPart: (productsByPart.get(r.partId)?.size ?? 0) >= 2,
+        sourcing,
+        // 自购件库存不足被带入采购单时标记（前端橙色行 + 顶部横幅提醒）
+        isSelfBuy: sourcing === 'selfbuy',
+        includeInPo,
+        excluded,
+        excludedReason,
         ...usage,
         requiredQty: r.requiredQty,
         onHand,
-        gapQty: plan?.gapQty ?? 0,
+        gapQty,
         // 建议采购量：安全库存补货后的数量（未触发时 = gapQty）
         suggestedQty: plan?.suggestedQty ?? 0,
       }
@@ -316,6 +338,7 @@ export function purchasingRoutes(app: FastifyInstance) {
           sku: it.part.sku,
           name: it.part.name,
           unit: it.part.unit,
+          sourcing: it.part.sourcing,
           qty: it.qty,
           usage: it.usage,
           note: it.note,
@@ -639,6 +662,7 @@ export function purchasingRoutes(app: FastifyInstance) {
         unitPrice: it.unitPrice.toNumber(),
         unitPriceInclTax: it.unitPriceInclTax?.toNumber() ?? null,
         note: it.note,
+        sourcing: it.part.sourcing,
       })),
     }
   }

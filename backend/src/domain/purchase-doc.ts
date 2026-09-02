@@ -29,6 +29,7 @@ export interface PoDocLine {
   unitPrice: number // 不含税
   unitPriceInclTax: number | null // 含税（锦名诚单可为空）
   note: string | null
+  sourcing?: string | null // 采购方式（2026-09-01：自购件标橙色提醒）
 }
 
 export interface PoDocData {

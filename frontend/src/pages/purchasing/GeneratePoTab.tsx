@@ -117,7 +117,9 @@ function RequirementGroupedTable(props: {
       dataSource={sorted}
       pagination={false}
       scroll={{ x: 1100 }}
-      rowClassName={(r) => (isGroupStart(r) ? 'po-group-start' : '')}
+      rowClassName={(r) =>
+        (r.excluded ? 'po-row-excluded ' : '') + (isGroupStart(r) ? 'po-group-start' : '')
+      }
       columns={[
         {
           title: '供应商',
@@ -134,7 +136,21 @@ function RequirementGroupedTable(props: {
         {
           title: '零件',
           key: 'part',
-          render: (_: unknown, r: Requirement) => r.sku + '　' + r.partName,
+          render: (_: unknown, r: Requirement) =>
+            r.sku + '　' + r.partName + (r.sourcing === 'selfbuy' && r.gapQty > 0 ? '　' : ''),
+        },
+        {
+          title: '采购方式',
+          dataIndex: 'sourcing',
+          key: 'sourcing',
+          width: 110,
+          render: (_: unknown, r: Requirement) => {
+            if (r.sourcing === 'selfmade') return <Tag color="default">自制</Tag>
+            if (r.sourcing === 'selfbuy') {
+              return r.gapQty > 0 ? <Tag color="orange">自购·库存不足</Tag> : <Tag color="gold">自购</Tag>
+            }
+            return <Tag color="blue">外购</Tag>
+          },
         },
         {
           title: '用量/台',
@@ -261,7 +277,11 @@ export default function GeneratePoTab(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderIds, reqRefresh])
 
-  const gaps = requirements.filter((r) => (r.suggestedQty ?? r.gapQty) > 0)
+  const gaps = requirements.filter((r) => r.includeInPo && (r.suggestedQty ?? r.gapQty) > 0)
+  // 采购方式统计（2026-09-01）：自制永不采购；自购库存充足不带入，库存不足带入并提醒
+  const selfMadeCount = requirements.filter((r) => r.sourcing === 'selfmade').length
+  const selfBuyExcludedCount = requirements.filter((r) => r.sourcing === 'selfbuy' && !r.includeInPo).length
+  const selfBuyIncluded = gaps.filter((r) => r.sourcing === 'selfbuy')
 
   // 草稿订单提醒 + 已生成采购单二次确认（增补/补损），保留原交互并适配多订单
   async function openCreatePoWithCheck() {
@@ -404,7 +424,23 @@ export default function GeneratePoTab(props: Props) {
         <Alert type="success" message="所选订单当前无零件缺口" showIcon />
       ) : null}
 
-      <style>{REQ_GROUP_CSS}</style>
+      {orderIds.length > 0 && !reqLoading ? (
+        <Alert
+          type={selfBuyIncluded.length > 0 ? 'warning' : 'info'}
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={
+            '采购方式口径：' +
+            (selfMadeCount > 0 ? '已排除 ' + selfMadeCount + ' 个自制件（工厂打印）；' : '') +
+            (selfBuyExcludedCount > 0 ? '已排除 ' + selfBuyExcludedCount + ' 个自购件（库存充足，您自己买）；' : '') +
+            (selfBuyIncluded.length > 0
+              ? '已带入 ' + selfBuyIncluded.length + ' 个自购件（库存不足本次生产，橙色标记，请留意是否改由自己购买）'
+              : '')
+          }
+        />
+      ) : null}
+
+      <style>{REQ_GROUP_CSS + ' .po-row-excluded > td { color: #999 !important; background: #fafafa !important; }'}</style>
       <RequirementGroupedTable
         requirements={requirements}
         loading={reqLoading}

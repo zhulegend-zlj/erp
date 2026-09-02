@@ -79,7 +79,7 @@ export default function GeneratePoModal(props: Props) {
       return
     }
     const items: PoItemField[] = requirements
-      .filter((r) => (r.suggestedQty ?? r.gapQty) > 0)
+      .filter((r) => r.includeInPo && (r.suggestedQty ?? r.gapQty) > 0)
       .map((r) => {
         const sup = suppliers.find((s) => s.id === r.supplierId)
         return {
@@ -284,6 +284,24 @@ export default function GeneratePoModal(props: Props) {
             '（按供应商分组预估，以生成为准）'
           }
         />
+        {(() => {
+          const selfBuy = (watchedItems ?? []).filter((it) => {
+            const req = requirements.find((r) => r.partId === it?.partId)
+            return req?.sourcing === 'selfbuy'
+          })
+          return selfBuy.length > 0 ? (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={
+                '本单包含 ' +
+                selfBuy.length +
+                ' 个自购件（橙色标记：库存不足本次生产才带入）。这些件平时由老板自己买，请留意是否改由自己购买。'
+              }
+            />
+          ) : null
+        })()}
 
         <Space wrap style={{ marginBottom: 8 }}>
           <Form.Item name="orderDate" label="下单日期" style={{ marginBottom: 8 }}>
@@ -374,6 +392,7 @@ export default function GeneratePoModal(props: Props) {
                         const it = watchedItems?.[index]
                         const req = requirements.find((r) => r.partId === it?.partId)
                         const hasSplit = it?.splits != null && it.splits.length > 0
+                        const isSelfBuy = req?.sourcing === 'selfbuy'
                         return (
                           <div
                             key={field.key}
@@ -381,8 +400,15 @@ export default function GeneratePoModal(props: Props) {
                               borderTop: index !== group.indices[0] ? '1px dashed #d9d9d9' : 'none',
                               paddingTop: index !== group.indices[0] ? 10 : 4,
                               paddingBottom: 6,
+                              background: isSelfBuy ? '#fff7e6' : undefined,
+                              borderRadius: isSelfBuy ? 6 : undefined,
                             }}
                           >
+                            {isSelfBuy ? (
+                              <Tag color="orange" style={{ marginBottom: 6 }}>
+                                自购件·库存不足带入（平时自己买，请留意）
+                              </Tag>
+                            ) : null}
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
                               <Form.Item
                                 name={[field.name, 'partId']}

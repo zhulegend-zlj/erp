@@ -27,7 +27,7 @@ import { CompanyHeadersTab } from './CompanyHeadersTab'
 interface CrudField {
   key: string
   label: string
-  type?: 'text' | 'textarea' | 'supplier' | 'image' | 'number' | 'drawing'
+  type?: 'text' | 'textarea' | 'supplier' | 'image' | 'number' | 'drawing' | 'sourcing'
   required?: boolean
 }
 
@@ -234,6 +234,7 @@ const RESOURCES: CrudResource[] = [
       { key: 'safetyStock', label: '安全库存', type: 'number' },
       { key: 'price', label: '价格', type: 'number' },
       { key: 'priceInclTax', label: '含税参考价', type: 'number' },
+      { key: 'sourcing', label: '采购方式', type: 'sourcing' },
       { key: 'supplierId', label: '供应商', type: 'supplier' },
     ],
   },
@@ -271,7 +272,10 @@ function CrudTab({
   const [linkSupplierId, setLinkSupplierId] = useState<number | undefined>()
   const [linkPrice, setLinkPrice] = useState<number | null>(null)
   const [linkPriceInclTax, setLinkPriceInclTax] = useState<number | null>(null)
+  const [linkSourcing, setLinkSourcing] = useState<string | undefined>()
   const [linkSubmitting, setLinkSubmitting] = useState(false)
+  const [sourcingFilter, setSourcingFilter] = useState<string | undefined>()
+  const [bundles, setBundles] = useState<Array<{ id: number; name: string }>>([])
   const [form] = Form.useForm<Record<string, any>>()
   // 零件页默认每页 100 条、成品页默认 50 条（按老板反馈），其他基础资料页默认 10 条
   const [pageSize, setPageSize] = useState(resource.path === '/parts' ? 100 : resource.path === '/products' ? 50 : 10)
@@ -289,15 +293,17 @@ function CrudTab({
     }
   }
 
-  async function load(targetPage = 1, size?: number, searchTerm?: string, prodId?: number) {
+  async function load(targetPage = 1, size?: number, searchTerm?: string, prodId?: number, sourcing?: string) {
     setLoading(true)
     try {
       const ps = size ?? pageSize
       const kw = searchTerm !== undefined ? searchTerm : keyword
       const pid = prodId !== undefined ? prodId : productId
+      const sc = sourcing !== undefined ? sourcing : sourcingFilter
       const params: Record<string, string | number> = { page: targetPage, pageSize: ps }
       if (kw) params.search = kw
       if (pid) params.productId = pid
+      if (sc) params.sourcing = sc
       const { data } = await api.get<Paged<CrudRow>>(resource.path, {
         params,
       })
@@ -326,6 +332,10 @@ function CrudTab({
         .get<{ id: number; sku: string; name: string }[]>('/products')
         .then(({ data }) => setProducts(data))
         .catch(notifyError)
+      void api
+        .get<Array<{ id: number; name: string }>>('/price-bundles')
+        .then(({ data }) => setBundles(data))
+        .catch(() => {})
     }
   }, [resource.path])
 
@@ -400,6 +410,8 @@ function CrudTab({
     setLinkPrice(p === null || p === undefined || p === '' ? null : Number(p))
     const pit = row.priceInclTax
     setLinkPriceInclTax(pit === null || pit === undefined || pit === '' ? null : Number(pit))
+    const s = row.sourcing
+    setLinkSourcing(typeof s === 'string' ? s : undefined)
     setLinkOpen(true)
   }
 
@@ -411,6 +423,7 @@ function CrudTab({
         supplierId: linkSupplierId ?? null,
         price: linkPrice ?? null,
         priceInclTax: linkPriceInclTax ?? null,
+        sourcing: linkSourcing,
       })
       message.success('供应商/价格已更新')
       setLinkOpen(false)
@@ -450,9 +463,28 @@ function CrudTab({
           const supplier = suppliers.find((s) => s.id === Number(v))
           return supplier ? supplier.name : String(v)
         }
+        if (f.type === 'sourcing') {
+          if (v === 'selfbuy') return <Tag color="orange">自购</Tag>
+          if (v === 'selfmade') return <Tag color="default">自制</Tag>
+          return <Tag color="blue">外购</Tag>
+        }
         return String(v)
       },
     })),
+    ...(isPart
+      ? [
+          {
+            title: '套餐价',
+            key: 'priceBundleId',
+            render: (_: unknown, row: CrudRow) => {
+              const bid = row.priceBundleId
+              if (bid == null || bid === '') return '-'
+              const b = bundles.find((x) => x.id === Number(bid))
+              return b ? <Tag color="purple">{b.name}</Tag> : String(bid)
+            },
+          },
+        ]
+      : []),
     ...(linkSupplierOnly
       ? [
           {
@@ -497,6 +529,21 @@ function CrudTab({
             </Button>
           ) : null}
           <Tag color="blue">共 {total} 个零件</Tag>
+          <Select
+            allowClear
+            placeholder="采购方式（全部）"
+            style={{ width: 160 }}
+            value={sourcingFilter}
+            onChange={(v) => {
+              setSourcingFilter(v)
+              void load(1, undefined, undefined, undefined, v)
+            }}
+            options={[
+              { value: 'purchased', label: '外购' },
+              { value: 'selfbuy', label: '自购' },
+              { value: 'selfmade', label: '自制' },
+            ]}
+          />
           <Select
             allowClear
             showSearch
@@ -589,6 +636,15 @@ function CrudTab({
                   placeholder={'请选择' + f.label}
                   options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
                 />
+              ) : f.type === 'sourcing' ? (
+                <Select
+                  placeholder={'请选择' + f.label}
+                  options={[
+                    { value: 'purchased', label: '外购（走采购单）' },
+                    { value: 'selfbuy', label: '自购（自己买，库存不足才进采购单）' },
+                    { value: 'selfmade', label: '自制（工厂打印，不进采购单）' },
+                  ]}
+                />
               ) : f.type === 'image' ? (
                 <ImageUpload getContext={uploadContext} />
               ) : f.type === 'drawing' ? (
@@ -651,6 +707,18 @@ function CrudTab({
           value={linkPriceInclTax ?? undefined}
           onChange={(v) => setLinkPriceInclTax(typeof v === 'number' ? v : null)}
         />
+        <div style={{ margin: '12px 0 8px' }}>采购方式</div>
+        <Select
+          style={{ width: '100%' }}
+          placeholder="采购方式"
+          value={linkSourcing}
+          onChange={(v) => setLinkSourcing(v)}
+          options={[
+            { value: 'purchased', label: '外购（走采购单）' },
+            { value: 'selfbuy', label: '自购（自己买，库存不足才进采购单）' },
+            { value: 'selfmade', label: '自制（工厂打印，不进采购单）' },
+          ]}
+        />
       </Modal>
     </>
   )
@@ -677,7 +745,14 @@ interface BomItem {
   productId: number
   partId: number
   qty: number
-  part: { id: number; sku: string; name: string }
+  part: {
+    id: number
+    sku: string
+    name: string
+    sourcing: 'purchased' | 'selfbuy' | 'selfmade'
+    missingPrice: boolean
+    supplierId: number | null
+  }
 }
 
 interface BomRow {
@@ -686,6 +761,8 @@ interface BomRow {
   qty?: number | null
   partName?: string
   sku?: string
+  sourcing?: 'purchased' | 'selfbuy' | 'selfmade'
+  missingPrice?: boolean
 }
 
 function BomTab({ canWrite }: { canWrite: boolean }) {
@@ -732,6 +809,8 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
             qty: b.qty,
             partName: b.part.name,
             sku: b.part.sku,
+            sourcing: b.part.sourcing,
+            missingPrice: b.part.missingPrice,
           })),
         ),
       )
@@ -790,6 +869,8 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
           qty: b.qty,
           partName: b.part.name,
           sku: b.part.sku,
+          sourcing: b.part.sourcing,
+          missingPrice: b.part.missingPrice,
         })),
       )
     } catch (err) {
@@ -829,7 +910,13 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
         >
           导出表格
         </Button>
-        {productId ? <Tag color="blue">共 {rows.length} 个零件</Tag> : null}
+        {productId ? (
+          <Tag color="blue">
+            共 {rows.length} 个零件｜外购 {rows.filter((r) => r.sourcing === 'purchased').length}（缺价{' '}
+            {rows.filter((r) => r.missingPrice).length}）｜自购 {rows.filter((r) => r.sourcing === 'selfbuy').length}｜自制{' '}
+            {rows.filter((r) => r.sourcing === 'selfmade').length}
+          </Tag>
+        ) : null}
       </Space>
       {canWrite && productId ? (
         <Space style={{ marginBottom: 8 }}>
@@ -865,6 +952,20 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
                 />
               ) : (
                 '-'
+              )
+            },
+          },
+          {
+            title: '采购方式',
+            key: 'sourcing',
+            width: 110,
+            render: (_: unknown, r: BomRow) => {
+              if (r.sourcing === 'selfbuy') return <Tag color="orange">自购</Tag>
+              if (r.sourcing === 'selfmade') return <Tag color="default">自制</Tag>
+              return r.missingPrice ? (
+                <Tag color="red">外购·缺价</Tag>
+              ) : (
+                <Tag color="blue">外购</Tag>
               )
             },
           },

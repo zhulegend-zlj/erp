@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  Alert,
   Button,
   Form,
   Input,
@@ -564,12 +565,26 @@ export default function PoListTab(props: Props) {
               {dateStr(previewData.expectedDeliveryDate)}　<b>加税点数：</b>
               {previewData.taxPoint ?? 0}%
             </div>
+            {(previewData.lines ?? []).some((l) => l.sourcing === 'selfbuy') ? (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 8 }}
+                message="本单包含自购件（橙色标记）：库存不足本次生产才带入，平时由老板自己购买，请留意。"
+              />
+            ) : null}
             <Table
               size="small"
               rowKey={(_, i) => String(i ?? 0)}
               dataSource={previewData.lines ?? []}
               pagination={false}
               columns={[
+                {
+                  title: '采购方式',
+                  dataIndex: 'sourcing',
+                  render: (v: string | null | undefined) =>
+                    v === 'selfbuy' ? <Tag color="orange">自购</Tag> : v === 'selfmade' ? <Tag>自制</Tag> : null,
+                },
                 { title: 'SKU', dataIndex: 'sku' },
                 { title: '名称', dataIndex: 'name' },
                 { title: '规格', dataIndex: 'spec', render: (v: string | null) => v || '-' },

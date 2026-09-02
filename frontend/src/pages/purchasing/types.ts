@@ -51,6 +51,12 @@ export interface Requirement {
   onHand: number
   gapQty: number
   suggestedQty: number
+  // 采购方式（2026-09-01）：外购总进采购单；自购库存不足带入；自制不进
+  sourcing: 'purchased' | 'selfbuy' | 'selfmade'
+  isSelfBuy: boolean
+  includeInPo: boolean
+  excluded: boolean
+  excludedReason: string
 }
 
 export interface SplitField {
@@ -88,6 +94,7 @@ export interface PurchaseOrderItem {
   sku: string
   name: string
   unit: string
+  sourcing?: 'purchased' | 'selfbuy' | 'selfmade'
   qty: number
   usage?: number | null
   note?: string | null
@@ -149,6 +156,7 @@ export interface PoPreviewLine {
   unitPrice: number | string
   unitPriceInclTax?: number | string | null
   note?: string | null
+  sourcing?: string | null
 }
 
 export interface PoPreview {

@@ -100,13 +100,16 @@ const partSchema = z.object({
   priceInclTax: z.number({ error: '含税价必须为数字' }).nonnegative().max(9999999999.99).nullable().optional(),
   leadTime: z.string().nullable().optional(),
   safetyStock: z.number({ error: '安全库存必须为整数' }).int().nonnegative().max(2147483647).nullable().optional(),
+  // 采购方式（2026-09-01 老板设计）：外购/自购/自制，影响采购单生成
+  sourcing: z.enum(['purchased', 'selfbuy', 'selfmade'], { error: '采购方式仅支持 purchased/selfbuy/selfmade' }).optional(),
 })
 
-// 采购在零件上的写权限：供应商（挂链接）与价格（含含税参考价）；其余字段一律拒绝
+// 采购在零件上的写权限：供应商（挂链接）、价格（含含税参考价）与采购方式；其余字段一律拒绝
 const purchasePartUpdateSchema = z.object({
   supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
   price: z.number({ error: '价格必须为数字' }).nonnegative({ error: '价格必须为非负数' }).nullable().optional(),
   priceInclTax: z.number({ error: '含税价必须为数字' }).nonnegative({ error: '含税价必须为非负数' }).nullable().optional(),
+  sourcing: z.enum(['purchased', 'selfbuy', 'selfmade'], { error: '采购方式仅支持 purchased/selfbuy/selfmade' }).optional(),
 })
 
 const bomSchema = z.array(
@@ -297,7 +300,17 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
         const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true } })
         if (!product) return reply.code(404).send({ error: '成品不存在' })
       }
+      // 采购方式筛选（2026-09-01）：purchased/selfbuy/selfmade
+      const sourcingRaw = (req.query as Record<string, unknown>).sourcing
+      let sourcing: string | null = null
+      if (sourcingRaw !== undefined && sourcingRaw !== null && String(sourcingRaw) !== '') {
+        sourcing = String(sourcingRaw)
+        if (!['purchased', 'selfbuy', 'selfmade'].includes(sourcing)) {
+          return reply.code(400).send({ error: 'sourcing 仅支持 purchased/selfbuy/selfmade' })
+        }
+      }
       const conds: Prisma.Sql[] = []
+      if (sourcing) conds.push(Prisma.sql`"sourcing" = ${sourcing}`)
       if (search) {
         const escaped = search.replace(/[\\%_]/g, (c) => '\\' + c)
         const pattern = '%' + escaped + '%'
@@ -382,10 +395,10 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
       if (role === 'purchase') {
         const keys = Object.keys(body)
         if (keys.length === 0) {
-          return reply.code(400).send({ error: '请至少提供 supplierId 或 price' })
+          return reply.code(400).send({ error: '请至少提供 supplierId、price 或 sourcing' })
         }
-        if (keys.some((k) => k !== 'supplierId' && k !== 'price')) {
-          return reply.code(400).send({ error: '采购仅可修改零件的供应商与价格，其他资料请联系工程维护' })
+        if (keys.some((k) => k !== 'supplierId' && k !== 'price' && k !== 'priceInclTax' && k !== 'sourcing')) {
+          return reply.code(400).send({ error: '采购仅可修改零件的供应商、价格与采购方式，其他资料请联系工程维护' })
         }
         const data = parseBody(purchasePartUpdateSchema, req.body, reply)
         if (data === null) return
@@ -550,10 +563,36 @@ export function mastersRoutes(app: FastifyInstance) {
   app.get('/api/products/:id/bom', { preHandler: requireRole(...READ_ROLES) }, async (req, reply) => {
     const productId = parseId(req as { params: { id: string } }, reply)
     if (productId === null) return
-    return prisma.bom.findMany({
+    const boms = await prisma.bom.findMany({
       where: { productId },
       orderBy: { partId: 'asc' },
-      include: { part: { select: { id: true, sku: true, name: true } } },
+      include: { part: { select: { id: true, sku: true, name: true, sourcing: true, price: true, priceInclTax: true, supplierId: true } } },
+    })
+    // 价格可见性口径与零件列表一致：仅采购/老板可见 price；其余角色只拿到「是否缺价」标记（外购且无价）
+    const role = (req as { user?: { role?: string } }).user?.role ?? ''
+    const showPrice = role === 'purchase' || role === 'boss'
+    return boms.map((b) => {
+      const p = b.part
+      const missingPrice = p.sourcing === 'purchased' && p.price == null && p.priceInclTax == null
+      return {
+        id: b.id,
+        partId: b.partId,
+        qty: b.qty,
+        part: {
+          id: p.id,
+          sku: p.sku,
+          name: p.name,
+          sourcing: p.sourcing,
+          supplierId: p.supplierId,
+          missingPrice,
+          ...(showPrice
+            ? {
+                price: p.price == null ? null : Number(p.price),
+                priceInclTax: p.priceInclTax == null ? null : Number(p.priceInclTax),
+              }
+            : {}),
+        },
+      }
     })
   })
 

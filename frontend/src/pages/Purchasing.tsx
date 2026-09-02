@@ -7,6 +7,7 @@ import { notifyError } from './common'
 import { useKeepAliveState } from './keepAlive'
 import GeneratePoTab from './purchasing/GeneratePoTab'
 import PoListTab from './purchasing/PoListTab'
+import BundleTab from './purchasing/BundleTab'
 import SparePoModal from './purchasing/SparePoModal'
 import PlaceholderTab from './purchasing/PlaceholderTab'
 import type {
@@ -98,6 +99,11 @@ export default function Purchasing() {
                   refreshKey={listRefreshKey}
                 />
               ),
+            },
+            {
+              key: 'bundle',
+              label: '套餐价',
+              children: <BundleTab canCreate={canCreate} suppliers={suppliers} />,
             },
             { key: 'follow', label: '采购跟进', children: <PlaceholderTab title="采购跟进" /> },
             { key: 'overview', label: '订单采购总览', children: <PlaceholderTab title="订单采购总览" /> },

@@ -65,6 +65,7 @@ model Supplier {
   parts                Part[]
   returnReplenishments ReturnReplenish[]
   receipts             Receipt[]
+  bundles              PriceBundle[]
 }
 
 model Product {
@@ -105,6 +106,9 @@ model Part {
   safetyStock          Int? // 安全库存（低于安全线采购页提醒；下单会跌破线时自动补货到安全线）
   usedIn               String? // 用在何处（暂存未展示）
   process              String? // 生产工艺（暂存未展示）
+  sourcing             String              @default("purchased") // 采购方式：purchased外购/selfbuy自购/selfmade自制（2026-09-01 老板设计）
+  priceBundleId        Int? // 套餐价组（供应商打包一口价，分摊单价来源）
+  priceBundle          PriceBundle?        @relation(fields: [priceBundleId], references: [id])
   supplier             Supplier?           @relation(fields: [supplierId], references: [id])
   supplierId           Int?
   boms                 Bom[]
@@ -112,6 +116,7 @@ model Part {
   receipts             Receipt[]
   issues               Issue[]
   returnReplenishments ReturnReplenish[]
+  bundleItems          PriceBundleItem[]
 }
 
 model Bom {
@@ -469,3 +474,32 @@ model PurchaseOrderEditLog {
   editedBy        String
   editedAt        DateTime      @default(now())
 }
+
+// 套餐价组（2026-09-01 老板设计）：外购零件打包一口价——供应商把一批零件按「每套产品用量」报一个总价，
+// 系统按每套用量自动分摊出各零件单价并回写零件价格（Part.priceBundleId 关联）。
+model PriceBundle {
+  id         Int                @id @default(autoincrement())
+  supplierId Int
+  supplier   Supplier           @relation(fields: [supplierId], references: [id])
+  name       String // 套餐名，如「XX供应商21件套餐」
+  totalPrice Decimal            @db.Decimal(12, 2) // 每套总价
+  note       String?
+  items      PriceBundleItem[]
+  parts      Part[] // 分摊单价回写到的零件
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+}
+
+model PriceBundleItem {
+  id        Int         @id @default(autoincrement())
+  bundleId  Int
+  bundle    PriceBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  partId    Int
+  part      Part        @relation(fields: [partId], references: [id])
+  qty       Int // 每套用量（默认取 BOM 用量，可改）
+  unitPrice Decimal?    @db.Decimal(12, 4) // 手改单价覆盖；空=自动分摊
+
+  @@unique([bundleId, partId])
+}
+
+
