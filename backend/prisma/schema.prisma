@@ -52,7 +52,7 @@ model Supplier {
   shortName            String? // 简称（采购单文件名/历史口径用，如 广祺/信杰/林洲）
   contact              String? // [旧] 联系人（保留兼容）
   // 采购单头部字段：生成采购单时自动带出（第3轮口径）
-  contactPerson        String? // 联系人 ATTN
+  contactPerson        String? // [废弃] 联系人ATTN（2026-09-02 老板取消，仅用 contact；采购单 ATTN 取 contact）
   phone                String? // 电话
   fax                  String? // 传真
   email                String? // 邮箱

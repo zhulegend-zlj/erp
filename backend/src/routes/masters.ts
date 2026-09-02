@@ -52,7 +52,7 @@ const supplierSchema = z.object({
   name: z.string({ error: '名称必填' }).min(1, '名称必填').max(200, '名称过长（最多 200 字）'),
   contact: z.string().nullable().optional(),
   // 采购单头部字段（2026-08-29 重构，生成采购单自动带出）
-  contactPerson: z.string().nullable().optional(),
+  // contactPerson（联系人ATTN）2026-09-02 老板取消：有 contact 联系人即可，采购单 ATTN 自动取 contact
   phone: z.string().nullable().optional(),
   fax: z.string().nullable().optional(),
   email: z.string().nullable().optional(),

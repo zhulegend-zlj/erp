@@ -218,7 +218,6 @@ const RESOURCES: CrudResource[] = [
     fields: [
       { key: 'name', label: '名称' },
       { key: 'contact', label: '联系人' },
-      { key: 'contactPerson', label: '联系人ATTN' },
       { key: 'phone', label: '电话' },
       { key: 'fax', label: '传真' },
       { key: 'email', label: '邮箱' },
@@ -396,7 +395,7 @@ function CrudTab({
         payload[f.key] = v === '' || v === null || v === undefined ? null : Number(v)
       } else if (
         f.type === 'image' ||
-        ['spec', 'drawingsUrl', 'tooling', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode', 'defaultPaymentTerms', 'defaultIncoterm', 'defaultMark', 'defaultTaxRate', 'contactPerson', 'phone', 'fax', 'email', 'defaultHeaderName', 'leadTime'].includes(f.key)
+        ['spec', 'drawingsUrl', 'tooling', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode', 'defaultPaymentTerms', 'defaultIncoterm', 'defaultMark', 'defaultTaxRate', 'phone', 'fax', 'email', 'defaultHeaderName', 'leadTime'].includes(f.key)
       ) {
         if (payload[f.key] === '') payload[f.key] = null
       }
@@ -687,7 +686,7 @@ function CrudTab({
                 f.type === 'image' ||
                 f.type === 'number' ||
                 f.type === 'textarea' ||
-                ['spec', 'drawingsUrl', 'tooling', 'country', 'contact', 'unit', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode', 'defaultPaymentTerms', 'defaultIncoterm', 'defaultMark', 'defaultTaxRate', 'contactPerson', 'phone', 'fax', 'email', 'defaultHeaderName', 'leadTime'].includes(f.key)
+                ['spec', 'drawingsUrl', 'tooling', 'country', 'contact', 'unit', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode', 'defaultPaymentTerms', 'defaultIncoterm', 'defaultMark', 'defaultTaxRate', 'phone', 'fax', 'email', 'defaultHeaderName', 'leadTime'].includes(f.key)
                   ? []
                   : [{ required: true, message: '请输入' + f.label }]
               }
