@@ -452,11 +452,17 @@ function CrudTab({
         width: f.width,
         align: f.wrap ? undefined : ('center' as const),
         ellipsis: !f.wrap && f.type !== 'image' && f.type !== 'drawing' ? true : undefined,
+        onHeaderCell: f.wrap ? undefined : () => ({ style: { textAlign: 'center' as const } }),
         onCell: f.wrap
           ? () => ({
-              style: { verticalAlign: 'top', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: '20px' },
+              style: {
+                verticalAlign: 'top' as const,
+                whiteSpace: 'normal' as const,
+                wordBreak: 'break-word' as const,
+                lineHeight: '20px' as const,
+              },
             })
-          : () => ({ style: { verticalAlign: 'middle' } }),
+          : () => ({ style: { textAlign: 'center' as const, verticalAlign: 'middle' as const } }),
         render: (v: unknown) => {
         if (v === null || v === undefined || v === '') return '-'
         if (f.type === 'image') {
@@ -497,7 +503,8 @@ function CrudTab({
             fixed: 'right' as const,
             align: 'center' as const,
             ellipsis: true,
-            onCell: () => ({ style: { verticalAlign: 'middle' } }),
+            onHeaderCell: () => ({ style: { textAlign: 'center' as const } }),
+            onCell: () => ({ style: { textAlign: 'center' as const, verticalAlign: 'middle' as const } }),
             render: (_: unknown, row: CrudRow) => {
               const bid = row.priceBundleId
               if (bid == null || bid === '') return '-'
@@ -514,6 +521,9 @@ function CrudTab({
             key: 'action',
             width: 104,
             fixed: 'right' as const,
+            align: 'center' as const,
+            onHeaderCell: () => ({ style: { textAlign: 'center' as const } }),
+            onCell: () => ({ style: { textAlign: 'center' as const, verticalAlign: 'middle' as const } }),
             render: (_: unknown, row: CrudRow) => (
               <Button size="small" icon={<LinkOutlined />} onClick={() => openLink(row)}>
                 供应商/价格
@@ -528,6 +538,9 @@ function CrudTab({
               key: 'action',
               width: 104,
               fixed: 'right' as const,
+              align: 'center' as const,
+              onHeaderCell: () => ({ style: { textAlign: 'center' as const } }),
+              onCell: () => ({ style: { textAlign: 'center' as const, verticalAlign: 'middle' as const } }),
               render: (_: unknown, row: CrudRow) => (
                 <Space>
                   <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
