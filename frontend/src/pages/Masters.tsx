@@ -48,6 +48,7 @@ type CrudRow = { id: number } & Record<string, unknown>
 interface SupplierOption {
   id: number
   name: string
+  shortName?: string | null
 }
 
 /** 长文本换行显示：在 URL/编号的天然分隔符后插入 <wbr>（复制不受影响），换行点干净、行高贴近图片 */
@@ -217,6 +218,7 @@ const RESOURCES: CrudResource[] = [
     path: '/suppliers',
     fields: [
       { key: 'name', label: '名称' },
+      { key: 'shortName', label: '简称' },
       { key: 'contact', label: '联系人' },
       { key: 'phone', label: '电话' },
       { key: 'fax', label: '传真' },
@@ -500,7 +502,8 @@ function CrudTab({
         }
         if (f.type === 'supplier') {
           const supplier = suppliers.find((s) => s.id === Number(v))
-          const name = supplier ? supplier.name : String(v)
+          // 零件页供应商按简称展示（老板 2026-09-02），无简称用全称
+          const name = supplier ? (supplier.shortName || supplier.name) : String(v)
           return f.wrap ? <WrapText text={name} /> : name
         }
         if (f.type === 'sourcing') {
@@ -686,7 +689,7 @@ function CrudTab({
                 f.type === 'image' ||
                 f.type === 'number' ||
                 f.type === 'textarea' ||
-                ['spec', 'drawingsUrl', 'tooling', 'country', 'contact', 'unit', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode', 'defaultPaymentTerms', 'defaultIncoterm', 'defaultMark', 'defaultTaxRate', 'phone', 'fax', 'email', 'defaultHeaderName', 'leadTime'].includes(f.key)
+                ['spec', 'drawingsUrl', 'tooling', 'country', 'contact', 'shortName', 'unit', 'nameEn', 'weight', 'revision', 'material', 'dimensions', 'finish', 'artId', 'address', 'vatNo', 'eori', 'notifyParty', 'hsCode', 'defaultPaymentTerms', 'defaultIncoterm', 'defaultMark', 'defaultTaxRate', 'phone', 'fax', 'email', 'defaultHeaderName', 'leadTime'].includes(f.key)
                   ? []
                   : [{ required: true, message: '请输入' + f.label }]
               }
