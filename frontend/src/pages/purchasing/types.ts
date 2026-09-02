@@ -23,6 +23,7 @@ export interface SalesOrderDetail extends SalesOrder {
 export interface Supplier {
   id: number
   name: string
+  shortName?: string | null
   contact?: string | null
   contactPerson?: string | null
   phone?: string | null
