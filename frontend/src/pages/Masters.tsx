@@ -33,6 +33,8 @@ interface CrudField {
   width?: number
   /** 不在列表显示（仅编辑表单可见），如起订量/交货周期/安全库存 */
   hideInList?: boolean
+  /** 长文本在图片高度内自动换行显示（不省略号截断） */
+  wrap?: boolean
 }
 
 interface CrudResource {
@@ -224,23 +226,23 @@ const RESOURCES: CrudResource[] = [
     // 列布局按工程 CSP_V3 清单表格口径：去掉 Description-EN、用在何处、生产工艺、序号、用量、单位；
     // 2026-09-01 老板要求：起订量/交货周期/安全库存不在列表展示（仅编辑表单），列宽一屏能容下
     fields: [
-      { key: 'sku', label: '料号', width: 140 },
-      { key: 'imageUrl', label: '图片', type: 'image', width: 60 },
-      { key: 'nameEn', label: '英文品名', width: 110 },
-      { key: 'name', label: '中文名称', width: 140 },
-      { key: 'weight', label: '重量(g)', width: 64 },
-      { key: 'revision', label: '版本', width: 56 },
-      { key: 'material', label: '材质', width: 96 },
-      { key: 'dimensions', label: '尺寸规格', width: 96 },
-      { key: 'finish', label: '表面处理', width: 96 },
-      { key: 'drawingsUrl', label: '图档', type: 'drawing', width: 64 },
+      { key: 'sku', label: '料号', width: 130, wrap: true },
+      { key: 'imageUrl', label: '图片', type: 'image', width: 64 },
+      { key: 'nameEn', label: '英文品名', width: 130, wrap: true },
+      { key: 'name', label: '中文名称', width: 150, wrap: true },
+      { key: 'weight', label: '重量(g)', width: 56 },
+      { key: 'revision', label: '版本', width: 48 },
+      { key: 'material', label: '材质', width: 110, wrap: true },
+      { key: 'dimensions', label: '尺寸规格', width: 110, wrap: true },
+      { key: 'finish', label: '表面处理', width: 110, wrap: true },
+      { key: 'drawingsUrl', label: '图档', type: 'drawing', width: 60 },
       { key: 'moq', label: '起订量', type: 'number', hideInList: true },
       { key: 'leadTime', label: '交货周期', hideInList: true },
       { key: 'safetyStock', label: '安全库存', type: 'number', hideInList: true },
       { key: 'price', label: '价格', type: 'number', width: 72 },
       { key: 'priceInclTax', label: '含税参考价', type: 'number', width: 84 },
       { key: 'sourcing', label: '采购方式', type: 'sourcing', width: 84 },
-      { key: 'supplierId', label: '供应商', type: 'supplier', width: 120 },
+      { key: 'supplierId', label: '供应商', type: 'supplier', width: 110, wrap: true },
     ],
   },
 ]
@@ -448,7 +450,14 @@ function CrudTab({
         dataIndex: f.key,
         key: f.key,
         width: f.width,
-        ellipsis: f.type !== 'image' && f.type !== 'drawing' ? true : undefined,
+        ellipsis: !f.wrap && f.type !== 'image' && f.type !== 'drawing' ? true : undefined,
+        onCell: f.wrap
+          ? () => ({
+              style: { verticalAlign: 'top', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: '20px' },
+            })
+          : f.type === 'image' || f.type === 'drawing'
+            ? () => ({ style: { verticalAlign: 'top' } })
+            : undefined,
         render: (v: unknown) => {
         if (v === null || v === undefined || v === '') return '-'
         if (f.type === 'image') {
@@ -606,6 +615,7 @@ function CrudTab({
         columns={columns}
         dataSource={rows}
         loading={loading}
+        size={isPart ? 'small' : undefined}
         scroll={isPart ? { x: 'max-content' } : undefined}
         pagination={{
           current: page,
