@@ -247,21 +247,21 @@ const RESOURCES: CrudResource[] = [
     // 2026-09-01 老板要求：起订量/交货周期/安全库存不在列表展示（仅编辑表单），列宽一屏能容下
     fields: [
       { key: 'sku', label: '料号', width: 130, wrap: true },
-      { key: 'imageUrl', label: '图片', type: 'image', width: 52 },
-      { key: 'nameEn', label: '英文品名', width: 120, wrap: true },
+      { key: 'imageUrl', label: '图片', type: 'image', width: 64 },
+      { key: 'nameEn', label: '英文品名', width: 130, wrap: true },
       { key: 'name', label: '中文名称', width: 150, wrap: true },
-      { key: 'weight', label: '重量(g)', width: 44 },
-      { key: 'revision', label: '版本', width: 40 },
-      { key: 'material', label: '材质', width: 115, wrap: true },
-      { key: 'dimensions', label: '尺寸规格', width: 115, wrap: true },
-      { key: 'finish', label: '表面处理', width: 115, wrap: true },
-      { key: 'drawingsUrl', label: '图档', type: 'drawing', width: 56 },
+      { key: 'weight', label: '重量(g)', width: 56 },
+      { key: 'revision', label: '版本', width: 48 },
+      { key: 'material', label: '材质', width: 110, wrap: true },
+      { key: 'dimensions', label: '尺寸规格', width: 110, wrap: true },
+      { key: 'finish', label: '表面处理', width: 110, wrap: true },
+      { key: 'drawingsUrl', label: '图档', type: 'drawing', width: 60 },
       { key: 'moq', label: '起订量', type: 'number', hideInList: true },
       { key: 'leadTime', label: '交货周期', hideInList: true },
       { key: 'safetyStock', label: '安全库存', type: 'number', hideInList: true },
-      { key: 'price', label: '价格', type: 'number', width: 64 },
-      { key: 'priceInclTax', label: '含税参考价', type: 'number', width: 72 },
-      { key: 'sourcing', label: '采购方式', type: 'sourcing', width: 72 },
+      { key: 'price', label: '价格', type: 'number', width: 72 },
+      { key: 'priceInclTax', label: '含税参考价', type: 'number', width: 84 },
+      { key: 'sourcing', label: '采购方式', type: 'sourcing', width: 84 },
       { key: 'supplierId', label: '供应商', type: 'supplier', width: 110, wrap: true },
     ],
   },
@@ -519,7 +519,7 @@ function CrudTab({
           {
             title: '套餐价',
             key: 'priceBundleId',
-            width: 80,
+            width: 100,
             fixed: 'right' as const,
             align: 'center' as const,
             ellipsis: true,
@@ -539,7 +539,7 @@ function CrudTab({
           {
             title: '操作',
             key: 'action',
-            width: 96,
+            width: 104,
             fixed: 'right' as const,
             align: 'center' as const,
             onHeaderCell: () => ({ className: 'pt-center' }),
@@ -556,7 +556,7 @@ function CrudTab({
             {
               title: '操作',
               key: 'action',
-              width: 96,
+              width: 104,
               fixed: 'right' as const,
               align: 'center' as const,
               onHeaderCell: () => ({ className: 'pt-center' }),
@@ -653,7 +653,7 @@ function CrudTab({
         dataSource={rows}
         loading={loading}
         size={isPart ? 'small' : undefined}
-        scroll={isPart ? { x: 1431 } : undefined}
+        scroll={isPart ? { x: 'max-content' } : undefined}
         pagination={{
           current: page,
           pageSize,
