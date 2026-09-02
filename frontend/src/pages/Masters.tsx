@@ -50,6 +50,25 @@ interface SupplierOption {
   name: string
 }
 
+/** 长文本换行显示：在 URL/编号的天然分隔符后插入 <wbr>（复制不受影响），换行点干净、行高贴近图片 */
+function WrapText({ text }: { text: string }) {
+  const parts = text.split(/([/#&?=_\-])/)
+  return (
+    <>
+      {parts.map((p, i) =>
+        i % 2 === 1 ? (
+          <span key={i}>
+            {p}
+            <wbr />
+          </span>
+        ) : (
+          <span key={i}>{p}</span>
+        ),
+      )}
+    </>
+  )
+}
+
 const DRAWING_ACCEPT = '.pdf,.dwg,.dxf,.step,.stp,.igs,.zip,.xlsx,.jpg,.jpeg,.png,.webp,.gif,.svg'
 
 // 图档上传：pdf/dwg/dxf/step/stp/igs/zip/xlsx 或图片，上传后保存 /uploads 地址
@@ -484,14 +503,15 @@ function CrudTab({
         }
         if (f.type === 'supplier') {
           const supplier = suppliers.find((s) => s.id === Number(v))
-          return supplier ? supplier.name : String(v)
+          const name = supplier ? supplier.name : String(v)
+          return f.wrap ? <WrapText text={name} /> : name
         }
         if (f.type === 'sourcing') {
           if (v === 'selfbuy') return <Tag color="orange">自购</Tag>
           if (v === 'selfmade') return <Tag color="default">自制</Tag>
           return <Tag color="blue">外购</Tag>
         }
-        return String(v)
+        return f.wrap ? <WrapText text={String(v)} /> : String(v)
       },
     })),
     ...(isPart
