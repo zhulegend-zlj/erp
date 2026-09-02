@@ -450,14 +450,13 @@ function CrudTab({
         dataIndex: f.key,
         key: f.key,
         width: f.width,
+        align: f.wrap ? undefined : ('center' as const),
         ellipsis: !f.wrap && f.type !== 'image' && f.type !== 'drawing' ? true : undefined,
         onCell: f.wrap
           ? () => ({
               style: { verticalAlign: 'top', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: '20px' },
             })
-          : f.type === 'image' || f.type === 'drawing'
-            ? () => ({ style: { verticalAlign: 'top' } })
-            : undefined,
+          : () => ({ style: { verticalAlign: 'middle' } }),
         render: (v: unknown) => {
         if (v === null || v === undefined || v === '') return '-'
         if (f.type === 'image') {
@@ -496,7 +495,9 @@ function CrudTab({
             key: 'priceBundleId',
             width: 100,
             fixed: 'right' as const,
+            align: 'center' as const,
             ellipsis: true,
+            onCell: () => ({ style: { verticalAlign: 'middle' } }),
             render: (_: unknown, row: CrudRow) => {
               const bid = row.priceBundleId
               if (bid == null || bid === '') return '-'
