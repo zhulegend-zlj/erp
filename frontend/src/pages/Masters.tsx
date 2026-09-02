@@ -224,23 +224,23 @@ const RESOURCES: CrudResource[] = [
     // 列布局按工程 CSP_V3 清单表格口径：去掉 Description-EN、用在何处、生产工艺、序号、用量、单位；
     // 2026-09-01 老板要求：起订量/交货周期/安全库存不在列表展示（仅编辑表单），列宽一屏能容下
     fields: [
-      { key: 'sku', label: '料号', width: 150 },
-      { key: 'imageUrl', label: '图片', type: 'image', width: 76 },
-      { key: 'nameEn', label: '英文品名', width: 150 },
-      { key: 'name', label: '中文名称', width: 160 },
-      { key: 'weight', label: '重量(g)', width: 80 },
-      { key: 'revision', label: '版本', width: 70 },
-      { key: 'material', label: '材质', width: 130 },
-      { key: 'dimensions', label: '尺寸规格', width: 130 },
-      { key: 'finish', label: '表面处理', width: 130 },
-      { key: 'drawingsUrl', label: '图档', type: 'drawing', width: 80 },
+      { key: 'sku', label: '料号', width: 140 },
+      { key: 'imageUrl', label: '图片', type: 'image', width: 60 },
+      { key: 'nameEn', label: '英文品名', width: 110 },
+      { key: 'name', label: '中文名称', width: 140 },
+      { key: 'weight', label: '重量(g)', width: 64 },
+      { key: 'revision', label: '版本', width: 56 },
+      { key: 'material', label: '材质', width: 96 },
+      { key: 'dimensions', label: '尺寸规格', width: 96 },
+      { key: 'finish', label: '表面处理', width: 96 },
+      { key: 'drawingsUrl', label: '图档', type: 'drawing', width: 64 },
       { key: 'moq', label: '起订量', type: 'number', hideInList: true },
       { key: 'leadTime', label: '交货周期', hideInList: true },
       { key: 'safetyStock', label: '安全库存', type: 'number', hideInList: true },
-      { key: 'price', label: '价格', type: 'number', width: 90 },
-      { key: 'priceInclTax', label: '含税参考价', type: 'number', width: 100 },
-      { key: 'sourcing', label: '采购方式', type: 'sourcing', width: 92 },
-      { key: 'supplierId', label: '供应商', type: 'supplier', width: 150 },
+      { key: 'price', label: '价格', type: 'number', width: 72 },
+      { key: 'priceInclTax', label: '含税参考价', type: 'number', width: 84 },
+      { key: 'sourcing', label: '采购方式', type: 'sourcing', width: 84 },
+      { key: 'supplierId', label: '供应商', type: 'supplier', width: 120 },
     ],
   },
 ]
@@ -448,7 +448,7 @@ function CrudTab({
         dataIndex: f.key,
         key: f.key,
         width: f.width,
-        ellipsis: f.type !== 'image' && f.type !== 'drawing' ? { showTitle: false } : undefined,
+        ellipsis: f.type !== 'image' && f.type !== 'drawing' ? true : undefined,
         render: (v: unknown) => {
         if (v === null || v === undefined || v === '') return '-'
         if (f.type === 'image') {
@@ -485,8 +485,9 @@ function CrudTab({
           {
             title: '套餐价',
             key: 'priceBundleId',
-            width: 130,
-            ellipsis: { showTitle: false },
+            width: 100,
+            fixed: 'right' as const,
+            ellipsis: true,
             render: (_: unknown, row: CrudRow) => {
               const bid = row.priceBundleId
               if (bid == null || bid === '') return '-'
@@ -501,6 +502,8 @@ function CrudTab({
           {
             title: '操作',
             key: 'action',
+            width: 104,
+            fixed: 'right' as const,
             render: (_: unknown, row: CrudRow) => (
               <Button size="small" icon={<LinkOutlined />} onClick={() => openLink(row)}>
                 供应商/价格
@@ -513,6 +516,8 @@ function CrudTab({
             {
               title: '操作',
               key: 'action',
+              width: 104,
+              fixed: 'right' as const,
               render: (_: unknown, row: CrudRow) => (
                 <Space>
                   <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
@@ -601,6 +606,7 @@ function CrudTab({
         columns={columns}
         dataSource={rows}
         loading={loading}
+        scroll={isPart ? { x: 'max-content' } : undefined}
         pagination={{
           current: page,
           pageSize,
