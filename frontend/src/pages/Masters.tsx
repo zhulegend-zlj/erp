@@ -217,15 +217,15 @@ const RESOURCES: CrudResource[] = [
     label: '供应商',
     path: '/suppliers',
     fields: [
-      { key: 'name', label: '名称' },
-      { key: 'shortName', label: '简称' },
-      { key: 'contact', label: '联系人' },
-      { key: 'phone', label: '电话' },
-      { key: 'fax', label: '传真' },
-      { key: 'email', label: '邮箱' },
-      { key: 'defaultPaymentTerms', label: '默认付款方式' },
-      { key: 'defaultHeaderName', label: '默认抬头' },
-      { key: 'taxPoint', label: '加税点数', type: 'number' },
+      { key: 'name', label: '名称', width: 260, wrap: true },
+      { key: 'shortName', label: '简称', width: 100 },
+      { key: 'contact', label: '联系人', width: 90 },
+      { key: 'phone', label: '电话', width: 130 },
+      { key: 'fax', label: '传真', width: 130 },
+      { key: 'email', label: '邮箱', width: 200, wrap: true },
+      { key: 'defaultPaymentTerms', label: '默认付款方式', width: 110 },
+      { key: 'defaultHeaderName', label: '默认抬头', width: 100 },
+      { key: 'taxPoint', label: '加税点数', type: 'number', width: 90 },
     ],
   },
   {
@@ -308,6 +308,9 @@ function CrudTab({
   const [pageSize, setPageSize] = useState(resource.path === '/parts' ? 100 : resource.path === '/products' ? 50 : 10)
   const isPart = resource.path === '/parts'
   const isProduct = resource.path === '/products'
+  const isSupplier = resource.path === '/suppliers'
+  // 零件/供应商两页：操作列固定右侧（列宽固定、总宽一屏）
+  const fixOps = isPart || isSupplier
   // 上传时实时读取表单中的 SKU/名称（避免 useWatch 时序问题导致上下文丢失）
   function uploadContext() {
     const values = form.getFieldsValue(['sku', 'name']) as { sku?: string; name?: string }
@@ -520,7 +523,7 @@ function CrudTab({
             title: '套餐价',
             key: 'priceBundleId',
             width: 100,
-            fixed: 'right' as const,
+            fixed: fixOps ? ('right' as const) : undefined,
             align: 'center' as const,
             ellipsis: true,
             onHeaderCell: () => ({ className: 'pt-center' }),
@@ -539,8 +542,8 @@ function CrudTab({
           {
             title: '操作',
             key: 'action',
-            width: 104,
-            fixed: 'right' as const,
+            width: fixOps ? 96 : undefined,
+            fixed: fixOps ? ('right' as const) : undefined,
             align: 'center' as const,
             onHeaderCell: () => ({ className: 'pt-center' }),
             onCell: () => ({ className: 'pt-center' }),
@@ -556,8 +559,8 @@ function CrudTab({
             {
               title: '操作',
               key: 'action',
-              width: 104,
-              fixed: 'right' as const,
+              width: fixOps ? 96 : undefined,
+              fixed: fixOps ? ('right' as const) : undefined,
               align: 'center' as const,
               onHeaderCell: () => ({ className: 'pt-center' }),
               onCell: () => ({ className: 'pt-center' }),
@@ -580,7 +583,7 @@ function CrudTab({
 
   return (
     <>
-      {isPart ? (
+      {isPart || isSupplier ? (
         <style>{'.pt-center { text-align: center !important; vertical-align: middle !important; } .pt-wrap-cell { text-align: left !important; vertical-align: top !important; white-space: normal !important; word-break: break-word !important; line-height: 20px !important; }'}</style>
       ) : null}
       {isPart ? (
@@ -653,7 +656,7 @@ function CrudTab({
         dataSource={rows}
         loading={loading}
         size={isPart ? 'small' : undefined}
-        scroll={isPart ? { x: 'max-content' } : undefined}
+        scroll={isPart ? { x: 'max-content' } : isSupplier ? { x: 1306 } : undefined}
         pagination={{
           current: page,
           pageSize,
