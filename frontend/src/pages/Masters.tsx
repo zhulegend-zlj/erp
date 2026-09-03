@@ -303,6 +303,7 @@ function CrudTab({
   const [linkSourcing, setLinkSourcing] = useState<string | undefined>()
   const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [sourcingFilter, setSourcingFilter] = useState<string | undefined>()
+  const [supplierFilter, setSupplierFilter] = useState<number | undefined>()
   const [bundles, setBundles] = useState<Array<{ id: number; name: string }>>([])
   const [form] = Form.useForm<Record<string, any>>()
   // 零件页默认每页 100 条、成品页默认 50 条（按老板反馈），其他基础资料页默认 10 条
@@ -324,17 +325,19 @@ function CrudTab({
     }
   }
 
-  async function load(targetPage = 1, size?: number, searchTerm?: string, prodId?: number, sourcing?: string) {
+  async function load(targetPage = 1, size?: number, searchTerm?: string, prodId?: number, sourcing?: string, supplierId?: number) {
     setLoading(true)
     try {
       const ps = size ?? pageSize
       const kw = searchTerm !== undefined ? searchTerm : keyword
       const pid = prodId !== undefined ? prodId : productId
       const sc = sourcing !== undefined ? sourcing : sourcingFilter
+      const sp = supplierId !== undefined ? supplierId : supplierFilter
       const params: Record<string, string | number> = { page: targetPage, pageSize: ps }
       if (kw) params.search = kw
       if (pid) params.productId = pid
       if (sc) params.sourcing = sc
+      if (sp) params.supplierId = sp
       const { data } = await api.get<Paged<CrudRow>>(resource.path, {
         params,
       })
@@ -615,6 +618,19 @@ function CrudTab({
               { value: 'selfbuy', label: '自购' },
               { value: 'selfmade', label: '自制' },
             ]}
+          />
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder="供应商（全部）"
+            style={{ width: 180 }}
+            value={supplierFilter}
+            onChange={(v) => {
+              setSupplierFilter(v)
+              void load(1, undefined, undefined, undefined, undefined, v)
+            }}
+            options={suppliers.map((s) => ({ value: s.id, label: (s.shortName || s.name) }))}
           />
           <Select
             allowClear

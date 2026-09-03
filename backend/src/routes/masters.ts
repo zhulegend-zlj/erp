@@ -310,8 +310,16 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
           return reply.code(400).send({ error: 'sourcing 仅支持 purchased/selfbuy/selfmade' })
         }
       }
+      // 供应商筛选（2026-09-02 老板要求：按供应商看零件，不填=全部）
+      const supplierIdRaw = (req.query as Record<string, unknown>).supplierId
+      let supplierId: number | null = null
+      if (supplierIdRaw !== undefined && supplierIdRaw !== null && String(supplierIdRaw) !== '') {
+        supplierId = parsePositiveInt(String(supplierIdRaw))
+        if (supplierId === null) return reply.code(400).send({ error: 'supplierId 必须为正整数' })
+      }
       const conds: Prisma.Sql[] = []
       if (sourcing) conds.push(Prisma.sql`"sourcing" = ${sourcing}`)
+      if (supplierId !== null) conds.push(Prisma.sql`"supplierId" = ${supplierId}`)
       if (search) {
         const escaped = search.replace(/[\\%_]/g, (c) => '\\' + c)
         const pattern = '%' + escaped + '%'
