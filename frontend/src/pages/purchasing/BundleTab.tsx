@@ -352,7 +352,7 @@ export default function BundleTab(props: { canCreate: boolean; suppliers: Suppli
                         <InputNumber min={0} precision={4} placeholder="手改单价(可选)" style={{ width: 130 }} />
                       </Form.Item>
                       <span style={{ minWidth: 90, color: allocated != null ? '#1677ff' : '#999' }}>
-                        {allocated != null ? '分摊 ¥' + (allocated >= 1 ? allocated.toFixed(2) : String(Math.round(allocated * 10000) / 10000)) : '—'}
+                        {allocated != null ? '分摊 ¥' + String(Math.round(allocated * 10000) / 10000) : '—'}
                       </span>
                       <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
                     </div>

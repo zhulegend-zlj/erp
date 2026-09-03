@@ -518,12 +518,11 @@ function CrudTab({
           if (v === 'selfmade') return <Tag color="default">自制</Tag>
           return <Tag color="blue">外购</Tag>
         }
-        // 价格类显示：≥1 元两位小数；<1 元最多四位小数去尾零（如 0.155 不丢精度，老板 2026-09-02）
+        // 价格类显示：按录入精度显示，最多 4 位小数去尾零（手输 0.6825 显示 0.6825，老板 2026-09-02）
         if (f.key === 'price' || f.key === 'priceInclTax') {
           if (v === null || v === undefined || v === '') return '-'
           const n = Number(v)
           if (Number.isNaN(n)) return String(v)
-          if (n >= 1) return n.toFixed(2)
           return String(Math.round(n * 10000) / 10000)
         }
         return f.wrap ? <WrapText text={String(v)} /> : String(v)
@@ -781,13 +780,14 @@ function CrudTab({
           value={linkSupplierId}
           onChange={(v) => {
             setLinkSupplierId(v)
-            // 换供应商：按新税点重算含税价（≥1 两位、<1 四位）
+            // 换供应商：按新税点重算含税价（精度跟随价格小数位）
             const tp = v != null ? Number(suppliers.find((s) => s.id === v)?.taxPoint ?? 0) : 0
             if (linkPrice == null) {
               setLinkPriceInclTax(null)
             } else {
-              const calc = linkPrice * (1 + tp / 100)
-              setLinkPriceInclTax(calc >= 1 ? Math.round(calc * 100) / 100 : Math.round(calc * 10000) / 10000)
+              const dec = (String(linkPrice).split('.')[1] ?? '').length
+              const m = Math.pow(10, Math.min(4, Math.max(2, dec)))
+              setLinkPriceInclTax(Math.round(linkPrice * (1 + tp / 100) * m) / m)
             }
           }}
           optionFilterProp="label"
@@ -803,13 +803,14 @@ function CrudTab({
           onChange={(v) => {
             const p = typeof v === 'number' ? v : null
             setLinkPrice(p)
-            // 按所选供应商税点自动填含税价（≥1 两位、<1 四位）
+            // 按所选供应商税点自动填含税价（精度跟随价格小数位）
             const tp = linkSupplierId != null ? Number(suppliers.find((s) => s.id === linkSupplierId)?.taxPoint ?? 0) : 0
             if (p == null) {
               setLinkPriceInclTax(null)
             } else {
-              const calc = p * (1 + tp / 100)
-              setLinkPriceInclTax(calc >= 1 ? Math.round(calc * 100) / 100 : Math.round(calc * 10000) / 10000)
+              const dec = (String(p).split('.')[1] ?? '').length
+              const m = Math.pow(10, Math.min(4, Math.max(2, dec)))
+              setLinkPriceInclTax(Math.round(p * (1 + tp / 100) * m) / m)
             }
           }}
         />
