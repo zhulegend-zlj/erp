@@ -349,10 +349,10 @@ export default function BundleTab(props: { canCreate: boolean; suppliers: Suppli
                         <InputNumber min={1} precision={0} placeholder="每套用量" style={{ width: 100 }} />
                       </Form.Item>
                       <Form.Item name={[field.name, 'unitPrice']} style={{ marginBottom: 0 }}>
-                        <InputNumber min={0} precision={4} placeholder="手改单价(可选)" style={{ width: 130 }} />
+                        <InputNumber min={0} precision={2} placeholder="手改单价(可选)" style={{ width: 130 }} />
                       </Form.Item>
                       <span style={{ minWidth: 90, color: allocated != null ? '#1677ff' : '#999' }}>
-                        {allocated != null ? '分摊 ¥' + allocated.toFixed(4) : '—'}
+                        {allocated != null ? '分摊 ¥' + allocated.toFixed(2) : '—'}
                       </span>
                       <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
                     </div>
