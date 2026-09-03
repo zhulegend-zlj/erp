@@ -540,7 +540,7 @@ export default function GeneratePoModal(props: Props) {
                                 />
                               </Form.Item>
                               <Form.Item name={[field.name, 'unitPriceInclTax']} style={{ marginBottom: 0 }}>
-                                <InputNumber min={0} precision={2} placeholder="含税单价" style={{ width: 130 }} />
+                                <InputNumber min={0} precision={4} placeholder="含税单价" style={{ width: 130 }} />
                               </Form.Item>
                               <Form.Item name={[field.name, 'note']} style={{ marginBottom: 0 }}>
                                 <Input placeholder="备注" style={{ width: 160 }} />

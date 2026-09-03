@@ -1,9 +1,10 @@
-// 双价自动算：含税价 = 不含税价 × (1 + 加税点数/100)，四舍五入到 2 位
+// 双价自动算：含税价 = 不含税价 × (1 + 加税点数/100)
+// 精度：≥1 元四舍五入 2 位；<1 元四舍五入 4 位（小单价不丢精度，老板 2026-09-02）
 export function calcInclTax(price: number | null | undefined, taxPoint: number | null | undefined): number | null {
   if (price === null || price === undefined) return null
   const tp = Number(taxPoint ?? 0)
-  if (Number.isNaN(tp)) return Math.round(Number(price) * 100) / 100
-  return Math.round(Number(price) * (1 + tp / 100) * 100) / 100
+  const v = Number(price) * (1 + (Number.isNaN(tp) ? 0 : tp) / 100)
+  return v >= 1 ? Math.round(v * 100) / 100 : Math.round(v * 10000) / 10000
 }
 
 // 字母编号：A→Z，跳过 I/O（两字母时前缀也跳过 I/O）

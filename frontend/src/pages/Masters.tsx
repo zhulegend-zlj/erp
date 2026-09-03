@@ -747,7 +747,7 @@ function CrudTab({
                 ) : f.key === 'safetyStock' ? (
                   <InputNumber min={0} precision={0} step={1} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
                 ) : f.key === 'priceInclTax' ? (
-                  <InputNumber min={0} precision={2} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
+                  <InputNumber min={0} precision={4} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
                 ) : f.key === 'price' ? (
                   <InputNumber min={0} precision={4} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
                 ) : f.key === 'taxPoint' ? (
@@ -781,9 +781,14 @@ function CrudTab({
           value={linkSupplierId}
           onChange={(v) => {
             setLinkSupplierId(v)
-            // 换供应商：按新税点重算含税价（保留两位小数）
+            // 换供应商：按新税点重算含税价（≥1 两位、<1 四位）
             const tp = v != null ? Number(suppliers.find((s) => s.id === v)?.taxPoint ?? 0) : 0
-            setLinkPriceInclTax(linkPrice == null ? null : Math.round(linkPrice * (1 + tp / 100) * 100) / 100)
+            if (linkPrice == null) {
+              setLinkPriceInclTax(null)
+            } else {
+              const calc = linkPrice * (1 + tp / 100)
+              setLinkPriceInclTax(calc >= 1 ? Math.round(calc * 100) / 100 : Math.round(calc * 10000) / 10000)
+            }
           }}
           optionFilterProp="label"
           options={suppliers.map((s) => ({ value: s.id, label: s.name + (s.taxPoint != null ? '（加税点 ' + s.taxPoint + '%）' : '') }))}
@@ -798,15 +803,20 @@ function CrudTab({
           onChange={(v) => {
             const p = typeof v === 'number' ? v : null
             setLinkPrice(p)
-            // 按所选供应商税点自动填含税价（保留两位小数）
+            // 按所选供应商税点自动填含税价（≥1 两位、<1 四位）
             const tp = linkSupplierId != null ? Number(suppliers.find((s) => s.id === linkSupplierId)?.taxPoint ?? 0) : 0
-            setLinkPriceInclTax(p == null ? null : Math.round(p * (1 + tp / 100) * 100) / 100)
+            if (p == null) {
+              setLinkPriceInclTax(null)
+            } else {
+              const calc = p * (1 + tp / 100)
+              setLinkPriceInclTax(calc >= 1 ? Math.round(calc * 100) / 100 : Math.round(calc * 10000) / 10000)
+            }
           }}
         />
         <div style={{ margin: '12px 0 8px' }}>含税参考价（自动按税点填入，可手改）</div>
         <InputNumber
           min={0}
-          precision={2}
+          precision={4}
           style={{ width: '100%' }}
           placeholder="含税参考价"
           value={linkPriceInclTax ?? undefined}
