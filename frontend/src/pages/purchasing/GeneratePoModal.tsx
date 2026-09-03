@@ -527,7 +527,7 @@ export default function GeneratePoModal(props: Props) {
                               >
                                 <InputNumber
                                   min={0}
-                                  precision={2}
+                                  precision={4}
                                   placeholder="不含税单价"
                                   style={{ width: 130 }}
                                   onChange={(v) => {

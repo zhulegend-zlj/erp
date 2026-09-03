@@ -518,11 +518,13 @@ function CrudTab({
           if (v === 'selfmade') return <Tag color="default">自制</Tag>
           return <Tag color="blue">外购</Tag>
         }
-        // 价格类字段只显示两位小数（老板 2026-09-02）
+        // 价格类显示：≥1 元两位小数；<1 元最多四位小数去尾零（如 0.155 不丢精度，老板 2026-09-02）
         if (f.key === 'price' || f.key === 'priceInclTax') {
           if (v === null || v === undefined || v === '') return '-'
           const n = Number(v)
-          return Number.isNaN(n) ? String(v) : n.toFixed(2)
+          if (Number.isNaN(n)) return String(v)
+          if (n >= 1) return n.toFixed(2)
+          return String(Math.round(n * 10000) / 10000)
         }
         return f.wrap ? <WrapText text={String(v)} /> : String(v)
       },
@@ -744,8 +746,10 @@ function CrudTab({
                   <InputNumber min={1} precision={0} step={1} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
                 ) : f.key === 'safetyStock' ? (
                   <InputNumber min={0} precision={0} step={1} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
-                ) : f.key === 'priceInclTax' || f.key === 'price' ? (
+                ) : f.key === 'priceInclTax' ? (
                   <InputNumber min={0} precision={2} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
+                ) : f.key === 'price' ? (
+                  <InputNumber min={0} precision={4} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
                 ) : f.key === 'taxPoint' ? (
                   <InputNumber min={0} max={100} placeholder={'请输入' + f.label} style={{ width: '100%' }} />
                 ) : (
@@ -787,7 +791,7 @@ function CrudTab({
         <div style={{ margin: '12px 0 8px' }}>价格（不含税）</div>
         <InputNumber
           min={0}
-          precision={2}
+          precision={4}
           style={{ width: '100%' }}
           placeholder="不含税单价"
           value={linkPrice ?? undefined}
