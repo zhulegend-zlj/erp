@@ -58,6 +58,12 @@ export interface Requirement {
   includeInPo: boolean
   excluded: boolean
   excludedReason: string
+  // 套餐价组（2026-09-02：生成采购单合并显示）
+  priceBundleId: number | null
+  bundleName: string | null
+  bundleTotalPrice: number | null
+  bundleItemQty: number | null
+  bundleMemberCount: number | null
 }
 
 export interface SplitField {
@@ -75,6 +81,9 @@ export interface PoItemField {
   note?: string
   supplierReplyDate?: string | null
   splits?: SplitField[]
+  // 套餐价合并行（提交时展开成成员零件行）
+  bundleId?: number
+  bundleName?: string
 }
 
 export interface PoFormValues {

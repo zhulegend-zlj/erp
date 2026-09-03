@@ -78,19 +78,35 @@ export default function GeneratePoModal(props: Props) {
       form.setFieldsValue({ ...defaults, items: draftItems })
       return
     }
-    const items: PoItemField[] = requirements
-      .filter((r) => r.includeInPo && (r.suggestedQty ?? r.gapQty) > 0)
-      .map((r) => {
-        const sup = suppliers.find((s) => s.id === r.supplierId)
-        return {
+    // 套餐价合并：同一套餐的成员零件合成一条「套餐」行（数量=套数、单价=每套总价），提交时展开
+    const items: PoItemField[] = []
+    const seenBundles = new Set<number>()
+    for (const r of requirements) {
+      if (!r.includeInPo || (r.suggestedQty ?? r.gapQty) <= 0) continue
+      const sup = suppliers.find((s) => s.id === r.supplierId)
+      if (r.priceBundleId != null) {
+        if (seenBundles.has(r.priceBundleId)) continue
+        seenBundles.add(r.priceBundleId)
+        const sets = r.bundleItemQty ? Math.max(1, Math.round(r.requiredQty / r.bundleItemQty)) : 1
+        items.push({
+          bundleId: r.priceBundleId,
+          bundleName: r.bundleName ?? '套餐',
+          qty: sets,
+          unitPrice: r.bundleTotalPrice ?? undefined,
+          unitPriceInclTax: calcInclTax(r.bundleTotalPrice, sup?.taxPoint),
+          supplierId: r.supplierId ?? undefined,
+        })
+      } else {
+        items.push({
           partId: r.partId,
           qty: r.suggestedQty ?? r.gapQty,
           unitPrice: r.price ?? undefined,
           unitPriceInclTax: calcInclTax(r.price, sup?.taxPoint),
           supplierId: r.supplierId ?? undefined,
           usage: r.usage ?? undefined,
-        }
-      })
+        })
+      }
+    }
     form.setFieldsValue({ ...defaults, items })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -170,6 +186,42 @@ export default function GeneratePoModal(props: Props) {
       supplierId?: number
     }[] = []
     for (const it of values.items ?? []) {
+      // 套餐合并行：展开成成员零件行（数量按套数比例换算，单价用分摊单价）
+      if (it.bundleId != null) {
+        const members = requirements.filter((x) => x.priceBundleId === it.bundleId)
+        const m0 = members[0]
+        const baseSets = m0 && m0.bundleItemQty ? m0.requiredQty / m0.bundleItemQty : 1
+        for (const m of members) {
+          const sup = suppliers.find((s) => s.id === m.supplierId)
+          const perSet = baseSets > 0 ? m.requiredQty / baseSets : 0
+          const base = {
+            partId: m.partId,
+            unitPrice: Number(m.price ?? 0),
+            unitPriceInclTax: calcInclTax(m.price, sup?.taxPoint) ?? undefined,
+            usage: m.usage != null ? m.usage : undefined,
+            note: it.note || undefined,
+            supplierId: m.supplierId ?? undefined,
+          }
+          if (it.splits && it.splits.length > 0) {
+            it.splits.forEach((s, si) => {
+              flat.push({
+                ...base,
+                qty: Math.max(1, Math.round((Number(s.qty ?? 0)) * perSet)),
+                supplierReplyDate: s.expectedDeliveryDate ?? undefined,
+                splitNo: si,
+              })
+            })
+          } else {
+            flat.push({
+              ...base,
+              qty: Math.max(1, Math.round(Number(it.qty ?? 0) * perSet)),
+              supplierReplyDate: it.supplierReplyDate ?? undefined,
+              splitNo: 0,
+            })
+          }
+        }
+        continue
+      }
       const partId = Number(it.partId ?? 0)
       const unitPrice = Number(it.unitPrice ?? 0)
       const base = {
@@ -390,7 +442,11 @@ export default function GeneratePoModal(props: Props) {
                       {group.indices.map((index) => {
                         const field = fields[index]!
                         const it = watchedItems?.[index]
+                        const isBundleRow = it?.bundleId != null
                         const req = requirements.find((r) => r.partId === it?.partId)
+                        const bundleMembers = isBundleRow
+                          ? requirements.filter((x) => x.priceBundleId === it?.bundleId)
+                          : []
                         const hasSplit = it?.splits != null && it.splits.length > 0
                         const isSelfBuy = req?.sourcing === 'selfbuy'
                         return (
@@ -410,6 +466,23 @@ export default function GeneratePoModal(props: Props) {
                               </Tag>
                             ) : null}
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
+                              {isBundleRow ? (
+                                <span
+                                  style={{
+                                    width: 250,
+                                    lineHeight: '32px',
+                                    fontWeight: 600,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  <Tag color="purple" style={{ marginRight: 6 }}>
+                                    套餐·{bundleMembers.length}件
+                                  </Tag>
+                                  {it?.bundleName}
+                                </span>
+                              ) : (
                               <Form.Item
                                 name={[field.name, 'partId']}
                                 rules={[{ required: true, message: '零件' }]}
@@ -439,6 +512,7 @@ export default function GeneratePoModal(props: Props) {
                                   }))}
                                 />
                               </Form.Item>
+                              )}
                               <Form.Item
                                 name={[field.name, 'qty']}
                                 rules={[{ required: !hasSplit, message: '数量' }]}
@@ -479,21 +553,29 @@ export default function GeneratePoModal(props: Props) {
                               />
                             </div>
                             <div style={{ color: '#8c8c8c', fontSize: 12, marginTop: 6 }}>
-                              {req
-                                ? '用量 ' +
-                                  (req.usageText ?? req.usage ?? '-') +
+                              {isBundleRow
+                                ? '套餐 ' +
+                                  bundleMembers.length +
+                                  ' 件 ｜每套总价 ¥' +
+                                  (it?.unitPrice ?? '-') +
                                   ' ｜需求 ' +
-                                  req.requiredQty +
-                                  ' ｜库存 ' +
-                                  req.onHand +
-                                  ' ｜缺口 ' +
-                                  req.gapQty +
-                                  ' ｜建议采购 ' +
-                                  (req.suggestedQty ?? req.gapQty) +
-                                  (req.moq != null ? ' ｜MOQ ' + req.moq : '') +
-                                  (req.safetyStock != null ? ' ｜安全库存 ' + req.safetyStock : '') +
-                                  (req.isCommonPart ? ' ｜共用料' : '')
-                                : ''}
+                                  (it?.qty ?? '-') +
+                                  ' 套（数量=套数）'
+                                : req
+                                  ? '用量 ' +
+                                    (req.usageText ?? req.usage ?? '-') +
+                                    ' ｜需求 ' +
+                                    req.requiredQty +
+                                    ' ｜库存 ' +
+                                    req.onHand +
+                                    ' ｜缺口 ' +
+                                    req.gapQty +
+                                    ' ｜建议采购 ' +
+                                    (req.suggestedQty ?? req.gapQty) +
+                                    (req.moq != null ? ' ｜MOQ ' + req.moq : '') +
+                                    (req.safetyStock != null ? ' ｜安全库存 ' + req.safetyStock : '') +
+                                    (req.isCommonPart ? ' ｜共用料' : '')
+                                  : ''}
                             </div>
 
                             <Form.List name={[field.name, 'splits']}>

@@ -218,6 +218,12 @@ export function purchasingRoutes(app: FastifyInstance) {
       prisma.stock.findMany({ where: { itemType: 'part', itemId: { in: partIds } } }),
       prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true, sku: true } }),
     ])
+    // 套餐价组（2026-09-02 老板要求：生成采购单时显示套餐价、合并显示）
+    const bundleIds = [...new Set(parts.filter((x) => x.priceBundleId != null).map((x) => x.priceBundleId as number))]
+    const bundleRows = bundleIds.length > 0
+      ? await prisma.priceBundle.findMany({ where: { id: { in: bundleIds } }, include: { items: true } })
+      : []
+    const bundleMap = new Map(bundleRows.map((b) => [b.id, b]))
     const productSkuMap = new Map(products.map((p) => [p.id, p.sku]))
     const partMap = new Map(parts.map((p) => [p.id, p]))
     const stockMap = new Map(stocks.map((s) => [s.itemId, s.qtyOnHand]))
@@ -267,6 +273,16 @@ export function purchasingRoutes(app: FastifyInstance) {
         includeInPo,
         excluded,
         excludedReason,
+        // 套餐价组（生成采购单合并显示）
+        priceBundleId: part?.priceBundleId ?? null,
+        bundleName: part?.priceBundleId != null ? (bundleMap.get(part.priceBundleId)?.name ?? null) : null,
+        bundleTotalPrice: part?.priceBundleId != null
+          ? (bundleMap.get(part.priceBundleId)?.totalPrice.toNumber() ?? null)
+          : null,
+        bundleItemQty: part?.priceBundleId != null
+          ? (bundleMap.get(part.priceBundleId)?.items.find((it) => it.partId === r.partId)?.qty ?? null)
+          : null,
+        bundleMemberCount: part?.priceBundleId != null ? (bundleMap.get(part.priceBundleId)?.items.length ?? null) : null,
         ...usage,
         requiredQty: r.requiredQty,
         onHand,
