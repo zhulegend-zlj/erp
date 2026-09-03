@@ -49,6 +49,7 @@ interface SupplierOption {
   id: number
   name: string
   shortName?: string | null
+  taxPoint?: number | string | null
 }
 
 /** 长文本换行显示：在 URL/编号的天然分隔符后插入 <wbr>（复制不受影响），换行点干净、行高贴近图片 */
@@ -745,30 +746,41 @@ function CrudTab({
         confirmLoading={linkSubmitting}
         destroyOnClose
       >
-        <div style={{ marginBottom: 8 }}>供应商</div>
+        <div style={{ marginBottom: 8 }}>供应商（选供应商后按税点自动算含税价）</div>
         <Select
           allowClear
           showSearch
           placeholder="选择供应商（可清除以取消关联）"
           style={{ width: '100%' }}
           value={linkSupplierId}
-          onChange={(v) => setLinkSupplierId(v)}
+          onChange={(v) => {
+            setLinkSupplierId(v)
+            // 换供应商：按新税点重算含税价（保留两位小数）
+            const tp = v != null ? Number(suppliers.find((s) => s.id === v)?.taxPoint ?? 0) : 0
+            setLinkPriceInclTax(linkPrice == null ? null : Math.round(linkPrice * (1 + tp / 100) * 100) / 100)
+          }}
           optionFilterProp="label"
-          options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+          options={suppliers.map((s) => ({ value: s.id, label: s.name + (s.taxPoint != null ? '（加税点 ' + s.taxPoint + '%）' : '') }))}
         />
-        <div style={{ margin: '12px 0 8px' }}>价格（含税）</div>
+        <div style={{ margin: '12px 0 8px' }}>价格（不含税）</div>
         <InputNumber
           min={0}
           precision={4}
           style={{ width: '100%' }}
-          placeholder="价格"
+          placeholder="不含税单价"
           value={linkPrice ?? undefined}
-          onChange={(v) => setLinkPrice(typeof v === 'number' ? v : null)}
+          onChange={(v) => {
+            const p = typeof v === 'number' ? v : null
+            setLinkPrice(p)
+            // 按所选供应商税点自动填含税价（保留两位小数）
+            const tp = linkSupplierId != null ? Number(suppliers.find((s) => s.id === linkSupplierId)?.taxPoint ?? 0) : 0
+            setLinkPriceInclTax(p == null ? null : Math.round(p * (1 + tp / 100) * 100) / 100)
+          }}
         />
-        <div style={{ margin: '12px 0 8px' }}>含税参考价</div>
+        <div style={{ margin: '12px 0 8px' }}>含税参考价（自动按税点填入，可手改）</div>
         <InputNumber
           min={0}
-          precision={4}
+          precision={2}
           style={{ width: '100%' }}
           placeholder="含税参考价"
           value={linkPriceInclTax ?? undefined}
