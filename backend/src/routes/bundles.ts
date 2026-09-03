@@ -55,6 +55,8 @@ async function applyPartPrices(
   for (const [partId, unitPrice] of unitMap) {
     // 套餐成员自动绑定套餐供应商（仅填补空供应商，已挂的不动）
     await db.part.updateMany({ where: { id: partId, supplierId: null }, data: { supplierId } })
+    // 套餐成员自动改为外购（老板 2026-09-02：进套餐 = 走采购单）
+    await db.part.updateMany({ where: { id: partId, sourcing: { not: 'purchased' } }, data: { sourcing: 'purchased' } })
     await db.part.update({
       where: { id: partId },
       data: { price: unitPrice, priceBundleId: bundleId },

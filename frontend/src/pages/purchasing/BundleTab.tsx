@@ -181,7 +181,7 @@ export default function BundleTab(props: { canCreate: boolean; suppliers: Suppli
           note: values.note || null,
           items,
         })
-        message.success('套餐已更新，分摊单价已回写零件')
+        message.success('套餐已更新：分摊单价回写零件，成员自动绑定供应商并改为外购')
       } else {
         await api.post('/price-bundles', {
           supplierId: values.supplierId,
@@ -190,7 +190,7 @@ export default function BundleTab(props: { canCreate: boolean; suppliers: Suppli
           note: values.note || null,
           items,
         })
-        message.success('套餐已保存，分摊单价已回写零件')
+        message.success('套餐已保存：分摊单价回写零件，成员自动绑定供应商并改为外购')
       }
       setModalOpen(false)
       await load()
