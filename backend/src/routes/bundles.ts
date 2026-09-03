@@ -45,6 +45,7 @@ function allocate(
 async function applyPartPrices(
   db: { part: { updateMany: typeof prisma.part.updateMany; update: typeof prisma.part.update } },
   bundleId: number,
+  supplierId: number,
   items: { partId: number; qty: number; unitPrice?: number | null | undefined }[],
   totalPrice: number,
 ) {
@@ -52,6 +53,8 @@ async function applyPartPrices(
   // 先清掉旧成员的套餐关联（成员变更时旧成员解除关联）
   await db.part.updateMany({ where: { priceBundleId: bundleId }, data: { priceBundleId: null } })
   for (const [partId, unitPrice] of unitMap) {
+    // 套餐成员自动绑定套餐供应商（仅填补空供应商，已挂的不动）
+    await db.part.updateMany({ where: { id: partId, supplierId: null }, data: { supplierId } })
     await db.part.update({
       where: { id: partId },
       data: { price: unitPrice, priceBundleId: bundleId },
@@ -125,7 +128,7 @@ export function bundleRoutes(app: FastifyInstance) {
         },
         include: { items: true },
       })
-      await applyPartPrices(tx, b.id, data.items, data.totalPrice)
+      await applyPartPrices(tx, b.id, data.supplierId, data.items, data.totalPrice)
       return b
     })
     return reply.code(200).send(bundle)
@@ -153,7 +156,7 @@ export function bundleRoutes(app: FastifyInstance) {
       await tx.priceBundle.update({ where: { id }, data: { supplierId: data.supplierId, name: data.name, totalPrice: data.totalPrice, note: data.note ?? null } })
       await tx.priceBundleItem.deleteMany({ where: { bundleId: id } })
       await tx.priceBundleItem.createMany({ data: data.items.map((it) => ({ bundleId: id, partId: it.partId, qty: it.qty, unitPrice: it.unitPrice ?? null })) })
-      await applyPartPrices(tx, id, data.items, data.totalPrice)
+      await applyPartPrices(tx, id, data.supplierId, data.items, data.totalPrice)
     })
     return reply.code(200).send({ id })
   })
