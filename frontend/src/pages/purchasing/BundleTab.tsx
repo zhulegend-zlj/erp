@@ -219,7 +219,7 @@ export default function BundleTab(props: { canCreate: boolean; suppliers: Suppli
         style={{ marginBottom: 12 }}
         message="套餐价：供应商把一批零件按「每套产品用量」报一口价（如 21 个零件每套共 ¥X）。保存后系统按用量自动分摊出每个零件的单价并回写零件价格（等额单价法，个别件可手改单价，剩余金额自动摊给其余件）。"
       />
-      <Table<Bundle>
+      <Table<Bundle> sticky={{ offsetHeader: 8 }}
         rowKey="id"
         loading={loading}
         dataSource={bundles}

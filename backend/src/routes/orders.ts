@@ -609,6 +609,7 @@ export function ordersRoutes(app: FastifyInstance) {
               paymentTerms: order.paymentTerms,
               status: order.status,
               parentOrderId: order.id,
+              splitFromStatus: order.status,
             },
           })
           for (let li = 0; li < order.items.length; li++) {
@@ -660,44 +661,92 @@ export function ordersRoutes(app: FastifyInstance) {
 
   // 删除订单：仅 sales/boss。只允许删除没有任何业务痕迹的订单
   // （无采购单/出货单/领料/成品入库/收款/库存流水），防止把运作中的单据、库存与账务删烂。
+  // 拆单联动（2026-09-07 老板拍板）：删子单 → 数量并回原单、原单「已拆分」按拆分前状态复活；
+  // 原单还有子单 → 禁止删除（先删子单）。编号不重排，留空号。
   app.delete('/api/orders/:id', { preHandler: requireRole('sales', 'boss') }, async (req, reply) => {
     const id = parsePositiveInt((req.params as { id: string }).id)
     if (id === null) return reply.code(400).send({ error: '订单 ID 必须为正整数' })
 
-    await prisma.$transaction(async (tx) => {
-      const order = await tx.salesOrder.findUnique({ where: { id } })
-      if (!order) throw new Error('订单不存在')
+    try {
+      const merged = await prisma.$transaction(async (tx) => {
+        const order = await tx.salesOrder.findUnique({ where: { id }, include: { items: true } })
+        if (!order) throw new Error('订单不存在')
 
-      const [purchaseOrders, shipments, schedules, issues, productionEntries, payments, ledgers] = await Promise.all([
-        tx.purchaseOrder.count({ where: { salesOrderId: id } }),
-        tx.shipment.count({ where: { salesOrderId: id } }),
-        tx.shipmentSchedule.count({ where: { salesOrderId: id, status: { not: 'cancelled' } } }),
-        tx.issue.count({ where: { salesOrderId: id } }),
-        tx.productionEntry.count({ where: { salesOrderId: id } }),
-        tx.customerPayment.count({ where: { salesOrderId: id } }),
-        tx.inventoryLedger.count({ where: { salesOrderId: id } }),
-      ])
-      const blockers: string[] = []
-      if (purchaseOrders > 0) blockers.push(`${purchaseOrders} 张采购单`)
-      if (shipments > 0) blockers.push(`${shipments} 张出货单`)
-      if (schedules > 0) blockers.push(`${schedules} 条出货排程`)
-      if (issues > 0) blockers.push(`${issues} 条领料`)
-      if (productionEntries > 0) blockers.push(`${productionEntries} 条成品入库`)
-      if (payments > 0) blockers.push(`${payments} 笔收款`)
-      if (ledgers > 0) blockers.push(`${ledgers} 条库存流水`)
-      if (blockers.length > 0) {
-        throw new Error(`订单已有业务记录，不能删除：${blockers.join('、')}`)
-      }
+        // 原单还有拆出的子单 → 禁止删除
+        const childCount = await tx.salesOrder.count({ where: { parentOrderId: id } })
+        if (childCount > 0) {
+          throw new Error(`原单还有 ${childCount} 个拆分出去的订单，不能删除；请先删除子订单（子单数量会自动并回原单）`)
+        }
 
-      await tx.salesOrderItem.deleteMany({ where: { orderId: id } })
-      await tx.salesOrder.delete({ where: { id } })
-    })
-      .then(() => reply.code(200).send({ ok: true }))
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : '删除失败'
-        if (message === '订单不存在') return reply.code(404).send({ error: message })
-        if (message.startsWith('订单已有业务记录')) return reply.code(400).send({ error: message })
-        return reply.code(500).send({ error: '删除失败，请稍后重试' })
+        // 业务痕迹校验（合并中间表同样计入采购单）
+        const [purchaseOrders, poLinks, shipments, schedules, issues, productionEntries, payments, ledgers] = await Promise.all([
+          tx.purchaseOrder.count({ where: { salesOrderId: id } }),
+          tx.purchaseOrderSalesOrder.count({ where: { salesOrderId: id } }),
+          tx.shipment.count({ where: { salesOrderId: id } }),
+          tx.shipmentSchedule.count({ where: { salesOrderId: id, status: { not: 'cancelled' } } }),
+          tx.issue.count({ where: { salesOrderId: id } }),
+          tx.productionEntry.count({ where: { salesOrderId: id } }),
+          tx.customerPayment.count({ where: { salesOrderId: id } }),
+          tx.inventoryLedger.count({ where: { salesOrderId: id } }),
+        ])
+        const blockers: string[] = []
+        if (purchaseOrders > 0 || poLinks > 0) blockers.push(`${purchaseOrders + poLinks} 张采购单`)
+        if (shipments > 0) blockers.push(`${shipments} 张出货单`)
+        if (schedules > 0) blockers.push(`${schedules} 条出货排程`)
+        if (issues > 0) blockers.push(`${issues} 条领料`)
+        if (productionEntries > 0) blockers.push(`${productionEntries} 条成品入库`)
+        if (payments > 0) blockers.push(`${payments} 笔收款`)
+        if (ledgers > 0) blockers.push(`${ledgers} 条库存流水`)
+        if (blockers.length > 0) {
+          throw new Error(`订单已有业务记录，不能删除：${blockers.join('、')}`)
+        }
+
+        // 拆分子单：数量并回原单；原单「已拆分」则按拆分前状态复活
+        let mergeInfo: { parentOrderNo: string; qty: number; restoredStatus?: string } | null = null
+        if (order.parentOrderId != null) {
+          const parent = await tx.salesOrder.findUnique({ where: { id: order.parentOrderId } })
+          if (!parent) throw new Error('原单不存在')
+          for (const line of order.items) {
+            const exist = await tx.salesOrderItem.findFirst({ where: { orderId: parent.id, productId: line.productId } })
+            if (exist) {
+              await tx.salesOrderItem.update({ where: { id: exist.id }, data: { qty: exist.qty + line.qty } })
+            } else {
+              await tx.salesOrderItem.create({
+                data: {
+                  orderId: parent.id,
+                  productId: line.productId,
+                  qty: line.qty,
+                  unitPrice: line.unitPrice,
+                  ...(line.lineNo != null ? { lineNo: line.lineNo } : {}),
+                  ...(line.customerDeliveryDate != null ? { customerDeliveryDate: line.customerDeliveryDate } : {}),
+                  ...(line.zrhDeliveryDate != null ? { zrhDeliveryDate: line.zrhDeliveryDate } : {}),
+                },
+              })
+            }
+          }
+          mergeInfo = { parentOrderNo: parent.orderNo, qty: Math.max(0, ...order.items.map((i) => i.qty)) }
+          if (parent.status === 'split') {
+            const restored = order.splitFromStatus ?? 'confirmed'
+            await tx.salesOrder.update({
+              where: { id: parent.id },
+              data: { status: restored, purchasing: false, producing: false },
+            })
+            mergeInfo.restoredStatus = restored
+          }
+        }
+
+        await tx.salesOrderItem.deleteMany({ where: { orderId: id } })
+        await tx.salesOrder.delete({ where: { id } })
+        return mergeInfo
       })
+      return reply.code(200).send({ ok: true, merged })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '删除失败'
+      if (message === '订单不存在') return reply.code(404).send({ error: message })
+      if (message.startsWith('订单已有业务记录') || message.startsWith('原单还有')) {
+        return reply.code(400).send({ error: message })
+      }
+      return reply.code(500).send({ error: '删除失败，请稍后重试' })
+    }
   })
 }

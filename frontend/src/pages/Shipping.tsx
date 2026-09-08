@@ -204,7 +204,7 @@ function LinesEditor({
     },
   ]
   return (
-    <Table<LineRow>
+    <Table<LineRow> sticky={{ offsetHeader: 8 }}
       rowKey="key" size="small" columns={columns} dataSource={lines} pagination={false} scroll={{ x: 1700 }}
       footer={() => (
         <Button type="dashed" block icon={<PlusOutlined />} onClick={() => setLines((prev) => [...prev, { key: newRowKey(), qty: 1 }])}>
@@ -549,7 +549,7 @@ export default function Shipping() {
           </Form>
           {hubId ? (
             <>
-              <Table<ScheduleRow>
+              <Table<ScheduleRow> sticky={{ offsetHeader: 8 }}
                 rowKey="id"
                 size="small"
                 columns={scheduleColumns}
@@ -568,7 +568,7 @@ export default function Shipping() {
       )}
 
       <Card title="出货单与运输节点">
-        <Table<Shipment>
+        <Table<Shipment> sticky={{ offsetHeader: 8 }}
           rowKey="id"
           loading={loading}
           dataSource={shipments}

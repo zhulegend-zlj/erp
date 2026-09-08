@@ -5,6 +5,27 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ERP 系统</title>
+    <script>
+      // 页面级错误捕获：模块加载失败/未捕获异常上报后端日志，便于排查白屏
+      window.addEventListener('error', function (e) {
+        try {
+          fetch('/api/client-error', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: e.message || '', stack: (e.error && e.error.stack) || '', source: location.href, file: e.filename || '', line: e.lineno, col: e.colno }),
+          }).catch(function () {})
+        } catch (_) {}
+      })
+      window.addEventListener('unhandledrejection', function (e) {
+        try {
+          fetch('/api/client-error', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: 'unhandledrejection: ' + String(e.reason), stack: (e.reason && e.reason.stack) || '', source: location.href }),
+          }).catch(function () {})
+        } catch (_) {}
+      })
+    </script>
   </head>
   <body>
     <div id="root"></div>

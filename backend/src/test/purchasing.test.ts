@@ -399,6 +399,45 @@ describe('purchasing', () => {
     expect(res.json().error).toContain('未设置供应商')
   })
 
+  it('批量生成：自购件归入自购单（poType=selfbuy，编号=订单号-自购，不出给供应商）', async () => {
+    let selfBuySup = await prisma.supplier.findFirst({ where: { shortName: '自购' } })
+    if (!selfBuySup) {
+      selfBuySup = await prisma.supplier.create({ data: { name: '自购（老板自己买）', shortName: '自购', contact: '老板' } })
+    }
+    const s1 = await prisma.supplier.create({ data: { name: '供应商-SB1' } })
+    const p1 = await prisma.part.create({ data: { sku: 'P-SB1', name: '零件SB1', supplierId: s1.id } })
+    const p2 = await prisma.part.create({ data: { sku: 'P-SB2', name: '零件SB2', sourcing: 'selfbuy' } })
+    const customer = await prisma.customer.create({ data: { name: '客户SB' } })
+    const prod = await prisma.product.create({ data: { sku: 'F-SB', name: '成品SB' } })
+    const order = await prisma.salesOrder.create({
+      data: { orderNo: 'SO-SB', customerId: customer.id, status: 'confirmed', items: { create: { productId: prod.id, qty: 1, unitPrice: 1 } } },
+    })
+    const app = buildApp()
+    const cookie = await loginCookie(app, 'purchase')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/purchase-orders/batch',
+      headers: { cookie },
+      payload: {
+        salesOrderIds: [order.id],
+        items: [
+          { partId: p1.id, qty: 10, unitPrice: 1 },
+          { partId: p2.id, qty: 20, unitPrice: 1, selfBuy: true },
+        ],
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    const orders = res.json()
+    expect(orders).toHaveLength(2)
+    const sb = orders.find((o: any) => o.poType === 'selfbuy')
+    const normal = orders.find((o: any) => o.poType !== 'selfbuy')
+    expect(sb).toBeTruthy()
+    expect(sb.orderNo).toBe('SO-SB-自购')
+    expect(sb.supplierId).toBe(selfBuySup.id)
+    expect(normal.poType).toBe('normal')
+    expect(normal.supplierId).toBe(s1.id)
+  })
+
   it('并发收货不超订购量（BUG-01 回归：8 并发收 2 台只成功 2 次）', async () => {
     const supplier = await prisma.supplier.create({ data: { name: '供应商-CONC' } })
     const part = await prisma.part.create({ data: { sku: 'P-CONC', name: '零件CONC', supplierId: supplier.id } })
@@ -454,7 +493,7 @@ describe('purchasing', () => {
       include: { items: true },
     })
     expect(po.items[0]!.unitPriceInclTax?.toNumber()).toBe(1.07)
-    expect(po.items[0]!.usage).toBe(2)
+    expect(po.items[0]!.usage?.toNumber()).toBe(2)
     expect(po.items[0]!.note).toBe('合并两单')
     // 两个订单都点亮采购中
     const so1 = await prisma.salesOrder.findUnique({ where: { id: o1.id } })

@@ -7,6 +7,7 @@ import { notifyError } from './common'
 import { useKeepAliveState } from './keepAlive'
 import GeneratePoTab from './purchasing/GeneratePoTab'
 import PoListTab from './purchasing/PoListTab'
+import PoTemplateTab from './purchasing/PoTemplateTab'
 import BundleTab from './purchasing/BundleTab'
 import SparePoModal from './purchasing/SparePoModal'
 import PlaceholderTab from './purchasing/PlaceholderTab'
@@ -86,7 +87,10 @@ export default function Purchasing() {
                   setDraftItems={setDraftItems}
                   suppliers={suppliers}
                   companyHeaders={companyHeaders}
-                  onCreated={() => setListRefreshKey((k) => k + 1)}
+                  onCreated={() => {
+                    setListRefreshKey((k) => k + 1)
+                    setActiveTab('po-list')
+                  }}
                 />
               ),
             },
@@ -106,6 +110,11 @@ export default function Purchasing() {
               key: 'bundle',
               label: '套餐价',
               children: <BundleTab canCreate={canManageBundles} suppliers={suppliers} />,
+            },
+            {
+              key: 'po-template',
+              label: '打印模板',
+              children: <PoTemplateTab canCreate={canManageBundles} />,
             },
             { key: 'follow', label: '采购跟进', children: <PlaceholderTab title="采购跟进" /> },
             { key: 'overview', label: '订单采购总览', children: <PlaceholderTab title="订单采购总览" /> },

@@ -1,10 +1,12 @@
-export interface BomRow { productId: number; partId: number; qty: number }
+import type { Prisma } from '@prisma/client'
+
+export interface BomRow { productId: number; partId: number; qty: Prisma.Decimal | number }
 
 export function bomExplode(productId: number, qty: number, boms: BomRow[]) {
   const map = new Map<number, number>()
   for (const b of boms) {
     if (b.productId !== productId) continue
-    map.set(b.partId, (map.get(b.partId) ?? 0) + b.qty * qty)
+    map.set(b.partId, (map.get(b.partId) ?? 0) + Number(b.qty) * qty)
   }
   return [...map.entries()].map(([partId, requiredQty]) => ({ partId, requiredQty }))
 }
@@ -47,12 +49,14 @@ export function computePurchasePlan(
 ) {
   return requirements.map(r => {
     const onHand = stock.get(r.partId) ?? 0
-    const gapQty = Math.max(0, r.requiredQty - onHand)
+    const gapQty = Math.ceil(Math.max(0, r.requiredQty - onHand))
     const safetyStock = safetyStockMap.get(r.partId) ?? 0
     // 有缺口时按缺口采购后库存归零，必然低于安全线（safety>0）→ 补到安全线：
     // 采购后库存 = onHand + suggested − required = safetyStock
-    const suggestedQty =
-      gapQty > 0 && safetyStock > 0 ? r.requiredQty - onHand + safetyStock : gapQty
+    // PO 采购数量保持整数（老板拍板）：小数需求向上取整，多买一点就多买一点
+    const suggestedQty = Math.ceil(
+      gapQty > 0 && safetyStock > 0 ? r.requiredQty - onHand + safetyStock : gapQty,
+    )
     return { partId: r.partId, gapQty, suggestedQty }
   })
 }

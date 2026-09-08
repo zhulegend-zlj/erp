@@ -59,6 +59,8 @@ model Supplier {
   defaultPaymentTerms  String? // 默认付款方式（月结/月结30天/货到付款/现金…）
   defaultHeaderName    String? // 默认抬头（智锐恒/锦名诚）
   taxPoint             Decimal? @db.Decimal(5, 2) // 加税点数（如 7=加7个点；空=不含税口径）
+  poTemplateId         Int? // 该供应商默认使用的打印模板（2026-09-07 迷你编辑器方案）
+  poTemplate           PoTemplate?       @relation("SupplierTemplate", fields: [poTemplateId], references: [id])
   createdAt            DateTime          @default(now())
   purchaseOrders       PurchaseOrder[]
   supplierPayments     SupplierPayment[]
@@ -125,7 +127,7 @@ model Bom {
   productId Int
   part      Part    @relation(fields: [partId], references: [id])
   partId    Int
-  qty       Int
+  qty       Decimal @db.Decimal(12, 4) // 每套用量，支持小数（如 0.0005 kg/套、30套1个≈0.0333）
 
   @@unique([productId, partId])
 }
@@ -148,6 +150,8 @@ model SalesOrder {
   parentOrderId   Int?
   parentOrder     SalesOrder?  @relation("SalesOrderSplit", fields: [parentOrderId], references: [id])
   childOrders     SalesOrder[] @relation("SalesOrderSplit")
+  // 拆单时父单的状态快照（删除子单时用于恢复原单状态，2026-09-07 老板拍板）
+  splitFromStatus String?
   // 采购催销售确认：草稿订单无法生成采购单时一键提醒（销售确认订单后清空）
   confirmReminderAt    DateTime?
   confirmReminderBy    String?
@@ -181,6 +185,17 @@ model SalesOrderItem {
   @@unique([orderId, productId])
 }
 
+model PoTemplate {
+  suppliers  Supplier[] @relation("SupplierTemplate")
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  headerType String   @default("zrh") // zrh=智锐恒(含税) / jmc=锦名诚(不含税)
+  isDefault  Boolean  @default(false)
+  config     Json? // 列显隐/列宽/表头文字/条款覆盖
+  createdAt  DateTime @default(now())
+  purchaseOrders PurchaseOrder[]
+}
+
 model PurchaseOrder {
   id           Int                 @id @default(autoincrement())
   orderNo      String              @unique
@@ -199,6 +214,8 @@ model PurchaseOrder {
   termsNote    String? // 备注条款（打印用）
   headerName   String? // 抬头（智锐恒/锦名诚）→ 决定打印模板口径
   taxPoint     Decimal?            @db.Decimal(5, 2) // 加税点快照（供应商带出可改）
+  template     PoTemplate?         @relation(fields: [templateId], references: [id])
+  templateId   Int? // 打印模板（导出/预览套用，2026-09-07 老板方案A）
   createdAt    DateTime            @default(now())
   items        PurchaseOrderItem[]
   receipts     Receipt[]
@@ -217,7 +234,7 @@ model PurchaseOrderItem {
   qty             Int
   unitPrice       Decimal       @db.Decimal(12, 2) // 不含税单价（成本口径，财务/看板沿用）
   unitPriceInclTax Decimal?     @db.Decimal(12, 2) // 含税单价（展示/对账；含税=不含税×(1+加税点%)）
-  usage           Int? // 用量（BOM 带出可改，打印用）
+  usage           Decimal?      @db.Decimal(12, 4) // 用量（BOM 带出可改，打印用；随 BOM 用量小数化）
   note            String? // 备注（打印用，如 请给3‰免费备品）
   supplierReplyDate DateTime? // 供应商回复交期（采购跟进里采购填）
 

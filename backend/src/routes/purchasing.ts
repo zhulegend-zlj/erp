@@ -9,6 +9,26 @@ import { applyStockChange } from '../domain/inventory'
 import { markPurchasingStarted, refreshPurchasingPhase, refreshPurchasingPhaseAfterUndo } from '../domain/order-phase'
 import { parsePositiveInt, prismaErrorInfo, routeError } from '../errors'
 import { parsePagination, pagedResult } from '../pagination'
+import type { PoTemplateConfig } from '../domain/purchase-doc'
+import { PO_TEMPLATE_DIR, PO_TEMPLATE_ZRH, PO_TEMPLATE_JMC } from '../domain/purchase-doc'
+import { markDirectRenderEnd, markDirectRenderStart, renderPoToFiles, renderKey } from '../domain/po-render'
+import { luckysheetToXlsx } from '../domain/luckysheet-xlsx'
+import { amountToCn, modelToHtml, modelToXlsx, sheetjsToModel, xlsxToModelAsync } from '../domain/template-model'
+import type { TmplModel, TmplDocData } from '../domain/template-model'
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+const PO_TEMPLATE_UPLOAD_DIR = resolve(process.cwd(), 'uploads/po-templates')
+function builtInModel(headerType: string): TmplModel {
+  const file = resolve(PO_TEMPLATE_DIR, headerType === 'jmc' ? 'PurchaseOrder-JMC.model.json' : 'PurchaseOrder-ZRH.model.json')
+  return JSON.parse(readFileSync(file, 'utf8')) as TmplModel
+}
+function templateFilePath(id: number): string {
+  return resolve(PO_TEMPLATE_UPLOAD_DIR, id + '.xlsx')
+}
+function templateCachePath(key: string): string {
+  return resolve(PO_TEMPLATE_UPLOAD_DIR, key + '-cached.xlsx')
+}
 
 const purchaseItemSchema = z.object({
   partId: z.number({ error: '零件必填' }).int({ error: '零件必须为整数' }).positive({ error: '零件必须为正整数' }),
@@ -23,7 +43,7 @@ const purchaseItemSchema = z.object({
     .max(9999999999.99, { error: '单价超出允许范围' }),
   // 重构新增（全部可选，旧请求体原样可用）
   unitPriceInclTax: z.number({ error: '含税单价必须为数字' }).nonnegative().max(9999999999.99).nullable().optional(),
-  usage: z.number({ error: '用量必须为整数' }).int().positive().nullable().optional(),
+  usage: z.number({ error: '用量必须为数字' }).positive().max(9999.9999, { error: '用量超出允许范围' }).nullable().optional(),
   note: z.string().max(500, { error: '备注超长' }).nullable().optional(),
   supplierReplyDate: z.coerce.date().nullable().optional(),
   splitNo: z.number({ error: '批次号必须为整数' }).int().nonnegative().optional(), // 拆单：同供应商同零件不同批次生成多张单
@@ -34,7 +54,7 @@ const createPurchaseOrderSchema = z.object({
   salesOrderId: z.number().int().positive().optional(),
   salesOrderIds: z.array(z.number().int().positive(), { error: '关联订单必须为正整数数组' }).max(50).optional(),
   poStatus: z.enum(['pending', 'sent', 'printed', 'confirmed']).optional(),
-  poType: z.enum(['normal', 'spare']).optional(),
+  poType: z.enum(['normal', 'spare', 'selfbuy']).optional(),
   orderDate: z.coerce.date().nullable().optional(),
   expectedDeliveryDate: z.string().max(200).nullable().optional(), // 预计交货时间（文本，如 2026.03.01开始每周交1000套）
   paymentTerms: z.string().max(100).nullable().optional(),
@@ -42,12 +62,15 @@ const createPurchaseOrderSchema = z.object({
   headerName: z.string().max(100).nullable().optional(),
   taxPoint: z.number({ error: '加税点必须为数字' }).min(0).max(100).nullable().optional(),
   manualOrderNo: z.string().min(1).max(100).optional(), // 手工编号（覆盖自动编号）
+  templateId: z.number({ error: '模板必须为整数' }).int().positive().nullable().optional(), // 打印模板（预览/导出套用）
   items: z.array(purchaseItemSchema, { error: '明细必填' }).min(1, '采购单至少包含一个明细'),
 })
 
 // 批量生成允许行级供应商覆盖（未挂供应商的零件可在弹窗里现选，不强制先写回零件资料）
 const batchItemSchema = purchaseItemSchema.extend({
   supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
+  // 自购件：不出给供应商，自动归「自购」采购单（供应商 shortName=自购）
+  selfBuy: z.boolean().optional(),
 })
 const batchPurchaseOrderSchema = createPurchaseOrderSchema
   .omit({ supplierId: true })
@@ -115,7 +138,7 @@ async function nextPurchaseOrderNo(
   salesOrderIds: number[] | null,
   tx: Prisma.TransactionClient,
   manualOrderNo?: string,
-  poType = 'normal',
+  poType: 'normal' | 'spare' | 'selfbuy' = 'normal',
 ): Promise<string> {
   if (manualOrderNo) return manualOrderNo
   // 免费备品单：<订单号>备品（重复加 -2/-3）；不挂订单的备品单必须手工编号
@@ -131,6 +154,22 @@ async function nextPurchaseOrderNo(
     const rows = await tx.purchaseOrder.findMany({ select: { orderNo: true } })
     const no = nextSpareNo(rows.map((r) => r.orderNo), orders[0]?.orderNo ?? null)
     if (!no) throw new Error('免费备品单编号已用完，请手工输入编号')
+    return no
+  }
+  // 自购单：<订单号>-自购（重复加 -2/-3）；不挂订单 = PO-YYYYMMDD-自购
+  if (poType === 'selfbuy') {
+    const firstOrder = salesOrderIds?.length
+      ? await tx.salesOrder.findFirst({ where: { id: salesOrderIds[0]! }, select: { orderNo: true } })
+      : null
+    const base = (firstOrder?.orderNo ?? 'PO-' + utcDateStamp()) + '-自购'
+    const rows = await tx.purchaseOrder.findMany({ where: { orderNo: { startsWith: base } }, select: { orderNo: true } })
+    const exists = new Set(rows.map((r) => r.orderNo))
+    let no = base
+    let i = 2
+    while (exists.has(no)) {
+      no = base + '-' + i
+      i++
+    }
     return no
   }
   if (salesOrderIds === null || salesOrderIds.length === 0) {
@@ -199,7 +238,7 @@ export function purchasingRoutes(app: FastifyInstance) {
     const usageByPart = new Map<number, Map<number, number>>()
     for (const b of boms) {
       const m = usageByPart.get(b.partId) ?? new Map<number, number>()
-      m.set(b.productId, (m.get(b.productId) ?? 0) + b.qty)
+      m.set(b.productId, (m.get(b.productId) ?? 0) + Number(b.qty))
       usageByPart.set(b.partId, m)
     }
     // 共用料识别：同一零件挂在 ≥2 个不同成品 BOM 里
@@ -356,7 +395,7 @@ export function purchasingRoutes(app: FastifyInstance) {
           unit: it.part.unit,
           sourcing: it.part.sourcing,
           qty: it.qty,
-          usage: it.usage,
+          usage: it.usage?.toNumber() ?? null,
           note: it.note,
           supplierReplyDate: it.supplierReplyDate,
           ...(hidePrice ? {} : { unitPrice: it.unitPrice.toNumber(), unitPriceInclTax: it.unitPriceInclTax?.toNumber() ?? null }),
@@ -435,6 +474,7 @@ export function purchasingRoutes(app: FastifyInstance) {
     termsNote?: string | null | undefined
     headerName?: string | null | undefined
     taxPoint?: number | null | undefined
+    templateId?: number | null | undefined
   }) {
     return {
       poStatus: data.poStatus ?? 'pending',
@@ -445,6 +485,7 @@ export function purchasingRoutes(app: FastifyInstance) {
       termsNote: data.termsNote ?? null,
       headerName: data.headerName ?? null,
       taxPoint: data.taxPoint ?? null,
+      templateId: data.templateId ?? null,
     }
   }
 
@@ -456,16 +497,44 @@ export function purchasingRoutes(app: FastifyInstance) {
     usage?: number | null | undefined
     note?: string | null | undefined
     supplierReplyDate?: Date | null | undefined
-  }) {
+  }, fallbackUsage?: number | null) {
     return {
       partId: item.partId,
       qty: item.qty,
       unitPrice: item.unitPrice,
       unitPriceInclTax: item.unitPriceInclTax ?? null,
-      usage: item.usage ?? null,
+      usage: item.usage ?? fallbackUsage ?? null,
       note: item.note ?? null,
       supplierReplyDate: item.supplierReplyDate ?? null,
     }
+  }
+
+  /** 用量兜底：明细未带用量时按关联订单成品 BOM 计算（2026-09-08 老板发现 265443E 导出无用量） */
+  async function bomUsageFallback(
+    salesOrderIds: number[] | undefined,
+    items: Array<{ partId: number }>,
+  ): Promise<Map<number, number | null>> {
+    const out = new Map<number, number | null>()
+    if (!salesOrderIds || salesOrderIds.length === 0) return out
+    const soItems = await prisma.salesOrderItem.findMany({
+      where: { orderId: { in: salesOrderIds } },
+      select: { productId: true },
+    })
+    const productIds = [...new Set(soItems.map((i) => i.productId))]
+    if (productIds.length === 0) return out
+    const boms = await prisma.bom.findMany({ where: { productId: { in: productIds } } })
+    const byPart = new Map<number, Map<number, number>>()
+    for (const b of boms) {
+      const m = byPart.get(b.partId) ?? new Map<number, number>()
+      m.set(b.productId, (m.get(b.productId) ?? 0) + Number(b.qty))
+      byPart.set(b.partId, m)
+    }
+    for (const it of items) {
+      const m = byPart.get(it.partId)
+      const values = m ? [...new Set(m.values())] : []
+      out.set(it.partId, values.length === 1 ? (values[0] ?? null) : null)
+    }
+    return out
   }
 
   // —— 采购单流转状态（poStatus）：pending→sent→printed→confirmed 单向，采购/老板改；与收货进度 status 完全分离
@@ -664,6 +733,7 @@ export function purchasingRoutes(app: FastifyInstance) {
       },
       model: [...modelSkus].join(' / '),
       paymentTerms: po.paymentTerms,
+      termsNote: po.termsNote,
       expectedDeliveryDate: po.expectedDeliveryDate,
       taxPoint: po.taxPoint != null ? po.taxPoint.toNumber() : null,
       lines: po.items.map((it) => ({
@@ -673,7 +743,7 @@ export function purchasingRoutes(app: FastifyInstance) {
         material: it.part.material ?? null,
         finish: it.part.finish ?? null,
         unit: it.part.unit,
-        usage: it.usage,
+        usage: it.usage?.toNumber() ?? null,
         qty: it.qty,
         unitPrice: it.unitPrice.toNumber(),
         unitPriceInclTax: it.unitPriceInclTax?.toNumber() ?? null,
@@ -683,12 +753,84 @@ export function purchasingRoutes(app: FastifyInstance) {
     }
   }
 
+  /** 模板解析：显式绑定 > 内置 xlsx 标准模板；模型模板（旧编辑器实验）保留兼容 */
+  async function resolvePoTemplate(po: { templateId: number | null } | null) {
+    const tpl = po?.templateId != null ? await prisma.poTemplate.findUnique({ where: { id: po.templateId } }) : null
+    const cfgV2 = (tpl?.config ?? {}) as { version?: number; model?: TmplModel }
+    if (cfgV2.version === 2 && cfgV2.model) return { kind: 'model' as const, tpl, model: cfgV2.model }
+    const customFile = tpl != null && existsSync(templateFilePath(tpl.id)) ? templateFilePath(tpl.id) : null
+    return { kind: 'xlsx' as const, tpl, customFile }
+  }
+
+  // 预览：xlsx 标准模板 → 真渲染（Excel→PDF→PNG，预览=打印）；模型模板 → 模型 HTML
   app.get('/api/purchase-orders/:id/preview', { preHandler: requireRole('purchase', 'boss', 'warehouse') }, async (req, reply) => {
     const id = parsePositiveInt((req.params as { id: string }).id)
     if (id === null) return reply.code(400).send({ error: '采购单 ID 必须为正整数' })
     try {
       const data = await poDocData(id)
-      return data
+      const po = await prisma.purchaseOrder.findUnique({ where: { id } })
+      if (!po) return reply.code(404).send({ error: '采购单不存在' })
+      const resolved = await resolvePoTemplate(po)
+      let html = ''
+      let render: 'xlsx' | 'model' = 'xlsx'
+      let renderV = ''
+      if (resolved.kind === 'model') {
+        render = 'model'
+        const doc: TmplDocData = {
+          orderNo: data.orderNo,
+          orderDate: data.orderDate.slice(0, 10),
+          headerName: data.headerName ?? '东莞市智锐恒电子有限公司',
+          model: data.model,
+          paymentTerms: data.paymentTerms,
+          expectedDeliveryDate: data.expectedDeliveryDate,
+          termsNote: data.termsNote ?? null,
+          supplier: data.supplier,
+          lines: data.lines,
+        }
+        const total = Math.round(data.lines.reduce((s, l) => s + l.qty * l.unitPrice, 0) * 100) / 100
+        html = modelToHtml(resolved.model, doc, total, amountToCn(total))
+      } else {
+        // xlsx 模板：仿照采购单的纯前端表格，秒开、不渲染（2026-09-08 老板拍板）
+        const { buildPoMimicHtml } = await import('../domain/purchase-doc')
+        html = buildPoMimicHtml(data)
+        render = 'xlsx'
+      }
+      return { data, html, templateName: resolved.tpl?.name ?? null, render, renderV }
+    } catch (err) {
+      const e = routeError(err, ['不存在'])
+      return reply.code(e.status).send({ error: e.message })
+    }
+  })
+
+  // 打印页：xlsx 标准模板 → 仿照表格 HTML（浏览器打印，可另存为 PDF）；模型模板 → 模型 HTML
+  app.get('/api/purchase-orders/:id/print', { preHandler: requireRole('purchase', 'boss', 'warehouse') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '采购单 ID 必须为正整数' })
+    try {
+      const data = await poDocData(id)
+      const po = await prisma.purchaseOrder.findUnique({ where: { id } })
+      if (!po) return reply.code(404).send({ error: '采购单不存在' })
+      const resolved = await resolvePoTemplate(po)
+      if (resolved.kind === 'xlsx') {
+        const { buildPoMimicHtml } = await import('../domain/purchase-doc')
+        return reply
+          .header('Content-Type', 'text/html; charset=utf-8')
+          .send(buildPoMimicHtml(data, { autoPrint: true }))
+      }
+      const doc: TmplDocData = {
+        orderNo: data.orderNo,
+        orderDate: data.orderDate.slice(0, 10),
+        headerName: data.headerName ?? '东莞市智锐恒电子有限公司',
+        model: data.model,
+        paymentTerms: data.paymentTerms,
+        expectedDeliveryDate: data.expectedDeliveryDate,
+        termsNote: data.termsNote ?? null,
+        supplier: data.supplier,
+        lines: data.lines,
+      }
+      const total = Math.round(data.lines.reduce((s, l) => s + l.qty * l.unitPrice, 0) * 100) / 100
+      const html = modelToHtml(resolved.model, doc, total, amountToCn(total))
+      return reply.header('Content-Type', 'text/html; charset=utf-8').send('<title>采购单-' + data.orderNo + '</title>' + html)
     } catch (err) {
       const e = routeError(err, ['不存在'])
       return reply.code(e.status).send({ error: e.message })
@@ -700,8 +842,29 @@ export function purchasingRoutes(app: FastifyInstance) {
     if (id === null) return reply.code(400).send({ error: '采购单 ID 必须为正整数' })
     try {
       const data = await poDocData(id)
+      const po = await prisma.purchaseOrder.findUnique({ where: { id } })
+      if (!po) return reply.code(404).send({ error: '采购单不存在' })
+      const resolved = await resolvePoTemplate(po)
       const { buildPoTemplate, poDocFileName } = await import('../domain/purchase-doc')
-      const buffer = await buildPoTemplate(data)
+      let buffer: Buffer
+      if (resolved.kind === 'model') {
+        const doc: TmplDocData = {
+          orderNo: data.orderNo,
+          orderDate: data.orderDate.slice(0, 10),
+          headerName: data.headerName ?? '东莞市智锐恒电子有限公司',
+          model: data.model,
+          paymentTerms: data.paymentTerms,
+          expectedDeliveryDate: data.expectedDeliveryDate,
+          termsNote: data.termsNote ?? null,
+          supplier: data.supplier,
+          lines: data.lines,
+        }
+        const total = Math.round(data.lines.reduce((s, l) => s + l.qty * l.unitPrice, 0) * 100) / 100
+        buffer = await modelToXlsx(resolved.model, doc, total, amountToCn(total))
+      } else {
+        const cfg = resolved.tpl?.config as PoTemplateConfig | null
+        buffer = await buildPoTemplate(data, cfg, resolved.customFile)
+      }
       reply
         .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         .header('Content-Disposition', 'attachment; filename="' + encodeURIComponent(poDocFileName(data.orderNo)) + '"')
@@ -713,11 +876,239 @@ export function purchasingRoutes(app: FastifyInstance) {
     }
   })
 
+  // —— 真渲染（2026-09-07 老板：预览=打印效果。Excel COM → PDF → PNG，串行 + 落盘缓存）——
+  async function renderPoFile(id: number, opts?: { warm?: boolean }): Promise<{ pdfPath: string; pngPath: string }> {
+    // 直连预览优先：预热渲染期间用户主动预览时，预热循环会暂停让路
+    if (!opts?.warm) markDirectRenderStart()
+    try {
+      const data = await poDocData(id)
+      const po = await prisma.purchaseOrder.findUnique({ where: { id } })
+      if (!po) throw new Error('采购单不存在')
+      const resolved = await resolvePoTemplate(po)
+      if (resolved.kind === 'model') throw new Error('该采购单使用模型模板，无真渲染')
+      const cfg = resolved.tpl?.config as PoTemplateConfig | null
+      const { buildPoTemplate, builtinPrintArea } = await import('../domain/purchase-doc')
+      const buffer = await buildPoTemplate(data, cfg, resolved.customFile)
+      const builtinFile = resolve(PO_TEMPLATE_DIR, 'PurchaseOrder-STD.xlsx')
+      const customStamp = resolved.customFile && existsSync(resolved.customFile) ? statSync(resolved.customFile).mtimeMs : 0
+      const builtinStamp = existsSync(builtinFile) ? statSync(builtinFile).mtimeMs : 0
+      const cacheKey = 'po-' + id + '-' + renderKey([data, resolved.tpl?.id ?? null, customStamp, builtinStamp])
+      // 内置标准模板显式传打印区域，避免 Excel 把右侧空列算进页面
+      const printArea = resolved.customFile ? '' : builtinPrintArea(data.lines.length)
+      // 预览图 110dpi：屏幕清晰度足够，光栅化更快（2026-09-08 老板嫌预览慢）
+      return renderPoToFiles(buffer, cacheKey, { orientation: 'portrait', dpi: 110, printArea })
+    } finally {
+      if (!opts?.warm) markDirectRenderEnd()
+    }
+  }
+
+  app.get('/api/purchase-orders/:id/render-preview', { preHandler: requireRole('purchase', 'boss', 'warehouse') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '采购单 ID 必须为正整数' })
+    try {
+      const { pngPath } = await renderPoFile(id)
+      reply.header('Content-Type', 'image/png').header('Cache-Control', 'no-cache').send(readFileSync(pngPath))
+      return
+    } catch (err) {
+      console.error('[render-preview]', err)
+      const e = routeError(err, ['不存在'])
+      return reply.code(e.status).send({ error: e.message })
+    }
+  })
+
+  app.get('/api/purchase-orders/:id/render-pdf', { preHandler: requireRole('purchase', 'boss', 'warehouse') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '采购单 ID 必须为正整数' })
+    try {
+      const data = await poDocData(id)
+      const { pdfPath } = await renderPoFile(id)
+      reply
+        .header('Content-Type', 'application/pdf')
+        .header('Content-Disposition', 'inline; filename="PO-' + data.orderNo + '.pdf"')
+        .send(readFileSync(pdfPath))
+      return
+    } catch (err) {
+      console.error('[render-pdf]', err)
+      const e = routeError(err, ['不存在'])
+      return reply.code(e.status).send({ error: e.message })
+    }
+  })
+
+  // —— 打印模板（2026-09-07 老板方案A：列显隐/列宽/表头/条款，预览=导出同一份渲染）——
+  const poTemplateSchema = z.object({
+    name: z.string({ error: '模板名必填' }).min(1, '模板名必填').max(60, '模板名过长'),
+    headerType: z.enum(['zrh', 'jmc'], { error: 'headerType 仅支持 zrh/jmc' }),
+    isDefault: z.boolean().optional(),
+    config: z.unknown().nullable().optional(),
+  })
+  app.get('/api/po-templates', { preHandler: requireRole(...READ_ROLES) }, async (_req) => {
+    const rows = await prisma.poTemplate.findMany({ orderBy: { id: 'asc' } })
+    return rows.map((r) => ({ id: r.id, name: r.name, headerType: r.headerType, isDefault: r.isDefault, config: r.config }))
+  })
+  app.post('/api/po-templates', { preHandler: requireRole('purchase', 'boss') }, async (req, reply) => {
+    const data = parseBody(poTemplateSchema, req.body, reply)
+    if (data === null) return
+    const dup = await prisma.poTemplate.findUnique({ where: { name: data.name } })
+    if (dup) return reply.code(400).send({ error: '模板名已存在' })
+    if (data.isDefault) await prisma.poTemplate.updateMany({ where: { headerType: data.headerType }, data: { isDefault: false } })
+    const created = await prisma.poTemplate.create({
+      data: { name: data.name, headerType: data.headerType, isDefault: data.isDefault === true, config: (data.config ?? null) as Prisma.InputJsonValue },
+    })
+    return reply.code(200).send(created)
+  })
+  app.patch('/api/po-templates/:id', { preHandler: requireRole('purchase', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '模板 ID 必须为正整数' })
+    const body = (req.body ?? {}) as { name?: unknown; headerType?: unknown; isDefault?: unknown; config?: unknown }
+    const data: { name?: string; headerType?: 'zrh' | 'jmc'; isDefault?: boolean; config?: Prisma.InputJsonValue } = {}
+    if ('name' in body) {
+      if (typeof body.name !== 'string' || body.name.trim().length < 1 || body.name.trim().length > 60) return reply.code(400).send({ error: '模板名不合法' })
+      const dup = await prisma.poTemplate.findFirst({ where: { name: body.name, id: { not: id } } })
+      if (dup) return reply.code(400).send({ error: '模板名已存在' })
+      data.name = body.name
+    }
+    if ('headerType' in body) {
+      if (body.headerType !== 'zrh' && body.headerType !== 'jmc') return reply.code(400).send({ error: 'headerType 仅支持 zrh/jmc' })
+      data.headerType = body.headerType
+    }
+    if ('isDefault' in body) data.isDefault = body.isDefault === true
+    if ('config' in body) data.config = (body.config ?? null) as Prisma.InputJsonValue
+    const exist = await prisma.poTemplate.findUnique({ where: { id } })
+    if (!exist) return reply.code(404).send({ error: '模板不存在' })
+    if (data.isDefault) {
+      await prisma.poTemplate.updateMany({ where: { headerType: data.headerType ?? exist.headerType, id: { not: id } }, data: { isDefault: false } })
+    }
+    const updated = await prisma.poTemplate.update({ where: { id }, data })
+    return reply.code(200).send(updated)
+  })
+  app.delete('/api/po-templates/:id', { preHandler: requireRole('purchase', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '模板 ID 必须为正整数' })
+    await prisma.poTemplate.delete({ where: { id } }).catch(() => null)
+    const p = templateFilePath(id)
+    if (existsSync(p)) unlinkSync(p)
+    return reply.code(200).send({ ok: true })
+  })
+
+  // —— 模板底稿文件（Luckysheet 编辑器，2026-09-07 老板方案B：像表格一样改模板并保存）——
+  // 打开底稿：自定义文件优先，否则内置模板；公式先固化成值（编辑器不认公式）
+  app.get('/api/po-templates/:id/file', { preHandler: requireRole('purchase', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '模板 ID 必须为正整数' })
+    const tpl = await prisma.poTemplate.findUnique({ where: { id } })
+    if (!tpl) return reply.code(404).send({ error: '模板不存在' })
+    const custom = templateFilePath(id)
+    const base = existsSync(custom) ? custom : resolve(PO_TEMPLATE_DIR, tpl.headerType === 'jmc' ? PO_TEMPLATE_JMC : PO_TEMPLATE_ZRH)
+    const cacheKey = existsSync(custom) ? 'tpl-' + id : 'system-' + tpl.headerType
+    const cache = templateCachePath(cacheKey)
+    // 缓存未生成才做公式固化（打开编辑器秒开，2026-09-07 提速）
+    if (!existsSync(cache)) {
+      const { workbookWithCachedValues } = await import('../domain/purchase-doc')
+      const buf = await workbookWithCachedValues(readFileSync(base))
+      mkdirSync(PO_TEMPLATE_UPLOAD_DIR, { recursive: true })
+      writeFileSync(cache, buf)
+    }
+    reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', 'attachment; filename="template-' + id + '.xlsx"')
+      .send(readFileSync(cache))
+    return
+  })
+  // 保存底稿：Luckysheet JSON → xlsx 存盘（导出/预览即用这份底稿）
+  app.put('/api/po-templates/:id/file', { preHandler: requireRole('purchase', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '模板 ID 必须为正整数' })
+    const tpl = await prisma.poTemplate.findUnique({ where: { id } })
+    if (!tpl) return reply.code(404).send({ error: '模板不存在' })
+    const body = (req.body ?? {}) as { data?: unknown }
+    if (!Array.isArray(body.data) || body.data.length === 0) {
+      return reply.code(400).send({ error: '底稿数据不合法' })
+    }
+    try {
+      const buf = luckysheetToXlsx(body.data as never)
+      mkdirSync(PO_TEMPLATE_UPLOAD_DIR, { recursive: true })
+      writeFileSync(templateFilePath(id), buf)
+      // 同步生成编辑器缓存（下次打开免转换）
+      const { workbookWithCachedValues } = await import('../domain/purchase-doc')
+      const cached = await workbookWithCachedValues(buf)
+      writeFileSync(templateCachePath('tpl-' + id), cached)
+      return reply.code(200).send({ ok: true })
+    } catch (err) {
+      return reply.code(400).send({ error: '底稿转换失败：' + (err instanceof Error ? err.message : '未知错误') })
+    }
+  })
+  // 重置底稿：删除自定义文件，回到内置系统模板
+  app.delete('/api/po-templates/:id/file', { preHandler: requireRole('purchase', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '模板 ID 必须为正整数' })
+    const p = templateFilePath(id)
+    if (existsSync(p)) unlinkSync(p)
+    const pc = templateCachePath('tpl-' + id)
+    if (existsSync(pc)) unlinkSync(pc)
+    return reply.code(200).send({ ok: true })
+  })
+
+  // 内置起始模型（新建模板默认从系统模板开始，2026-09-07）
+  app.get('/api/po-templates/default-model', { preHandler: requireRole('purchase', 'boss') }, async (req) => {
+    const headerType = (req.query as { headerType?: string }).headerType === 'jmc' ? 'jmc' : 'zrh'
+    return { model: builtInModel(headerType) }
+  })
+
+  // 上传 xlsx 表格 → 解析成迷你模板模型（2026-09-07 老板：提供一份表格作为初始模板）
+  app.post('/api/po-templates/parse-xlsx', { preHandler: requireRole('purchase', 'boss') }, async (req, reply) => {
+    let buf: Buffer | null = null
+    let fileName = ''
+    for await (const raw of req.parts()) {
+      const part = raw as { type: string; file?: NodeJS.ReadableStream; filename?: string }
+      if (part.type === 'file' && buf === null && part.file) {
+        fileName = part.filename ?? ''
+        const chunks: Buffer[] = []
+        for await (const ch of part.file) chunks.push(Buffer.isBuffer(ch) ? ch : Buffer.from(ch as never))
+        buf = Buffer.concat(chunks)
+      }
+    }
+    if (!buf) return reply.code(400).send({ error: '请上传表格文件' })
+    const ext = (fileName ?? '').toLowerCase().split('.').pop() ?? ''
+    try {
+      // xlsx 优先 exceljs（富文本/样式更全）；xls/csv 或 exceljs 读不了时用 SheetJS 兜底
+      const model = ext === 'xlsx' ? await xlsxToModelAsync(buf) : sheetjsToModel(buf)
+      return { model }
+    } catch {
+      try {
+        const model = sheetjsToModel(buf)
+        return { model }
+      } catch (err) {
+        return reply.code(400).send({ error: '表格解析失败：' + (err instanceof Error ? err.message : '未知错误') })
+      }
+    }
+  })
+
+  // 绑定/解绑供应商默认模板（生成该供应商采购单时自动使用）
+  app.post('/api/po-templates/:id/bind', { preHandler: requireRole('purchase', 'boss') }, async (req, reply) => {
+    const id = parsePositiveInt((req.params as { id: string }).id)
+    if (id === null) return reply.code(400).send({ error: '模板 ID 必须为正整数' })
+    const body = (req.body ?? {}) as { supplierId?: unknown }
+    const supId = body.supplierId == null ? null : Number(body.supplierId)
+    if (supId != null && (!Number.isInteger(supId) || supId <= 0)) return reply.code(400).send({ error: '供应商不合法' })
+    const tpl = await prisma.poTemplate.findUnique({ where: { id } })
+    if (!tpl) return reply.code(404).send({ error: '模板不存在' })
+    if (supId != null) {
+      const sup = await prisma.supplier.findUnique({ where: { id: supId } })
+      if (!sup) return reply.code(404).send({ error: '供应商不存在' })
+      await prisma.supplier.update({ where: { id: supId }, data: { poTemplateId: id } })
+    } else {
+      await prisma.supplier.updateMany({ where: { poTemplateId: id }, data: { poTemplateId: null } })
+    }
+    return reply.code(200).send({ ok: true })
+  })
+
   // 采购单：仅 purchase 可创建
   app.post('/api/purchase-orders', { preHandler: requireRole('purchase') }, async (req, reply) => {
     const data = parseBody(createPurchaseOrderSchema, req.body, reply)
     if (data === null) return
 
+    // 用量兜底（2026-09-08）：明细没带用量时按关联订单成品 BOM 自动补
+    const usageFallback = await bomUsageFallback(data.salesOrderIds ?? (data.salesOrderId != null ? [data.salesOrderId] : undefined), data.items)
     // 明细去重 + 零件必须属于所选供应商（与批量按供应商分组的口径一致，防发错供应商）
     const partIds = [...new Set(data.items.map((item) => item.partId))]
     if (partIds.length !== data.items.length) {
@@ -732,7 +1123,7 @@ export function purchasingRoutes(app: FastifyInstance) {
     if (missing.length > 0) {
       return reply.code(400).send({ error: '采购单包含不存在的零件' })
     }
-    if (data.poType !== 'spare') {
+    if (data.poType !== 'spare' && data.poType !== 'selfbuy') {
       const mismatched = data.items.filter((item) => partMap.get(item.partId)!.supplierId !== data.supplierId)
       if (mismatched.length > 0) {
         const names = mismatched.map((item) => partMap.get(item.partId)!.name || String(item.partId)).join('、')
@@ -760,7 +1151,7 @@ export function purchasingRoutes(app: FastifyInstance) {
         })
         for (const item of data.items) {
           await tx.purchaseOrderItem.create({
-            data: { purchaseOrderId: created.id, ...itemData(item) },
+            data: { purchaseOrderId: created.id, ...itemData(item, usageFallback.get(item.partId)) },
           })
         }
         if (prepared.salesOrderIds) {
@@ -791,6 +1182,8 @@ export function purchasingRoutes(app: FastifyInstance) {
     const data = parseBody(batchPurchaseOrderSchema, req.body, reply)
     if (data === null) return
 
+    // 用量兜底（2026-09-08）：明细没带用量时按关联订单成品 BOM 自动补
+    const usageFallback = await bomUsageFallback(data.salesOrderIds, data.items)
     const partIds = [...new Set(data.items.map((item) => item.partId))]
     const parts = await prisma.part.findMany({
       where: { id: { in: partIds } },
@@ -798,8 +1191,18 @@ export function purchasingRoutes(app: FastifyInstance) {
     })
     const partMap = new Map(parts.map((p) => [p.id, p]))
 
-    // 供应商来源：行级覆盖 > 零件资料；两者都没有才报错（备品单允许行级覆盖供应商）
+    // 自购件：不出给供应商，自动归「自购」供应商（shortName=自购，缺失时自动创建）
+    let selfBuySupplier = await prisma.supplier.findFirst({ where: { shortName: '自购' } })
+    if (!selfBuySupplier) {
+      selfBuySupplier = await prisma.supplier.create({
+        data: { name: '自购（老板自己买）', shortName: '自购', contact: '老板', defaultHeaderName: '东莞市智锐恒电子有限公司' },
+      })
+    }
+    const effSelfBuy = (item: (typeof data.items)[number]) => item.selfBuy === true
+
+    // 供应商来源：行级覆盖 > 零件资料；自购件缺省用「自购」供应商；两者都没有才报错
     const missingSupplier = data.items.filter((item) => {
+      if (effSelfBuy(item)) return false
       const part = partMap.get(item.partId)
       return !(item.supplierId ?? part?.supplierId)
     })
@@ -821,7 +1224,10 @@ export function purchasingRoutes(app: FastifyInstance) {
       // 分组键 = 供应商 + 拆单批次：同供应商同零件不同 splitNo 生成多张单（拆单，老板第 4 轮口径）
       const groups = new Map<string, typeof data.items>()
       for (const item of data.items) {
-        const supplierId = item.supplierId ?? partMap.get(item.partId)!.supplierId!
+        const isSb = effSelfBuy(item)
+        const supplierId = isSb
+          ? (item.supplierId ?? selfBuySupplier.id)
+          : (item.supplierId ?? partMap.get(item.partId)!.supplierId!)
         const key = supplierId + '|' + (item.splitNo ?? 0)
         const list = groups.get(key) ?? []
         list.push(item)
@@ -831,19 +1237,32 @@ export function purchasingRoutes(app: FastifyInstance) {
       const orders = await prisma.$transaction(async (tx) => {
         const createdOrders: any[] = []
         for (const items of groups.values()) {
-          const supplierId = items[0]!.supplierId ?? partMap.get(items[0]!.partId)!.supplierId!
-          const orderNo = await nextPurchaseOrderNo(prepared.salesOrderIds, tx, prepared.manualOrderNo, data.poType)
+          const first = items[0]!
+          const isSbGroup = items.every((it) => effSelfBuy(it))
+          const groupPoType = isSbGroup ? 'selfbuy' : (data.poType ?? 'normal')
+          const supplierId = isSbGroup
+            ? (first.supplierId ?? selfBuySupplier.id)
+            : (first.supplierId ?? partMap.get(first.partId)!.supplierId!)
+          const orderNo = await nextPurchaseOrderNo(prepared.salesOrderIds, tx, prepared.manualOrderNo, groupPoType)
+          // 该供应商绑定的默认模板（无则按抬头类型取全局默认，2026-09-07 老板要求）
+          const groupHeaderType = (data.headerName ?? '').includes('锦名诚') ? 'jmc' : 'zrh'
+          const supTpl = await tx.supplier.findUnique({ where: { id: supplierId }, select: { poTemplateId: true } })
+          let groupTplId = supTpl?.poTemplateId ?? null
+          if (groupTplId == null) {
+            const def = await tx.poTemplate.findFirst({ where: { headerType: groupHeaderType, isDefault: true }, select: { id: true } })
+            groupTplId = def?.id ?? null
+          }
           const created = await tx.purchaseOrder.create({
             data: {
               orderNo,
               supplierId,
               salesOrderId: prepared.salesOrderIds?.[0] ?? null,
-              ...poFields(data),
+              ...poFields({ ...data, poType: groupPoType, templateId: groupTplId ?? data.templateId ?? null }),
             },
           })
           for (const item of items) {
             await tx.purchaseOrderItem.create({
-              data: { purchaseOrderId: created.id, ...itemData(item) },
+              data: { purchaseOrderId: created.id, ...itemData(item, usageFallback.get(item.partId)) },
             })
           }
           if (prepared.salesOrderIds) {

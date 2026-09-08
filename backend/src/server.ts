@@ -26,6 +26,12 @@ import { UPLOAD_DIR } from './uploads-store'
 
 export function buildApp() {
   const app = Fastify({ logger: true })
+  // 浏览器端错误上报（免登录）：定位白屏/前端崩溃用，只写日志
+  app.post('/api/client-error', async (req, reply) => {
+    const body = (req.body ?? {}) as { message?: unknown; stack?: unknown; source?: unknown; file?: unknown; line?: unknown; col?: unknown }
+    app.log.error({ clientError: true, message: String(body.message ?? '').slice(0, 1000), stack: String(body.stack ?? '').slice(0, 3000), source: String(body.source ?? ''), file: String(body.file ?? ''), line: body.line, col: body.col }, 'client-side error')
+    return reply.code(200).send({ ok: true })
+  })
   app.setErrorHandler((error, request, reply) => {
     const info = prismaErrorInfo(error)
     if (info) {

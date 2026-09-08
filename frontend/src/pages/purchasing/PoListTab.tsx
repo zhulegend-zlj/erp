@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import {
-  Alert,
   Button,
   Form,
   Input,
@@ -46,7 +45,7 @@ export default function PoListTab(props: Props) {
   const [rows, setRows] = useState<PurchaseOrder[]>([])
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(50)
   const [total, setTotal] = useState(0)
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
   const [salesOrderFilter, setSalesOrderFilter] = useState<number | undefined>(undefined)
@@ -71,7 +70,11 @@ export default function PoListTab(props: Props) {
 
   const [previewPo, setPreviewPo] = useState<PurchaseOrder | null>(null)
   const [previewData, setPreviewData] = useState<PoPreview | null>(null)
+  const [previewHtml, setPreviewHtml] = useState('')
+  const [previewTemplateName, setPreviewTemplateName] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewRender, setPreviewRender] = useState<'xlsx' | 'model' | null>(null)
+  const [previewRenderV, setPreviewRenderV] = useState('')
 
   async function loadPos(targetPage: number, size: number) {
     setLoading(true)
@@ -131,7 +134,6 @@ export default function PoListTab(props: Props) {
       paymentTerms: po.paymentTerms ?? undefined,
       termsNote: po.termsNote ?? undefined,
       headerName: po.headerName ?? undefined,
-      taxPoint: po.taxPoint ?? undefined,
       items: (po.items ?? []).map((it) => ({
         partId: it.partId,
         qty: it.qty,
@@ -154,11 +156,10 @@ export default function PoListTab(props: Props) {
         paymentTerms: values.paymentTerms || undefined,
         termsNote: values.termsNote || undefined,
         headerName: values.headerName || undefined,
-        taxPoint: values.taxPoint ?? undefined,
         items: (values.items ?? []).map((it) => ({
           partId: Number(it.partId ?? 0),
           qty: Number(it.qty ?? 0),
-          unitPrice: Number(it.unitPrice ?? 0),
+          unitPrice: it.unitPrice != null ? Number(it.unitPrice) : it.unitPriceInclTax != null ? Number(it.unitPriceInclTax) : 0,
           unitPriceInclTax: it.unitPriceInclTax != null ? Number(it.unitPriceInclTax) : undefined,
           note: it.note || undefined,
           supplierReplyDate: it.supplierReplyDate || undefined,
@@ -226,9 +227,21 @@ export default function PoListTab(props: Props) {
     setPreviewPo(po)
     setPreviewData(null)
     setPreviewLoading(true)
+    setPreviewRender(null)
+    setPreviewRenderV('')
     try {
-      const { data } = await api.get<PoPreview>('/purchase-orders/' + po.id + '/preview')
-      setPreviewData(data)
+      const { data } = await api.get<{
+        data: PoPreview
+        html: string
+        templateName: string | null
+        render?: 'xlsx' | 'model'
+        renderV?: string
+      }>('/purchase-orders/' + po.id + '/preview')
+      setPreviewData(data.data)
+      setPreviewHtml(data.html)
+      setPreviewTemplateName(data.templateName)
+      setPreviewRender(data.render ?? null)
+      setPreviewRenderV(data.renderV ?? '')
     } catch (err) {
       notifyError(err)
       setPreviewPo(null)
@@ -299,7 +312,7 @@ export default function PoListTab(props: Props) {
         />
       </Space>
 
-      <Table<PurchaseOrder>
+      <Table<PurchaseOrder> sticky={{ offsetHeader: 8 }}
         rowKey="id"
         loading={loading}
         dataSource={rows}
@@ -450,9 +463,6 @@ export default function PoListTab(props: Props) {
             <Form.Item name="headerName" label="抬头" style={{ marginBottom: 8 }}>
               <Select style={{ width: 240 }} options={headerOptions} />
             </Form.Item>
-            <Form.Item name="taxPoint" label="加税点数(%)" style={{ marginBottom: 8 }}>
-              <InputNumber min={0} max={100} precision={2} style={{ width: 120 }} />
-            </Form.Item>
           </Space>
           <Form.Item name="termsNote" label="备注条款" style={{ marginBottom: 12 }}>
             <Input.TextArea rows={2} />
@@ -475,7 +485,7 @@ export default function PoListTab(props: Props) {
                         <Form.Item name={[field.name, 'qty']} rules={[{ required: true, message: '数量' }]} style={{ marginBottom: 0 }}>
                           <InputNumber min={1} precision={0} placeholder="数量" />
                         </Form.Item>
-                        <Form.Item name={[field.name, 'unitPrice']} rules={[{ required: true, message: '不含税单价' }]} style={{ marginBottom: 0 }}>
+                        <Form.Item name={[field.name, 'unitPrice']} style={{ marginBottom: 0 }}>
                           <InputNumber min={0} precision={4} placeholder="不含税单价" style={{ width: 130 }} />
                         </Form.Item>
                         <Form.Item name={[field.name, 'unitPriceInclTax']} style={{ marginBottom: 0 }}>
@@ -537,8 +547,22 @@ export default function PoListTab(props: Props) {
         title={previewPo ? '采购单预览：' + previewPo.orderNo : '采购单预览'}
         open={previewPo !== null}
         onCancel={() => setPreviewPo(null)}
-        footer={null}
-        width={900}
+        width={1180}
+        footer={
+          previewPo ? (
+            <Space>
+              <Button
+                type="primary"
+                onClick={() => {
+                  window.open('/api/purchase-orders/' + previewPo.id + '/print', '_blank')
+                }}
+              >
+                打印 / 导出PDF
+              </Button>
+              <Button onClick={() => setPreviewPo(null)}>关闭</Button>
+            </Space>
+          ) : null
+        }
       >
         {previewLoading ? (
           <div>加载中…</div>
@@ -547,64 +571,22 @@ export default function PoListTab(props: Props) {
             <div style={{ marginBottom: 8 }}>
               <b>抬头：</b>
               {previewData.headerName || '-'}　<b>编号：</b>
-              {previewData.orderNo}　<b>下单日期：</b>
-              {dateStr(previewData.orderDate)}　<b>机型：</b>
-              {previewData.model || '-'}
-            </div>
-            <div style={{ marginBottom: 8 }}>
-              <b>供应商：</b>
-              {previewData.supplier?.name || '-'}
-              {previewData.supplier?.contactPerson ? '　<b>联系人：</b>' + previewData.supplier.contactPerson : ''}
-              {previewData.supplier?.phone ? '　<b>电话：</b>' + previewData.supplier.phone : ''}
-              {previewData.supplier?.fax ? '　<b>传真：</b>' + previewData.supplier.fax : ''}
-              {previewData.supplier?.email ? '　<b>邮箱：</b>' + previewData.supplier.email : ''}
+              {previewData.orderNo}　<b>供应商：</b>
+              {previewData.supplier?.name || '-'}　<b>模板：</b>
+              {previewTemplateName ?? '默认模板'}
             </div>
             <div style={{ marginBottom: 8 }}>
               <b>付款方式：</b>
               {previewData.paymentTerms || '-'}　<b>预计交货：</b>
-              {dateStr(previewData.expectedDeliveryDate)}　<b>加税点数：</b>
-              {previewData.taxPoint ?? 0}%
+              {dateStr(previewData.expectedDeliveryDate)}
             </div>
-            {(previewData.lines ?? []).some((l) => l.sourcing === 'selfbuy') ? (
-              <Alert
-                type="warning"
-                showIcon
-                style={{ marginBottom: 8 }}
-                message="本单包含自购件（橙色标记）：库存不足本次生产才带入，平时由老板自己购买，请留意。"
-              />
-            ) : null}
-            <Table
-              size="small"
-              rowKey={(_, i) => String(i ?? 0)}
-              dataSource={previewData.lines ?? []}
-              pagination={false}
-              columns={[
-                {
-                  title: '采购方式',
-                  dataIndex: 'sourcing',
-                  render: (v: string | null | undefined) =>
-                    v === 'selfbuy' ? <Tag color="orange">自购</Tag> : v === 'selfmade' ? <Tag>自制</Tag> : null,
-                },
-                { title: 'SKU', dataIndex: 'sku' },
-                { title: '名称', dataIndex: 'name' },
-                { title: '规格', dataIndex: 'spec', render: (v: string | null) => v || '-' },
-                { title: '材质', dataIndex: 'material', render: (v: string | null) => v || '-' },
-                { title: '表面处理', dataIndex: 'finish', render: (v: string | null) => v || '-' },
-                { title: '单位', dataIndex: 'unit', render: (v: string | null) => v || '-' },
-                { title: '用量', dataIndex: 'usage', render: (v: number | string | null) => v ?? '-' },
-                { title: '数量', dataIndex: 'qty' },
-                {
-                  title: '不含税单价',
-                  dataIndex: 'unitPrice',
-                  render: (v: number | string) => '¥' + money(v),
-                },
-                {
-                  title: '含税单价',
-                  dataIndex: 'unitPriceInclTax',
-                  render: (v: number | string | null) => (v != null ? '¥' + money(v) : '-'),
-                },
-                { title: '备注', dataIndex: 'note', render: (v: string | null) => v || '-' },
-              ]}
+            <div style={{ color: '#8c8c8c', fontSize: 12, marginBottom: 8 }}>
+              以下为仿照采购单表格的预览（与打印一致，打印/存 PDF 走浏览器打印）
+            </div>
+            <iframe
+              title="采购单预览"
+              srcDoc={previewHtml}
+              style={{ width: '100%', height: 620, border: '1px solid #d9d9d9', background: '#525659' }}
             />
           </div>
         ) : (

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Component, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
   Alert,
@@ -48,6 +48,39 @@ import FeedbackWidget from './components/FeedbackWidget'
 import { notifyError } from './pages/common'
 
 const { Header, Sider, Content } = Layout
+
+// 全局错误边界：页面崩溃不再白屏，显示错误信息便于反馈修复
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <Alert
+          type="error"
+          showIcon
+          message="页面出错了"
+          description={
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>{String(this.state.error.message ?? this.state.error)}</div>
+              <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, maxHeight: 300, overflow: 'auto' }}>
+                {this.state.error.stack ?? ''}
+              </pre>
+              <Button type="primary" style={{ marginTop: 12 }} onClick={() => this.setState({ error: null })}>
+                重试
+              </Button>
+            </div>
+          }
+        />
+      )
+    }
+    return this.props.children
+  }
+}
 
 export const ALL_ROLES: Role[] = ['boss', 'purchase', 'warehouse', 'sales', 'finance', 'engineer']
 
@@ -451,7 +484,7 @@ function AppShell() {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider breakpoint="lg" collapsedWidth="0">
+      <Sider breakpoint="lg" collapsedWidth="0" collapsible>
         <div
           style={{
             height: 32,
@@ -499,7 +532,9 @@ function AppShell() {
           </Button>
         </Header>
         <Content style={{ margin: 16 }}>
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </Content>
         <FeedbackWidget />
       </Layout>

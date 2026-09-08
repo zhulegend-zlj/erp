@@ -23,9 +23,13 @@ ws.eachRow((row, i) => {
   const sku = clean(row.getCell(4).value)
   const amount = Number(row.getCell(15).value ?? 0)
   if (!sku) return
+  const en = clean(row.getCell(8).value)
+  const cn = clean(row.getCell(7).value)
+  // 报价成本占位行不是零件
+  if (/^(Materials Cost|Material Loss|Assembling|Overhead|Shipment\/Logistics|Profit)/i.test(en)) return
   rows.push({
     seq: clean(row.getCell(1).value), sku,
-    cn: clean(row.getCell(7).value), en: clean(row.getCell(8).value),
+    cn, en,
     weight: clean(row.getCell(9).value), rev: clean(row.getCell(10).value),
     material: clean(row.getCell(11).value), dims: clean(row.getCell(12).value),
     finish: clean(row.getCell(13).value), amount: Number.isFinite(amount) ? amount : 0,

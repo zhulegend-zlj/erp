@@ -60,6 +60,12 @@ describe('computePurchasePlan（安全库存补货，老板拍板口径）', () 
     const plan = computePurchasePlan(req, new Map(), new Map([[13, 300]]))
     expect(plan).toEqual([{ partId: 13, gapQty: 100, suggestedQty: 400 }])
   })
+
+  it('小数需求向上取整（BOM 用量小数化后，PO 数量保持整数）', () => {
+    const req = [{ partId: 14, requiredQty: 33.3 }]
+    const plan = computePurchasePlan(req, new Map(), new Map([[14, 5]]))
+    expect(plan).toEqual([{ partId: 14, gapQty: 34, suggestedQty: 39 }])
+  })
 })
 
 describe('finance', () => {

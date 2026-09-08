@@ -260,7 +260,7 @@ function SplitOrderModal(props: {
         拆出合计 <b>{sum}</b> 套｜留在原单 <b style={{ color: remain < 0 ? 'red' : undefined }}>{remain}</b> 套
         {remain === 0 ? '（原单将变为「已拆分」）' : ''}
       </div>
-      <Table<{ line: OrderItem; qs: number[]; remainLine: number }>
+      <Table<{ line: OrderItem; qs: number[]; remainLine: number }> sticky={{ offsetHeader: 8 }}
         rowKey={(r) => String(r.line.productId)}
         size="small"
         pagination={false}
@@ -294,7 +294,7 @@ export default function Orders() {
   const [total, setTotal] = useState(0)
   const [form] = Form.useForm<OrderFormValues>()
   const [editForm] = Form.useForm<OrderFormValues>()
-  const [pageSize, setPageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(50)
   const [deleteTarget, setDeleteTarget] = useState<SalesOrder | null>(null)
   const [deleteText, setDeleteText] = useState('')
   const [deletingId, setDeletingId] = useState<number | null>(null)
@@ -482,8 +482,16 @@ export default function Orders() {
     if (!deleteTarget || deleteText !== deleteTarget.orderNo) return
     setDeletingId(deleteTarget.id)
     try {
-      await api.delete('/orders/' + deleteTarget.id)
-      message.success('订单已删除')
+      const { data } = await api.delete<{ ok: boolean; merged?: { parentOrderNo: string; qty: number; restoredStatus?: string } | null }>(
+        '/orders/' + deleteTarget.id,
+      )
+      const m = data.merged
+      message.success(
+        m && m.parentOrderNo
+          ? '订单已删除：' + m.qty + ' 套数量已并回原单 ' + m.parentOrderNo +
+              (m.restoredStatus ? '（原单已恢复为「' + statusLabel(m.restoredStatus) + '」）' : '')
+          : '订单已删除',
+      )
       setDeleteTarget(null)
       setDeleteText('')
       if (orders.length === 1 && page > 1) {
@@ -499,11 +507,12 @@ export default function Orders() {
   }
 
   const columns = [
-    { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
+    { title: 'ID', dataIndex: 'id', key: 'id', width: 48 },
     {
       title: '订单号',
       dataIndex: 'orderNo',
       key: 'orderNo',
+      width: 140,
       render: (_: unknown, r: SalesOrder) => (
         <Space size={4}>
           <span>{r.orderNo}</span>
@@ -512,16 +521,18 @@ export default function Orders() {
         </Space>
       ),
     },
-    { title: '客户PO', dataIndex: 'customerPoNo', key: 'customerPoNo', render: (v: string | null) => v || '-' },
+
     {
       title: '客户',
       key: 'customer',
+      width: 120,
       render: (_: unknown, r: SalesOrder) => r.customer?.name ?? '-',
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
+      width: 118,
       render: (_: unknown, r: SalesOrder) => (
         <span>
           <Tag color={phaseTagColor(r)}>{orderPhaseLabel(r)}</Tag>
@@ -536,7 +547,7 @@ export default function Orders() {
     {
       title: '已出',
       key: 'shipped',
-      width: 90,
+      width: 72,
       render: (_: unknown, r: SalesOrder) => {
         const shipped = r.shippedQty ?? 0
         const totalQty = r.totalQty ?? 0
@@ -546,11 +557,11 @@ export default function Orders() {
         return shipped > 0 && shipped >= totalQty ? <Tag color="green">出满</Tag> : '-'
       },
     },
-    { title: 'ZRH交期（最早）', dataIndex: 'earliestZrhDate', key: 'earliestZrhDate', render: dateStr },
+    { title: 'ZRH交期', dataIndex: 'earliestZrhDate', key: 'earliestZrhDate', width: 92, render: dateStr },
     {
       title: '明细',
       key: 'items',
-      width: 260,
+      width: 220,
       render: (_: unknown, r: SalesOrder) => {
         const names = r.items.map((it) => it.product.name + ' × ' + it.qty)
         const overflow = names.length > 2
@@ -569,6 +580,8 @@ export default function Orders() {
     {
       title: '操作',
       key: 'action',
+      fixed: 'right' as const,
+      width: 232,
       render: (_: unknown, r: SalesOrder) => {
         if (!canAdvance && !canSplit) return null
         const nextMap: Record<string, string> = { draft: 'confirmed', shipped: 'completed' }
@@ -588,7 +601,7 @@ export default function Orders() {
                 onConfirm={() => void handleStatusChange(r.id, next, 'advance')}
               >
                 <Button size="small" type="primary" ghost loading={advancingId === r.id}>
-                  推进至「{statusLabel(next)}」
+                  推进
                 </Button>
               </Popconfirm>
             ) : null}
@@ -604,7 +617,7 @@ export default function Orders() {
                 onConfirm={() => void handleStatusChange(r.id, prev, 'rollback')}
               >
                 <Button size="small" loading={advancingId === r.id}>
-                  {isBoss && r.status !== 'confirmed' ? '强制回退至已确认' : '回退至「' + statusLabel(prev) + '」'}
+                  {isBoss && r.status !== 'confirmed' ? '强制回退' : '回退'}
                 </Button>
               </Popconfirm>
             ) : null}
@@ -671,11 +684,15 @@ export default function Orders() {
         ) : null
       }
     >
-      <Table<SalesOrder>
+      <style>{'.orders-compact .ant-table-thead > tr > th { padding: 8px 4px !important; font-size: 13px !important; }' + '.orders-compact .ant-table-tbody > tr > td { padding: 6px 4px !important; font-size: 13px !important; }'}</style>
+      <Table<SalesOrder> sticky={{ offsetHeader: 8 }}
         rowKey="id"
         columns={columns}
         dataSource={orders}
         loading={loading}
+        size="small"
+        className="orders-compact"
+        scroll={{ x: 'max-content' }}
         pagination={{
           current: page,
           pageSize,
@@ -784,7 +801,7 @@ export default function Orders() {
         footer={null}
         width={860}
       >
-        <Table<OrderItem>
+        <Table<OrderItem> sticky={{ offsetHeader: 8 }}
           rowKey="productId"
           size="small"
           pagination={false}
@@ -855,6 +872,18 @@ export default function Orders() {
           即将删除订单 <b>{deleteTarget?.orderNo}</b>（客户：{deleteTarget?.customer?.name ?? '-'}）。
           删除后不可恢复；已有采购/仓库/出货/财务记录的单据将被系统拒绝删除。
         </p>
+        {deleteTarget?.parentOrder ? (
+          <p style={{ color: '#d46b08' }}>
+            这是拆分的子订单：删除后{' '}
+            {Math.max(0, ...(deleteTarget.items ?? []).map((it) => it.qty))} 套数量将自动并回原单{' '}
+            {deleteTarget.parentOrder.orderNo}。
+          </p>
+        ) : null}
+        {deleteTarget && (deleteTarget.childOrders?.length ?? 0) > 0 ? (
+          <p style={{ color: '#cf1322' }}>
+            原单还有 {deleteTarget.childOrders!.length} 个拆分出去的订单，系统将拒绝删除；请先删除子订单。
+          </p>
+        ) : null}
         <p>请输入完整订单号以确认：</p>
         <Input
           value={deleteText}

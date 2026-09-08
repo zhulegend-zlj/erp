@@ -489,7 +489,7 @@ export default function Schedules() {
         />
       ) : null}
       {orderDetail ? (
-        <Table
+        <Table sticky={{ offsetHeader: 8 }}
           size="small"
           rowKey="key"
           pagination={false}
@@ -499,7 +499,7 @@ export default function Schedules() {
           columns={detailColumns}
         />
       ) : null}
-      <Table<ScheduleRow>
+      <Table<ScheduleRow> sticky={{ offsetHeader: 8 }}
         rowKey="id"
         columns={columns}
         dataSource={rows}
@@ -564,7 +564,7 @@ export default function Schedules() {
           </span>
           <span style={{ color: '#888', fontSize: 12 }}>同一目的地的排程会排在一起并合计（同一台车）；已出货/已取消不参与打印</span>
         </div>
-        <Table<ScheduleRow>
+        <Table<ScheduleRow> sticky={{ offsetHeader: 8 }}
           rowKey="id"
           size="small"
           pagination={false}

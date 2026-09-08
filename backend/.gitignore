@@ -4,3 +4,13 @@ coverage/
 .env
 *.log
 uploads/
+
+# 一次性脚本与临时产物
+_*.ts
+backups/
+tmp-ck27/
+prisma/*.cjs
+prisma/*.mts
+prisma/*.ts
+prisma/*.sql
+prisma/*.json

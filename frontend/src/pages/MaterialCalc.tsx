@@ -90,7 +90,7 @@ export default function MaterialCalc() {
           message={'订单 ' + result.orderNo + '，订单数：' + result.orderQty}
         />
       ) : null}
-      <Table<OrderMaterialRow>
+      <Table<OrderMaterialRow> sticky={{ offsetHeader: 8 }}
         rowKey="partId"
         loading={loading}
         dataSource={result?.items ?? []}

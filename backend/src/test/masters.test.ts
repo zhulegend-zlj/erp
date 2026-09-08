@@ -331,7 +331,7 @@ describe('masters 权限（工程/采购分工）', () => {
     const cookie = await loginCookie(app, 'engineer')
     const prod = await prisma.product.create({ data: { sku: 'F-EXP', name: '成品EXP' } })
     const part = await prisma.part.create({
-      data: { sku: 'P-EXP', name: '零件EXP', nameEn: 'part EXP', weight: '12g', revision: '1', material: 'AL', dimensions: '10x10', finish: '黑色阳极', price: 3.25 },
+      data: { sku: 'P-EXP', name: '零件EXP', nameEn: 'part EXP', weight: '12g', revision: '1', material: 'AL', dimensions: '10x10', finish: '黑色阳极', price: 3.25, priceInclTax: 3.5 },
     })
     // 给零件一个真实图片（测试环境 UPLOAD_DIR 为临时目录）
     const partDir = partDirName(part.sku, part.name)
@@ -363,16 +363,18 @@ describe('masters 权限（工程/采购分工）', () => {
     expect(ws!.getImages().length).toBe(1)
     expect(String(ws!.getRow(1).getCell(13).value ?? '')).not.toContain('价格')
 
-    // 采购导出：14 列，含价格列且值为 3.25
+    // 采购导出：15 列，含价格列（3.25）+ 含税价列（3.5）
     const purchaseCookie = await loginCookie(app, 'purchase')
     const resP = await app.inject({ method: 'GET', url: '/api/products/' + prod.id + '/bom/export', headers: { cookie: purchaseCookie } })
     expect(resP.statusCode).toBe(200)
     const wbP = new ExcelJS.Workbook()
     await wbP.xlsx.load(resP.rawPayload as never)
     const wsP = wbP.worksheets[0]
-    expect(wsP!.columnCount).toBe(14)
+    expect(wsP!.columnCount).toBe(15)
     expect(String(wsP!.getRow(1).getCell(13).value ?? '')).toContain('价格')
+    expect(String(wsP!.getRow(1).getCell(14).value ?? '')).toContain('含税')
     expect(Number(wsP!.getRow(2).getCell(13).value)).toBe(3.25)
+    expect(Number(wsP!.getRow(2).getCell(14).value)).toBe(3.5)
 
     // 不存在的成品 → 404
     expect((await app.inject({ method: 'GET', url: '/api/products/999999/bom/export', headers: { cookie } })).statusCode).toBe(404)

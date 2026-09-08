@@ -11,12 +11,34 @@ export interface Paged<T> {
 
 // 后端错误统一返回 { error: string }，这里提取给 message.error 展示
 export function errMsg(err: unknown): string {
-  const e = err as { response?: { data?: { error?: string } } }
-  return e?.response?.data?.error ?? '操作失败，请稍后重试'
+  const e = err as { response?: { data?: { error?: string } }; message?: unknown }
+  // 后端错误
+  if (e?.response?.data?.error) return e.response.data.error
+  // 前端抛出的真实错误（不能吞成「操作失败」，否则没法排查）
+  if (typeof e?.message === 'string' && e.message) return e.message
+  if (err instanceof Error) return err.message
+  return '操作失败，请稍后重试'
 }
 
 export function notifyError(err: unknown): void {
   message.error(errMsg(err))
+  // 非后端业务错误也上报日志，便于定位（白屏/组件初始化类问题）
+  const e = err as { response?: { data?: { error?: string } }; message?: unknown; stack?: unknown }
+  if (!e?.response?.data?.error) {
+    try {
+      void fetch('/api/client-error', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: typeof e?.message === 'string' ? e.message : String(err),
+          stack: typeof e?.stack === 'string' ? e.stack : '',
+          source: location.href,
+        }),
+      })
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 // 金额展示：后端 Decimal 字段以字符串序列化，兼容 number/string

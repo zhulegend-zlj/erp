@@ -1,0 +1,1 @@
+ALTER TABLE "PurchaseOrderItem" ALTER COLUMN "usage" TYPE DECIMAL(12,4);

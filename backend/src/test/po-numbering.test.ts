@@ -36,6 +36,15 @@ describe('采购单编号引擎（字母口径，老板拍板）', () => {
     expect(nextLetterForBase(['259278A'], '259203')).toBe('A')
   })
 
+  it('nextLetterForBase：单字母用尽后两位字母顺延（供应商分组 > 24 个，2026-09-07）', () => {
+    const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+    const all = letters.split('').map((c) => '259203' + c)
+    expect(nextLetterForBase(all, '259203')).toBe('AA')
+    expect(nextLetterForBase([...all, '259203AA'], '259203')).toBe('AB')
+    // 两位字母后缀不影响单字母阶段：未用尽时仍取下一单字母
+    expect(nextLetterForBase(['259203A', '259203ZZ'], '259203')).toBe('B')
+  })
+
   it('合并单前缀：首PO-末PO 去掉共同前缀（259283/259288 → 259283-288）', () => {
     expect(mergeBase(['259283', '259288'])).toBe('259283-288')
     expect(mergeBase(['262195', '262196'])).toBe('262195-196')

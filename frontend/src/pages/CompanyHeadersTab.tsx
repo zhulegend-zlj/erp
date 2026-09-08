@@ -135,7 +135,7 @@ export function CompanyHeadersTab({ canWrite }: { canWrite: boolean }) {
       ) : (
         <p>公司抬头由老板/采购维护，其他角色仅可查看。</p>
       )}
-      <Table<CompanyHeaderRow>
+      <Table<CompanyHeaderRow> sticky={{ offsetHeader: 8 }}
         rowKey="id"
         columns={columns}
         dataSource={rows}

@@ -619,6 +619,82 @@ describe('orders', () => {
     expect(await prisma.salesOrderItem.findMany({ where: { orderId } })).toHaveLength(0)
   })
 
+  it('删子单：数量并回原单，原单「已拆分」按拆分前状态复活（2026-09-07 老板拍板）', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const created = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: {
+        customerId: customer.id, customerPoNo: 'SB-1',
+        items: [{ productId: product.id, customerDeliveryDate: '2026-10-01', zrhDeliveryDate: '2026-10-01', qty: 100, unitPrice: 10 }],
+      }
+    })
+    const orderId = created.json().id as number
+    // 先把原单推进到已确认（拆分前状态=confirmed）
+    await app.inject({ method: 'PATCH', url: '/api/orders/' + orderId + '/status', headers: { cookie }, payload: { status: 'confirmed' } })
+    // 拆光 → 原单已拆分
+    const split = await app.inject({
+      method: 'POST', url: '/api/orders/' + orderId + '/split', headers: { cookie },
+      payload: { splits: [100] },
+    })
+    expect(split.statusCode).toBe(200)
+    const childId = (split.json().children as Array<{ id: number }>)[0]!.id
+    expect((await prisma.salesOrder.findUniqueOrThrow({ where: { id: orderId } })).status).toBe('split')
+    // 删子单 → 数量并回原单 + 状态恢复 confirmed
+    const del = await app.inject({ method: 'DELETE', url: '/api/orders/' + childId, headers: { cookie } })
+    expect(del.statusCode).toBe(200)
+    expect(del.json().merged).toMatchObject({ parentOrderNo: 'SB-1', qty: 100, restoredStatus: 'confirmed' })
+    const parent = await prisma.salesOrder.findUniqueOrThrow({ where: { id: orderId }, include: { items: true } })
+    expect(parent.status).toBe('confirmed')
+    expect(parent.items[0]!.qty).toBe(100)
+    expect(await prisma.salesOrder.findUnique({ where: { id: childId } })).toBeNull()
+  })
+
+  it('部分拆分删子单：数量并回原单，原单状态不变', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const created = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: {
+        customerId: customer.id, customerPoNo: 'SB-2',
+        items: [{ productId: product.id, customerDeliveryDate: '2026-10-01', zrhDeliveryDate: '2026-10-01', qty: 100, unitPrice: 10 }],
+      }
+    })
+    const orderId = created.json().id as number
+    const split = await app.inject({
+      method: 'POST', url: '/api/orders/' + orderId + '/split', headers: { cookie },
+      payload: { splits: [30] },
+    })
+    const childId = (split.json().children as Array<{ id: number }>)[0]!.id
+    const del = await app.inject({ method: 'DELETE', url: '/api/orders/' + childId, headers: { cookie } })
+    expect(del.statusCode).toBe(200)
+    expect(del.json().merged).toMatchObject({ parentOrderNo: 'SB-2', qty: 30 })
+    expect(del.json().merged.restoredStatus).toBeUndefined()
+    const parent = await prisma.salesOrder.findUniqueOrThrow({ where: { id: orderId }, include: { items: true } })
+    expect(parent.status).toBe('draft')
+    expect(parent.items[0]!.qty).toBe(100)
+  })
+
+  it('原单还有子单时禁止删除', async () => {
+    const app = buildApp()
+    const { customer, product, cookie } = await seedOrder(app)
+    const created = await app.inject({
+      method: 'POST', url: '/api/orders', headers: { cookie },
+      payload: {
+        customerId: customer.id, customerPoNo: 'SB-3',
+        items: [{ productId: product.id, customerDeliveryDate: '2026-10-01', zrhDeliveryDate: '2026-10-01', qty: 100, unitPrice: 10 }],
+      }
+    })
+    const orderId = created.json().id as number
+    await app.inject({
+      method: 'POST', url: '/api/orders/' + orderId + '/split', headers: { cookie },
+      payload: { splits: [30] },
+    })
+    const del = await app.inject({ method: 'DELETE', url: '/api/orders/' + orderId, headers: { cookie } })
+    expect(del.statusCode).toBe(400)
+    expect(del.json().error).toContain('请先删除子订单')
+  })
+
   it('拆单：部分拆分剩余留在原单，数量比例分摊余数归最后一份', async () => {
     const app = buildApp()
     const { customer, product, cookie } = await seedOrder(app)

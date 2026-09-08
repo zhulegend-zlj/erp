@@ -1,15 +1,3 @@
-// 双价自动算：含税价 = 不含税价 × (1 + 加税点数/100)
-// 精度跟随输入的不含税价小数位（最少 2 位、最多 4 位，老板 2026-09-02：手输 4 位就按 4 位）
-export function calcInclTax(price: number | null | undefined, taxPoint: number | null | undefined): number | null {
-  if (price === null || price === undefined) return null
-  const tp = Number(taxPoint ?? 0)
-  const v = Number(price) * (1 + (Number.isNaN(tp) ? 0 : tp) / 100)
-  const decStr = (Number(price).toString().split('.')[1] ?? '').length
-  const prec = Math.min(4, Math.max(2, decStr))
-  const m = Math.pow(10, prec)
-  return Math.round(v * m) / m
-}
-
 // 字母编号：A→Z，跳过 I/O（两字母时前缀也跳过 I/O）
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
 export function poLetter(index: number): string {
@@ -50,9 +38,9 @@ export const RECEIPT_STATUS_META: Record<string, { label: string; color: string 
 }
 
 export function poTypeLabel(poType: string): string {
-  return poType === 'spare' ? '备品' : '正常'
+  return poType === 'spare' ? '备品' : poType === 'selfbuy' ? '自购' : '正常'
 }
 
 export function poTypeColor(poType: string): string {
-  return poType === 'spare' ? 'orange' : 'processing'
+  return poType === 'spare' ? 'orange' : poType === 'selfbuy' ? 'gold' : 'processing'
 }

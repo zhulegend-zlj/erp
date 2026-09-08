@@ -97,7 +97,7 @@ const partSchema = z.object({
     .nullable()
     .optional(),
   supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
-  // 重构新增（2026-08-29）：含税参考价归采购维护；交货周期/安全库存归工程维护
+  // 重构新增（2026-08-29）：含税价归采购维护；交货周期/安全库存归工程维护
   priceInclTax: z.number({ error: '含税价必须为数字' }).nonnegative().max(9999999999.99).nullable().optional(),
   leadTime: z.string().nullable().optional(),
   safetyStock: z.number({ error: '安全库存必须为整数' }).int().nonnegative().max(2147483647).nullable().optional(),
@@ -105,7 +105,7 @@ const partSchema = z.object({
   sourcing: z.enum(['purchased', 'selfbuy', 'selfmade'], { error: '采购方式仅支持 purchased/selfbuy/selfmade' }).optional(),
 })
 
-// 采购在零件上的写权限：供应商（挂链接）、价格（含含税参考价）与采购方式；其余字段一律拒绝
+// 采购在零件上的写权限：供应商（挂链接）、价格（含含税价）与采购方式；其余字段一律拒绝
 const purchasePartUpdateSchema = z.object({
   supplierId: z.number({ error: '供应商必须为整数' }).int().positive().nullable().optional(),
   price: z.number({ error: '价格必须为数字' }).nonnegative({ error: '价格必须为非负数' }).nullable().optional(),
@@ -116,7 +116,7 @@ const purchasePartUpdateSchema = z.object({
 const bomSchema = z.array(
   z.object({
     partId: z.number({ error: '零件必填' }).int({ error: '零件必须为整数' }).positive({ error: '零件必须为正整数' }),
-    qty: z.number({ error: '数量必填' }).int({ error: '数量必须为整数' }).positive({ error: '数量必须为正整数' }),
+    qty: z.number({ error: '数量必填' }).positive({ error: '数量必须大于 0' }), // 支持小数（0.0005 kg/套、1/30≈0.0333），最多 4 位小数
   }),
 )
 
@@ -348,6 +348,36 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
       return pagedResult(strip(rows as unknown[]), total, page)
     }
 
+    // 供应商：关键词搜索（名称/简称/联系人/电话/邮箱，不区分大小写，2026-09-04 老板要求）
+    if (spec.resource === 'supplier') {
+      const searchRaw = (req.query as Record<string, unknown>).search
+      let search = ''
+      if (searchRaw !== undefined && searchRaw !== null) {
+        if (typeof searchRaw !== 'string') return reply.code(400).send({ error: 'search 必须为字符串' })
+        search = searchRaw.trim().slice(0, 100)
+      }
+      const where = search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' as const } },
+              { shortName: { contains: search, mode: 'insensitive' as const } },
+              { contact: { contains: search, mode: 'insensitive' as const } },
+              { phone: { contains: search, mode: 'insensitive' as const } },
+              { email: { contains: search, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}
+      if (pagination.kind === 'none') {
+        const rows = await delegate.findMany({ where, orderBy: { id: 'asc' } })
+        return rows
+      }
+      const page = pagination.page
+      const [rows, total] = await Promise.all([
+        delegate.findMany({ where, orderBy: { id: 'asc' }, skip: (page.page - 1) * page.pageSize, take: page.pageSize }),
+        delegate.count({ where }),
+      ])
+      return pagedResult(rows as unknown[], total, page)
+    }
     // 成品列表附带 BOM 零件数（老板反馈 2026-08-31：BOM 维护要看每个成品有多少零件）
     async function withBomCount<T extends { id: number }>(rows: T[]): Promise<(T & { bomCount: number })[]> {
       if (rows.length === 0) return rows as (T & { bomCount: number })[]
@@ -586,7 +616,7 @@ export function mastersRoutes(app: FastifyInstance) {
       return {
         id: b.id,
         partId: b.partId,
-        qty: b.qty,
+        qty: Number(b.qty),
         part: {
           id: p.id,
           sku: p.sku,
@@ -634,17 +664,17 @@ export function mastersRoutes(app: FastifyInstance) {
     }
     boms.sort((x, y) => cmp(x.part.sku, y.part.sku))
     // 导出列（权限口径）：基础 13 列（序号/料号/图片/Description-EN/英文品名/中文名称/重量/版本/材质/尺寸规格/表面处理/用量/供应商）；
-    // 采购/老板额外在「用量」后带「价格」列（与零件列表价格可见性口径一致），其余角色无价格列
+    // 采购/老板额外在「用量」后带「价格」+「含税价」列（与零件列表价格可见性口径一致），其余角色无价格列
     const role = (req as { user?: { role?: string } }).user?.role ?? ''
     const showPrice = role === 'purchase' || role === 'boss'
     const header = [
       'Item-No.\n序号', 'Part ID\n料号', 'photo\n图片', 'Description - EN', 'Part name (EN)\n（英文品名）',
       'Part Name （CN）\n中文名称', 'Weight（g)\n重量', 'Revision\n版本', 'Material \n材质', 'Dimensions\n尺寸规格 ',
       'Finish\n表面处理', 'Amout\n用量',
-      ...(showPrice ? ['price   价格'] : []),
+      ...(showPrice ? ['price   价格', 'price incl.tax\n含税价'] : []),
       'Vendorid\n供应商',
     ]
-    const widths = [8, 16, 12, 14, 26, 26, 10, 8, 24, 20, 22, 8, ...(showPrice ? [10] : []), 14]
+    const widths = [8, 16, 12, 14, 26, 26, 10, 8, 24, 20, 22, 8, ...(showPrice ? [10, 12] : []), 14]
     // exceljs 生成：嵌入图片缩略图 + 表头样式 + 冻结首行 + 每列筛选排序
     const wb = new ExcelJS.Workbook()
     wb.creator = 'erp'
@@ -674,8 +704,8 @@ export function mastersRoutes(app: FastifyInstance) {
         p.material ?? '', // 材质
         p.dimensions ?? '', // 尺寸规格
         p.finish ?? '', // 表面处理
-        b.qty, // 用量
-        ...(showPrice ? [p.price == null ? '' : Number(p.price.toString())] : []), // 价格（仅采购/老板）
+        Number(b.qty), // 用量
+        ...(showPrice ? [p.price == null ? '' : Number(p.price.toString()), p.priceInclTax == null ? '' : Number(p.priceInclTax.toString())] : []), // 价格/含税价（仅采购/老板）
         p.supplier?.name ?? '', // 供应商
       ])
       row.eachCell((cell) => {
@@ -702,7 +732,7 @@ export function mastersRoutes(app: FastifyInstance) {
       }
     }
     // 每列排序筛选：覆盖全部列（含价格列则为 A..N，否则 A..M）
-    ws.autoFilter = { from: 'A1', to: (showPrice ? 'N' : 'M') + (boms.length + 1) }
+    ws.autoFilter = { from: 'A1', to: (showPrice ? 'O' : 'M') + (boms.length + 1) }
     const buf = await wb.xlsx.writeBuffer()
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     // 文件名带导出身份（中文账号名，如 工程/采购），便于区分谁导出的版本

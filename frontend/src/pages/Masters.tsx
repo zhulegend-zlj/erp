@@ -8,6 +8,7 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Radio,
   Select,
   Space,
   Table,
@@ -16,7 +17,7 @@ import {
   Upload,
   message,
 } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, LinkOutlined, UploadOutlined, DownloadOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, DeleteOutlined, LinkOutlined, UploadOutlined, DownloadOutlined, CopyOutlined } from '@ant-design/icons'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { useKeepAliveState } from './keepAlive'
@@ -244,26 +245,26 @@ const RESOURCES: CrudResource[] = [
   {
     label: '零件',
     path: '/parts',
-    // 列布局按工程 CSP_V3 清单表格口径：去掉 Description-EN、用在何处、生产工艺、序号、用量、单位；
-    // 2026-09-01 老板要求：起订量/交货周期/安全库存不在列表展示（仅编辑表单），列宽一屏能容下
+    // 列布局：2026-09-03 老板定稿——所有电脑统一紧凑布局，一页展示、不出横向滚动条；
+    // 列表收起：图片/英文品名/重量/版本/图档（编辑弹窗里仍可看）；起订量/交货周期/安全库存仅编辑表单
     fields: [
-      { key: 'sku', label: '料号', width: 130, wrap: true },
+      { key: 'sku', label: '料号', width: 100, wrap: true },
       { key: 'imageUrl', label: '图片', type: 'image', width: 64 },
-      { key: 'nameEn', label: '英文品名', width: 130, wrap: true },
-      { key: 'name', label: '中文名称', width: 150, wrap: true },
-      { key: 'weight', label: '重量(g)', width: 56 },
-      { key: 'revision', label: '版本', width: 48 },
-      { key: 'material', label: '材质', width: 110, wrap: true },
-      { key: 'dimensions', label: '尺寸规格', width: 110, wrap: true },
-      { key: 'finish', label: '表面处理', width: 110, wrap: true },
-      { key: 'drawingsUrl', label: '图档', type: 'drawing', width: 60 },
+      { key: 'nameEn', label: '英文品名', width: 130, wrap: true, hideInList: true },
+      { key: 'name', label: '中文名称', width: 140, wrap: true },
+      { key: 'weight', label: '重量(g)', width: 56, hideInList: true },
+      { key: 'revision', label: '版本', width: 48, hideInList: true },
+      { key: 'material', label: '材质', width: 88, wrap: true },
+      { key: 'dimensions', label: '尺寸规格', width: 88, wrap: true },
+      { key: 'finish', label: '表面处理', width: 88, wrap: true },
+      { key: 'drawingsUrl', label: '图档', type: 'drawing', width: 60, hideInList: true },
       { key: 'moq', label: '起订量', type: 'number', hideInList: true },
       { key: 'leadTime', label: '交货周期', hideInList: true },
       { key: 'safetyStock', label: '安全库存', type: 'number', hideInList: true },
-      { key: 'price', label: '价格', type: 'number', width: 72 },
-      { key: 'priceInclTax', label: '含税参考价', type: 'number', width: 84 },
-      { key: 'sourcing', label: '采购方式', type: 'sourcing', width: 84 },
-      { key: 'supplierId', label: '供应商', type: 'supplier', width: 110, wrap: true },
+      { key: 'price', label: '价格', type: 'number', width: 64 },
+      { key: 'priceInclTax', label: '含税价', type: 'number', width: 64 },
+      { key: 'sourcing', label: '采购方式', type: 'sourcing', width: 76 },
+      { key: 'supplierId', label: '供应商', type: 'supplier', width: 96, wrap: true },
     ],
   },
 ]
@@ -306,8 +307,8 @@ function CrudTab({
   const [supplierFilter, setSupplierFilter] = useState<number | undefined>()
   const [bundles, setBundles] = useState<Array<{ id: number; name: string }>>([])
   const [form] = Form.useForm<Record<string, any>>()
-  // 零件页默认每页 100 条、成品页默认 50 条（按老板反馈），其他基础资料页默认 10 条
-  const [pageSize, setPageSize] = useState(resource.path === '/parts' ? 100 : resource.path === '/products' ? 50 : 10)
+  // 零件页默认每页 100 条、成品/供应商页默认 50 条（按老板反馈），其他基础资料页默认 10 条
+  const [pageSize, setPageSize] = useState(resource.path === '/parts' ? 100 : resource.path === '/products' || resource.path === '/suppliers' ? 50 : 10)
   const isPart = resource.path === '/parts'
   const isProduct = resource.path === '/products'
   const isSupplier = resource.path === '/suppliers'
@@ -533,7 +534,7 @@ function CrudTab({
           {
             title: '套餐价',
             key: 'priceBundleId',
-            width: 100,
+            width: 84,
             fixed: fixOps ? ('right' as const) : undefined,
             align: 'center' as const,
             ellipsis: true,
@@ -553,7 +554,7 @@ function CrudTab({
           {
             title: '操作',
             key: 'action',
-            width: fixOps ? 96 : undefined,
+            width: 96,
             fixed: fixOps ? ('right' as const) : undefined,
             align: 'center' as const,
             onHeaderCell: () => ({ className: 'pt-center' }),
@@ -595,7 +596,7 @@ function CrudTab({
   return (
     <>
       {isPart || isSupplier ? (
-        <style>{'.pt-center { text-align: center !important; vertical-align: middle !important; } .pt-wrap-cell { text-align: left !important; vertical-align: top !important; white-space: normal !important; word-break: break-word !important; line-height: 20px !important; }'}</style>
+        <style>{'.pt-center { text-align: center !important; vertical-align: middle !important; } .pt-wrap-cell { text-align: left !important; vertical-align: top !important; white-space: normal !important; word-break: break-word !important; line-height: 20px !important; } .pt-center, .pt-wrap-cell { padding: 6px 4px !important; font-size: 13px; } .ant-table-thead .pt-center { font-size: 13px; }'}</style>
       ) : null}
       {isPart ? (
         <Space style={{ marginBottom: 16 }} wrap>
@@ -669,12 +670,32 @@ function CrudTab({
             style={{ width: 300 }}
           />
         </Space>
+      ) : isSupplier ? (
+        <Space style={{ marginBottom: 16 }} wrap>
+          {canWrite ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建{resource.label}
+            </Button>
+          ) : null}
+          <Tag color="blue">共 {total} 个供应商</Tag>
+          <Input.Search
+            placeholder="按名称/简称/联系人/电话/邮箱搜索"
+            allowClear
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            onSearch={(v) => {
+              setKeyword(v)
+              void load(1, undefined, v)
+            }}
+            style={{ width: 300 }}
+          />
+        </Space>
       ) : canWrite ? (
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate} style={{ marginBottom: 16 }}>
           新建{resource.label}
         </Button>
       ) : null}
-      <Table<CrudRow>
+      <Table<CrudRow> sticky={{ offsetHeader: 8 }}
         rowKey="id"
         columns={columns}
         dataSource={rows}
@@ -771,7 +792,7 @@ function CrudTab({
         confirmLoading={linkSubmitting}
         destroyOnClose
       >
-        <div style={{ marginBottom: 8 }}>供应商（选供应商后按税点自动算含税价）</div>
+        <div style={{ marginBottom: 8 }}>供应商</div>
         <Select
           allowClear
           showSearch
@@ -780,15 +801,6 @@ function CrudTab({
           value={linkSupplierId}
           onChange={(v) => {
             setLinkSupplierId(v)
-            // 换供应商：按新税点重算含税价（精度跟随价格小数位）
-            const tp = v != null ? Number(suppliers.find((s) => s.id === v)?.taxPoint ?? 0) : 0
-            if (linkPrice == null) {
-              setLinkPriceInclTax(null)
-            } else {
-              const dec = (String(linkPrice).split('.')[1] ?? '').length
-              const m = Math.pow(10, Math.min(4, Math.max(2, dec)))
-              setLinkPriceInclTax(Math.round(linkPrice * (1 + tp / 100) * m) / m)
-            }
           }}
           optionFilterProp="label"
           options={suppliers.map((s) => ({ value: s.id, label: s.name + (s.taxPoint != null ? '（加税点 ' + s.taxPoint + '%）' : '') }))}
@@ -801,25 +813,15 @@ function CrudTab({
           placeholder="不含税单价"
           value={linkPrice ?? undefined}
           onChange={(v) => {
-            const p = typeof v === 'number' ? v : null
-            setLinkPrice(p)
-            // 按所选供应商税点自动填含税价（精度跟随价格小数位）
-            const tp = linkSupplierId != null ? Number(suppliers.find((s) => s.id === linkSupplierId)?.taxPoint ?? 0) : 0
-            if (p == null) {
-              setLinkPriceInclTax(null)
-            } else {
-              const dec = (String(p).split('.')[1] ?? '').length
-              const m = Math.pow(10, Math.min(4, Math.max(2, dec)))
-              setLinkPriceInclTax(Math.round(p * (1 + tp / 100) * m) / m)
-            }
+            setLinkPrice(typeof v === 'number' ? v : null)
           }}
         />
-        <div style={{ margin: '12px 0 8px' }}>含税参考价（自动按税点填入，可手改）</div>
+        <div style={{ margin: '12px 0 8px' }}>含税价</div>
         <InputNumber
           min={0}
           precision={4}
           style={{ width: '100%' }}
-          placeholder="含税参考价"
+          placeholder="含税价"
           value={linkPriceInclTax ?? undefined}
           onChange={(v) => setLinkPriceInclTax(typeof v === 'number' ? v : null)}
         />
@@ -888,6 +890,15 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
   const [rows, setRows] = useState<BomRow[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [copyOpen, setCopyOpen] = useState(false)
+  const [copyFrom, setCopyFrom] = useState<number | undefined>()
+  const [copyMode, setCopyMode] = useState<'replace' | 'append'>('replace')
+  const [copying, setCopying] = useState(false)
+  const [addFromOpen, setAddFromOpen] = useState(false)
+  const [addFromProduct, setAddFromProduct] = useState<number | undefined>()
+  const [addFromBom, setAddFromBom] = useState<BomRow[]>([])
+  const [addSelected, setAddSelected] = useState<(string | number)[]>([])
+  const [addSearch, setAddSearch] = useState('')
 
   function refreshProducts() {
     void api
@@ -936,6 +947,82 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
 
   function updateRow(index: number, patch: Partial<BomRow>) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)))
+  }
+
+  async function loadAddFromBom(pid: number) {
+    try {
+      const { data } = await api.get<BomItem[]>('/products/' + pid + '/bom')
+      setAddFromBom(
+        data.map((b) => ({
+          partId: b.partId,
+          qty: b.qty,
+          partName: b.part.name,
+          sku: b.part.sku,
+          sourcing: b.part.sourcing,
+          missingPrice: b.part.missingPrice,
+        })),
+      )
+    } catch (err) {
+      notifyError(err)
+    }
+  }
+
+  function confirmAddFrom() {
+    if (addSelected.length === 0) {
+      message.warning('请选择要添加的零件')
+      return
+    }
+    const picked = addFromBom.filter((b) => addSelected.some((k) => String(k) === String(b.partId)))
+    setRows((prev) => {
+      const existing = new Set(prev.map((r) => r.partId))
+      const fresh = picked.filter((p) => !existing.has(p.partId))
+      const skipped = picked.length - fresh.length
+      message.success('已添加 ' + fresh.length + ' 个零件' + (skipped > 0 ? '（跳过重复 ' + skipped + ' 个）' : ''))
+      return [...prev, ...fresh]
+    })
+    setAddFromOpen(false)
+    setAddSelected([])
+  }
+
+  async function doCopy() {
+    if (!productId || !copyFrom) return
+    if (copyFrom === productId) {
+      message.warning('来源成品不能是当前成品')
+      return
+    }
+    setCopying(true)
+    try {
+      const { data } = await api.get<BomItem[]>('/products/' + copyFrom + '/bom')
+      const copied: BomRow[] = data.map((b) => ({
+        partId: b.partId,
+        qty: b.qty,
+        partName: b.part.name,
+        sku: b.part.sku,
+        sourcing: b.part.sourcing,
+        missingPrice: b.part.missingPrice,
+      }))
+      if (copied.length === 0) {
+        message.warning('来源成品还没有 BOM，无法复制')
+        return
+      }
+      if (copyMode === 'append') {
+        setRows((prev) => {
+          const existing = new Set(prev.map((r) => r.partId))
+          const fresh = copied.filter((c) => !existing.has(c.partId))
+          const skipped = copied.length - fresh.length
+          message.success('已追加 ' + fresh.length + ' 个零件' + (skipped > 0 ? '（跳过重复 ' + skipped + ' 个）' : '') + '，请检查后点「保存 BOM」')
+          return [...prev, ...fresh]
+        })
+      } else {
+        setRows(copied)
+        message.success('已复制 ' + copied.length + ' 个零件，请增删改后点「保存 BOM」')
+      }
+      setCopyOpen(false)
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setCopying(false)
+    }
   }
 
   async function exportBom() {
@@ -1017,6 +1104,11 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
             保存 BOM
           </Button>
         ) : null}
+        {canWrite ? (
+          <Button icon={<CopyOutlined />} disabled={!productId} onClick={() => setCopyOpen(true)}>
+            复制 BOM
+          </Button>
+        ) : null}
         <Button
           icon={<DownloadOutlined />}
           disabled={!productId}
@@ -1045,9 +1137,19 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
           >
             添加零件
           </Button>
+          <Button
+            icon={<CopyOutlined />}
+            onClick={() => {
+              void refreshProducts()
+              setAddSearch('')
+              setAddFromOpen(true)
+            }}
+          >
+            从成品添加零件
+          </Button>
         </Space>
       ) : null}
-      <Table<BomRow>
+      <Table<BomRow> sticky={{ offsetHeader: 8 }}
         rowKey={(_, i) => String(i ?? 0)}
         loading={loading}
         dataSource={rows}
@@ -1114,10 +1216,10 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
             key: 'qty',
             render: (_: unknown, r: BomRow, index: number) => (
               <InputNumber
-                min={1}
+                min={0.0001}
                 value={r.qty}
                 disabled={!canWrite}
-                onChange={(v) => updateRow(index, { qty: v })}
+                onChange={(v) => updateRow(index, { qty: v == null ? v : Math.round(v * 10000) / 10000 })}
               />
             ),
           },
@@ -1140,6 +1242,100 @@ function BomTab({ canWrite }: { canWrite: boolean }) {
             : []),
         ]}
       />
+      <Modal
+        title="从成品添加零件"
+        open={addFromOpen}
+        okText="添加所选零件"
+        onOk={confirmAddFrom}
+        onCancel={() => {
+          setAddFromOpen(false)
+          setAddSelected([])
+          setAddSearch('')
+        }}
+        width={640}
+      >
+        <Select
+          placeholder="选择成品（列出它的 BOM 零件）"
+          style={{ width: '100%', marginBottom: 12 }}
+          value={addFromProduct}
+          onChange={(v) => {
+            setAddFromProduct(v)
+            setAddSelected([])
+            setAddSearch('')
+            if (v) void loadAddFromBom(v)
+          }}
+          onDropdownVisibleChange={(open) => {
+            if (open) void refreshProducts()
+          }}
+          options={products
+            .filter((p) => p.id !== productId)
+            .map((p) => ({
+              value: p.id,
+              label: p.name + '（' + p.sku + '）' + (p.bomCount != null ? ' · ' + p.bomCount + ' 个零件' : ''),
+            }))}
+        />
+        <Input
+          allowClear
+          placeholder="输入零件名称/料号快速定位"
+          value={addSearch}
+          onChange={(e) => setAddSearch(e.target.value)}
+          style={{ marginBottom: 12 }}
+        />
+        <Table<BomRow> sticky={{ offsetHeader: 8 }}
+          size="small"
+          rowKey={(r) => String(r.partId)}
+          dataSource={addFromBom.filter((b) => {
+            const kw = addSearch.trim().toLowerCase()
+            if (!kw) return true
+            return (b.partName ?? '').toLowerCase().includes(kw) || (b.sku ?? '').toLowerCase().includes(kw)
+          })}
+          pagination={false}
+          scroll={{ y: 320 }}
+          rowSelection={{ selectedRowKeys: addSelected, onChange: (keys) => setAddSelected(keys as (string | number)[]) }}
+          columns={[
+            {
+              title: '零件',
+              dataIndex: 'partName',
+              render: (_: unknown, r: BomRow) => (r.partName || '') + (r.sku ? '（' + r.sku + '）' : ''),
+            },
+            { title: '用量', dataIndex: 'qty', width: 70, align: 'center' },
+          ]}
+        />
+      </Modal>
+      <Modal
+        title="复制 BOM"
+        open={copyOpen}
+        okText="复制"
+        confirmLoading={copying}
+        onOk={() => void doCopy()}
+        onCancel={() => setCopyOpen(false)}
+      >
+        <p>
+          从其它成品复制 BOM 明细到当前成品，复制后在此基础上增删改，点「保存 BOM」才会写入。
+        </p>
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Select
+            placeholder="选择来源成品"
+            style={{ width: '100%' }}
+            value={copyFrom}
+            onChange={(v) => setCopyFrom(v)}
+            onDropdownVisibleChange={(open) => {
+              if (open) void refreshProducts()
+            }}
+            options={products
+              .filter((p) => p.id !== productId)
+              .map((p) => ({
+                value: p.id,
+                label: p.name + '（' + p.sku + '）' + (p.bomCount != null ? ' · ' + p.bomCount + ' 个零件' : ''),
+              }))}
+          />
+          <Radio.Group value={copyMode} onChange={(e) => setCopyMode(e.target.value as 'replace' | 'append')}>
+            <Radio value="replace">覆盖当前明细</Radio>
+            <Radio value="append">追加到当前明细（跳过重复料号）</Radio>
+          </Radio.Group>
+        </Space>
+      </Modal>
+
     </div>
   )
 }
@@ -1310,7 +1506,7 @@ function HubTab({ canWrite }: { canWrite: boolean }) {
       ) : (
         <p>到货仓由销售/老板维护。</p>
       )}
-      <Table rowKey="id" columns={columns} dataSource={hubs} pagination={false} size="small" />
+      <Table sticky={{ offsetHeader: 8 }} rowKey="id" columns={columns} dataSource={hubs} pagination={false} size="small" />
     </div>
   )
 }

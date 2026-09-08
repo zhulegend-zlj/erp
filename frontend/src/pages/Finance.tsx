@@ -276,7 +276,7 @@ function DueTab() {
   return (
     <div>
       <Card title="未来 60 天应收" style={{ marginBottom: 16 }}>
-        <Table<DueReceivable>
+        <Table<DueReceivable> sticky={{ offsetHeader: 8 }}
           rowKey={(r) => r.orderNo}
           loading={loading}
           dataSource={due.receivable}
@@ -296,7 +296,7 @@ function DueTab() {
         />
       </Card>
       <Card title="未来 60 天应付">
-        <Table<DuePayable>
+        <Table<DuePayable> sticky={{ offsetHeader: 8 }}
           rowKey={(r) => r.orderNo}
           loading={loading}
           dataSource={due.payable}

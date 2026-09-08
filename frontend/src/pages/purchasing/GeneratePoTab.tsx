@@ -14,7 +14,6 @@ import { PlusOutlined } from '@ant-design/icons'
 import { api } from '../../api'
 import type { User } from '../../api'
 import { dateStr, money, notifyError, orderPhaseLabel, statusLabel } from '../common'
-import type { Paged } from '../common'
 import GeneratePoModal from './GeneratePoModal'
 import type {
   CompanyHeader,
@@ -116,6 +115,7 @@ function RequirementGroupedTable(props: {
       loading={loading}
       dataSource={sorted}
       pagination={false}
+      sticky={{ offsetHeader: 8 }}
       scroll={{ x: 1100 }}
       rowClassName={(r) =>
         (r.excluded ? 'po-row-excluded ' : '') + (isGroupStart(r) ? 'po-group-start' : '')
@@ -241,7 +241,7 @@ export default function GeneratePoTab(props: Props) {
   const [reqLoading, setReqLoading] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [reqRefresh, setReqRefresh] = useState(0)
-  const [checking, setChecking] = useState(false)
+  const [poBusy, setPoBusy] = useState(false)
 
   async function loadOrders() {
     try {
@@ -320,39 +320,14 @@ export default function GeneratePoTab(props: Props) {
       })
       return
     }
-    setChecking(true)
-    try {
-      const results = await Promise.all(
-        selected.map((o) =>
-          api.get<Paged<PurchaseOrder>>('/purchase-orders', {
-            params: { salesOrderId: o.id, page: 1, pageSize: 100 },
-          }),
-        ),
-      )
-      const existing = results.flatMap((r) => (r.data.items ?? []).map((p) => p.orderNo))
-      if (existing.length > 0) {
-        Modal.confirm({
-          title: '所选订单已生成过采购单',
-          content:
-            '已存在：' +
-            existing.join('、') +
-            '。确认继续生成新的采购单吗？新采购单会关联到同一销售订单，收货后一起计算采购进度。',
-          okText: '继续生成',
-          cancelText: '取消',
-          onOk: () => setModalOpen(true),
-        })
-      } else {
-        setModalOpen(true)
-      }
-    } catch (err) {
-      notifyError(err)
-    } finally {
-      setChecking(false)
-    }
+    // 按钮立刻转圈（先画出来）再挂弹窗，弹窗内部转圈检查订单并准备明细
+    setPoBusy(true)
+    setModalOpen(true)
   }
 
   function handleCreated(_data: PurchaseOrder[]) {
     setModalOpen(false)
+    setPoBusy(false)
     setDraftItems(undefined)
     setReqRefresh((x) => x + 1)
     void loadOrders()
@@ -402,7 +377,7 @@ export default function GeneratePoTab(props: Props) {
           }))}
         />
         {canCreate && orderIds.length > 0 ? (
-          <Button type="primary" icon={<PlusOutlined />} loading={checking} onClick={openCreatePoWithCheck}>
+          <Button type="primary" icon={<PlusOutlined />} loading={poBusy} onClick={openCreatePoWithCheck}>
             生成采购单
           </Button>
         ) : null}
@@ -418,14 +393,14 @@ export default function GeneratePoTab(props: Props) {
         >
           <div>
             <b>客户：</b>
-            {od.customer?.name ?? '-'}　<b>交期：</b>
-            {dateStr(od.deliveryDate)}　<b>状态：</b>
+            {od.customer?.name ?? '-'}　<b>状态：</b>
             {statusLabel(od.status)}
           </div>
           <div style={{ marginTop: 8 }}>
             {od.items.map((it) => (
               <div key={it.id}>
                 {it.product.name}（{it.product.sku}）× {it.qty}
+                　客户交期 {dateStr(it.customerDeliveryDate ?? null)}　ZRH交期 {dateStr(it.zrhDeliveryDate ?? null)}
                 {user?.role === 'boss' && it.unitPrice !== undefined ? '　单价 ¥' + money(it.unitPrice) : ''}
               </div>
             ))}
@@ -469,8 +444,13 @@ export default function GeneratePoTab(props: Props) {
         companyHeaders={companyHeaders}
         draftItems={draftItems}
         onDraftItems={setDraftItems}
-        onCancel={() => setModalOpen(false)}
+        onCancel={() => {
+          setModalOpen(false)
+          setPoBusy(false)
+        }}
         onSuccess={handleCreated}
+        busy={poBusy}
+        onReady={() => setPoBusy(false)}
       />
     </div>
   )

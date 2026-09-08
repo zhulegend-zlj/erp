@@ -261,7 +261,7 @@ function ReceiptForm({ parts, suppliers, onDone }: { parts: Part[]; suppliers: S
             loading={poLoading}
             style={{ marginBottom: 16 }}
           >
-            <Table<PoLedgerRow>
+            <Table<PoLedgerRow> sticky={{ offsetHeader: 8 }}
               rowKey="partId"
               size="small"
               pagination={false}
@@ -465,7 +465,7 @@ function QcPanel({ refreshToken, onDone }: { refreshToken: number; onDone?: () =
         style={{ marginBottom: 12 }}
         message="收货入库后，可在这里补充 QC 状态与不良品数量（不良品仅作记录，不扣库存）。"
       />
-      <Table<ReceiptRecord>
+      <Table<ReceiptRecord> sticky={{ offsetHeader: 8 }}
         rowKey="id"
         size="small"
         loading={loading}
@@ -1029,7 +1029,7 @@ function RecentIssues({ refreshToken, onDone }: { refreshToken?: number; onDone?
 
   return (
     <Card title="最近领料记录" size="small" style={{ marginTop: 16 }}>
-      <Table<IssueRecord>
+      <Table<IssueRecord> sticky={{ offsetHeader: 8 }}
         rowKey="id"
         size="small"
         loading={loading}
@@ -1128,7 +1128,7 @@ function RecentProductions({ refreshToken, onDone }: { refreshToken?: number; on
 
   return (
     <Card title="最近入库记录" size="small" style={{ marginTop: 16 }}>
-      <Table<ProductionEntryRecord>
+      <Table<ProductionEntryRecord> sticky={{ offsetHeader: 8 }}
         rowKey="id"
         size="small"
         loading={loading}
@@ -1241,7 +1241,7 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
           style={{ width: 240 }}
         />
       </Space>
-      <Table<StockRow>
+      <Table<StockRow> sticky={{ offsetHeader: 8 }}
         rowKey={(r) => r.itemType + '-' + r.itemId}
         loading={loading}
         dataSource={rows}
@@ -1427,7 +1427,7 @@ function LedgerTab({ parts, orders }: { parts: Part[]; orders: SalesOrder[] }) {
           options={partOptions}
         />
       </Space>
-      <Table<LedgerSearchRow>
+      <Table<LedgerSearchRow> sticky={{ offsetHeader: 8 }}
         rowKey="id"
         loading={loading}
         dataSource={rows}
@@ -1773,7 +1773,7 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
         </Button>
       </Form>
 
-      <Table<ReturnReplenishRow>
+      <Table<ReturnReplenishRow> sticky={{ offsetHeader: 8 }}
         rowKey="id"
         loading={loading}
         dataSource={rows}
@@ -1921,7 +1921,7 @@ function WarehouseLedgerTab() {
         />
         <Button onClick={() => void load()}>查询台账</Button>
       </Space>
-      <Table<WarehouseLedgerRow>
+      <Table<WarehouseLedgerRow> sticky={{ offsetHeader: 8 }}
         rowKey="id"
         loading={loading}
         dataSource={rows}

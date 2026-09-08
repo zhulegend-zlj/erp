@@ -428,7 +428,7 @@ export function inventoryRoutes(app: FastifyInstance) {
     for (const item of order.items) {
       for (const b of boms) {
         if (b.productId !== item.productId) continue
-        requiredMap.set(b.partId, (requiredMap.get(b.partId) ?? 0) + b.qty * item.qty)
+        requiredMap.set(b.partId, (requiredMap.get(b.partId) ?? 0) + Number(b.qty) * item.qty)
       }
     }
     const partIds = [...requiredMap.keys()]
@@ -437,7 +437,7 @@ export function inventoryRoutes(app: FastifyInstance) {
     const usageByPart = new Map<number, Map<number, number>>()
     for (const b of boms) {
       const m = usageByPart.get(b.partId) ?? new Map<number, number>()
-      m.set(b.productId, (m.get(b.productId) ?? 0) + b.qty)
+      m.set(b.productId, (m.get(b.productId) ?? 0) + Number(b.qty))
       usageByPart.set(b.partId, m)
     }
 
@@ -537,7 +537,7 @@ export function inventoryRoutes(app: FastifyInstance) {
         const boms = await prisma.bom.findMany({
           where: { productId: { in: productIdsInOrder }, partId: bindItem.itemId },
         })
-        const usageMap = new Map(boms.map((b) => [b.productId, b.qty]))
+        const usageMap = new Map(boms.map((b) => [b.productId, Number(b.qty)]))
         for (const it of orderItems) {
           requiredQty += (usageMap.get(it.productId) ?? 0) * it.qty
         }

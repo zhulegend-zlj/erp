@@ -70,15 +70,22 @@ export function mergeBase(orderNos: string[]): string {
 
 /**
  * 从一组已有单号中取「base+单字母」的最大字母，返回下一个字母；
- * 没有任何以 base 开头的字母单 → 返回 A；已用到最后一个字母 → 返回 null（需手工输入）。
+ * 没有任何以 base 开头的字母单 → 返回 A；单字母 A…Z 用尽 → 两位字母 AA、AB… 继续
+ * （2026-09-07：供应商分组超过 24 个时报「字母编号已用完」，改为两位字母顺延）。
  */
 export function nextLetterForBase(existingOrderNos: string[], base: string): string | null {
-  let maxIdx = -1
+  let maxSingle = -1
   for (const no of existingOrderNos) {
-    const ch = parseLetterSuffix(no, base)
-    if (ch) maxIdx = Math.max(maxIdx, PO_LETTERS.indexOf(ch))
+    if (!no.startsWith(base)) continue
+    const rest = no.slice(base.length).toUpperCase()
+    const one = rest.charAt(0)
+    if (!PO_LETTERS.includes(one)) continue
+    if (PO_LETTERS.includes(rest.charAt(1))) continue // 两位字母后缀（AA 起），单字母阶段跳过
+    maxSingle = Math.max(maxSingle, PO_LETTERS.indexOf(one))
   }
-  return letterAt(maxIdx + 1)
+  if (maxSingle < PO_LETTERS.length - 1) return letterAt(maxSingle + 1)
+  // 单字母用尽 → 两位字母组合继续（与当天自购单同款组合序）
+  return nextTwoLetterForBase(existingOrderNos, base)
 }
 
 /** 当天两位字母序号的下一个（existing 中取以 base 开头的两位后缀最大值） */

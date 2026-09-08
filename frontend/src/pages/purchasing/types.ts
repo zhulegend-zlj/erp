@@ -12,6 +12,8 @@ export interface SalesOrderDetailItem {
   productId: number
   qty: number
   unitPrice?: string
+  customerDeliveryDate?: string | null
+  zrhDeliveryDate?: string | null
   product: { sku: string; name: string }
 }
 
@@ -84,6 +86,8 @@ export interface PoItemField {
   // 套餐价合并行（提交时展开成成员零件行）
   bundleId?: number
   bundleName?: string
+  // 自购件：归入「自购」采购单（不出给供应商）
+  selfBuy?: boolean
 }
 
 export interface PoFormValues {
@@ -93,9 +97,8 @@ export interface PoFormValues {
   paymentTerms?: string
   termsNote?: string
   headerName?: string
-  taxPoint?: number | null
-  manualOrderNo?: string
   items?: PoItemField[]
+  templateId?: number
 }
 
 export interface PurchaseOrderItem {

@@ -104,7 +104,7 @@ export default function Dashboard() {
         </Col>
       </Row>
       <Card title="订单总览">
-        <Table<DashboardOrder>
+        <Table<DashboardOrder> sticky={{ offsetHeader: 8 }}
           rowKey="id"
           columns={columns}
           dataSource={summary?.orders ?? []}
