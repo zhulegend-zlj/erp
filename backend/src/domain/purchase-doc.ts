@@ -423,16 +423,12 @@ async function renderPoDoc(data: PoDocData, cfg?: PoTemplateConfig | null, tplFi
   }
 
   // 7) 页面设置 + 打印区域
+  // 2026-09-08 老板拍板（方案1）：缩放打印到一页——表格列宽/行高原样不动，
+  // 打印时 Excel/WPS 自动整体缩放进一页 A4，I/J 列（金额/备注）都在打印区内
   const ps = ws.pageSetup
-  if (tpl.file === PO_TEMPLATE_STD) {
-    // 标准模板：默认打印比例 100%（2026-09-08 老板要求），模板列宽已压缩到一页 A4 内
-    ps.fitToPage = false
-    ;(ps as unknown as { zoom?: number }).zoom = 100
-  } else {
-    ps.fitToPage = true
-    ps.fitToWidth = 1
-    ps.fitToHeight = 1
-  }
+  ps.fitToPage = true
+  ps.fitToWidth = 1
+  ps.fitToHeight = 1
   ps.orientation = tpl.orientation
   ps.paperSize = 9 // A4
   const maxRow = Math.max(tpl.endRow + insertCount, totalRow + 2) + 4
