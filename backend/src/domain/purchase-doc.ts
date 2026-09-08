@@ -337,46 +337,14 @@ async function renderPoDoc(data: PoDocData, cfg?: PoTemplateConfig | null, tplFi
     set(c.usage, line.usage ?? '')
     set(c.qty, line.qty)
     set(c.price, useInclTax ? line.unitPriceInclTax ?? line.unitPrice : line.unitPrice)
-    if (!tpl.noteMerged) set(c.note, line.note)
+    // 备注列每行独立显示本行备注（2026-09-08 老板：不再整列合并拉长）
+    set(c.note, line.note)
     if (tpl.isZrh) {
       // 金额(含税) = 单价(含税) × 采购数量
       set(c.priceInclTax, line.unitPriceInclTax ?? '')
     }
     ws.getCell(r, c.amount).value = { formula: tpl.amountFormula(r) }
   })
-
-  // 备注列整列合并：填整单备注（termsNote 优先，否则合并各明细行备注）
-  if (tpl.noteMerged && c.note) {
-    const notes: string[] = []
-    if (data.termsNote?.trim()) notes.push(data.termsNote.trim())
-    for (const l of data.lines) {
-      const t = l.note?.trim()
-      if (t && !notes.includes(t)) notes.push(t)
-    }
-    if (n > 1) {
-      // 备注列整列合并：mergeCells 的校验基于插入前的合并表（插行后未刷新会误报冲突），
-      // 改为直接写入内部合并表（写出时按 range 序列化，新增合并不参与位移）
-      const any = ws as unknown as {
-        _merges: Record<string, { top: number; left: number; bottom: number; right: number; range: string }>
-      }
-      const bottom = first + n - 1
-      const key = colLetter(c.note) + first
-      if (!any._merges[key]) {
-        const master = ws.getCell(first, c.note)
-        for (let i = first; i <= bottom; i++) {
-          if (i !== first) (ws.getCell(i, c.note) as unknown as { merge: (m: unknown, s?: boolean) => void }).merge(master, true)
-        }
-        any._merges[key] = {
-          top: first,
-          left: c.note,
-          bottom,
-          right: c.note,
-          range: key + ':' + colLetter(c.note) + bottom,
-        }
-      }
-    }
-    ws.getCell(first, c.note).value = notes.join('；')
-  }
 
   // 4) 合计公式覆盖全部明细行 + 大写金额行指向新合计行
   const totalRow = first + Math.max(n, slot) - 1 + tpl.totalRowOffset
@@ -386,12 +354,25 @@ async function renderPoDoc(data: PoDocData, cfg?: PoTemplateConfig | null, tplFi
   }
   if (tpl.capitalAsText) {
     // 大写金额直接写文本（模板无公式单元格）；智锐恒单按含税价合计
+    // 2026-09-08 老板：右边格子只显示大写金额，不要 RMB 前缀
     const total = Math.round(
       data.lines.reduce((s, l) => s + l.qty * (useInclTax ? l.unitPriceInclTax ?? l.unitPrice : l.unitPrice), 0) * 100,
     ) / 100
-    ws.getCell(totalRow + 1, tpl.totalCol).value = 'RMB' + amountToCn(total)
+    ws.getCell(totalRow + 1, tpl.totalCol).value = amountToCn(total)
   } else {
     ws.getCell(totalRow + 1, tpl.totalCol).value = { formula: '=' + sumCol + totalRow }
+  }
+
+  // 合计行金额区右边框补实线：模板「金额合计（小写）」行金额区 G/H/I 缺 right 边框（最右不是实线），
+  // 打印时右侧开口；小写/大写两行统一补全（2026-09-08 老板反馈）
+  for (const row of [totalRow, totalRow + 1]) {
+    for (let col = tpl.totalCol; col <= 9; col++) {
+      const cell = ws.getCell(row, col)
+      cell.border = {
+        ...cell.border,
+        right: { style: 'thin', color: { argb: 'FF000000' } },
+      }
+    }
   }
 
   // 5) 付款方式（1.2 行替换；模板文字可能是富文本，先转纯文本再替换；行号随插入行位移）
@@ -433,6 +414,25 @@ async function renderPoDoc(data: PoDocData, cfg?: PoTemplateConfig | null, tplFi
   ps.paperSize = 9 // A4
   const maxRow = Math.max(tpl.endRow + insertCount, totalRow + 2) + 4
   ws.pageSetup.printArea = 'A1:' + tpl.printCol + maxRow
+
+  // 8) 一页打印压缩（2026-09-08 老板：导出 100% 比例必须正好一页 A4）
+  if (tpl.file === PO_TEMPLATE_STD) {
+    const widths = [7, 9, 7, 4, 4, 5.5, 6, 8, 5]
+    ws.columns.forEach((col, i) => {
+      if (widths[i]) col.width = widths[i]
+    })
+    for (let row = 1; row <= maxRow; row++) {
+      const r = ws.getRow(row)
+      if (r.height) {
+        if (row >= first && row <= last) {
+          r.height = 13.5 // 明细行
+        } else {
+          r.height = Math.round(r.height * 0.75 * 10) / 10 // 头尾/条款区按 75% 压缩
+        }
+      }
+    }
+    ps.margins = { ...ps.margins, left: 0.35, right: 0.35, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 }
+  }
 
   const html = workbookToHtml(wb)
   const buffer = Buffer.from(await wb.xlsx.writeBuffer())
@@ -493,15 +493,14 @@ export function buildPoMimicHtml(data: PoDocData, opts?: { autoPrint?: boolean }
   const company = useInclTax ? '东莞市智锐恒电子有限公司' : '东莞市锦名诚电子有限公司'
   const priceTitle = useInclTax ? '单价 (含税)' : '单价'
   const amountTitle = useInclTax ? '金额 (含税)' : '金额'
-  const n = Math.max(data.lines.length, 1)
   const rows: string[] = []
   // 表面处理只留中文（2026-09-08 老板要求）
   const cnOnly = (s: string | null | undefined) => (s ?? '').replace(/[^\u4e00-\u9fa5，、；：（）·%‰]/g, '').trim()
-  data.lines.forEach((l, i) => {
+  data.lines.forEach((l) => {
     const price = useInclTax ? (l.unitPriceInclTax ?? l.unitPrice) : l.unitPrice
     const amount = round2(l.qty * price)
-    // 备注列：整列合并，内容留空（2026-09-08 老板要求）
-    const noteCell = i === 0 ? '<td rowspan="' + n + '"></td>' : ''
+    // 备注列：每行独立显示本行备注（2026-09-08 老板：不再整列合并拉长）
+    const noteCell = '<td class="l">' + escHtml(l.note ?? '') + '</td>'
     rows.push(
       '<tr><td class="l">' + escHtml(l.sku) + '</td>' +
         '<td class="l">' + escHtml(l.name) + '</td>' + // 品名只展示中文名称，不带尺寸
@@ -561,8 +560,9 @@ export function buildPoMimicHtml(data: PoDocData, opts?: { autoPrint?: boolean }
     '</div></div>' +
     '<table><thead><tr><th style="width:10%">料号</th><th style="width:15%">品名规格</th><th style="width:13%">材质</th><th style="width:16%">表面处理/颜色</th><th style="width:5%">单位</th><th style="width:5%">用量</th><th style="width:8%">采购数量</th><th style="width:8%">' + priceTitle + '</th><th style="width:9%">' + amountTitle + '</th><th style="width:9%">备注</th></tr></thead><tbody>' +
     rows.join('') +
-    '<tr class="totrow"><td colspan="4"></td><td colspan="3" class="r">金额合计（小写）</td><td colspan="2" class="l">￥' + total + '</td><td></td></tr>' +
-    '<tr class="totrow"><td colspan="4"></td><td colspan="3" class="r">金额合计（大写）</td><td colspan="2" class="l">RMB' + amountToCn(total) + '</td><td></td></tr>' +
+    // 合计两行整体右移两列、金额贴最右；大写金额不带 RMB 前缀（2026-09-08 老板）
+    '<tr class="totrow"><td colspan="6"></td><td colspan="2" class="r">金额合计（小写）</td><td colspan="2" class="l">￥' + total + '</td></tr>' +
+    '<tr class="totrow"><td colspan="6"></td><td colspan="2" class="r">金额合计（大写）</td><td colspan="2" class="l">' + amountToCn(total) + '</td></tr>' +
     '</tbody></table>' +
     '<div class="terms"><b>备注：</b>' + (data.termsNote ? escHtml(data.termsNote) : '') + '<br/>' +
     '<b>1、货款结算：</b><br/>' +

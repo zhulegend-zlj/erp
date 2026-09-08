@@ -67,7 +67,7 @@ describe('采购单模板填充（标准模板：单行槽位，按明细行数�
     expect(get(9, 8)).toBe('=G9*F9')
     expect(get(9, 9)).toBe('请给3‰免费备品')
     expect(get(10, 7)).toBe('=SUM(H9:H9)')
-    expect(get(11, 7)).toBe('RMB' + amountToCn(2050 * 0.264))
+    expect(get(11, 7)).toBe(amountToCn(2050 * 0.264)) // 2026-09-08 老板：大写不带 RMB 前缀
     expect(get(15, 1)).toContain('付款方式：货到付款')
     expect(get(23, 1)).toContain('3.3 预计交货时间：2026.09.12')
     // 1 行不合并备注列
@@ -91,10 +91,11 @@ describe('采购单模板填充（标准模板：单行槽位，按明细行数�
     expect(get(11, 2)).toBe('支撑铁片F5*4*3')
     expect(get(11, 7)).toBe('3.25')
     expect(get(12, 7)).toBe('=SUM(H9:H11)')
-    expect(get(13, 7)).toBe('RMB' + amountToCn(541.2 + 550 + 1625))
+    expect(get(13, 7)).toBe(amountToCn(541.2 + 550 + 1625)) // 大写不带 RMB 前缀
     expect(get(17, 1)).toContain('付款方式：货到付款')
     expect(get(9, 9)).toBe('请给3‰免费备品')
-    expect(JSON.stringify(ws.model.merges)).toContain('I9:I11')
+    // 2026-09-08 老板：备注列不再整列合并（每行独立显示本行备注）
+    expect(JSON.stringify(ws.model.merges)).not.toContain('I9:I11')
     // 确认栏公司名随插行下移（29 = 27 + 2），原行不再有
     expect(get(29, 7)).toBe('东莞市智锐恒电子有限公司')
     expect(get(27, 7)).toBe('')
@@ -130,7 +131,7 @@ describe('采购单模板填充（标准模板：单行槽位，按明细行数�
     expect(get(9, 8)).toBe('=G9*F9')
     expect(get(9, 9)).toBe('请给3‰免费备品')
     expect(get(10, 7)).toBe('=SUM(H9:H9)')
-    expect(get(11, 7)).toBe('RMB' + amountToCn(8920))
+    expect(get(11, 7)).toBe(amountToCn(8920)) // 大写不带 RMB 前缀
     expect(get(15, 1)).toContain('付款方式：货到付款')
     expect(get(23, 1)).toContain('3.3 预计交货时间：2026.09.12')
   })
@@ -149,6 +150,6 @@ describe('采购单模板填充（标准模板：单行槽位，按明细行数�
     const buf = await buildPoTemplate(data)
     const { get } = await readBuf(buf)
     expect(get(13, 7)).toBe('=SUM(H9:H12)')
-    expect(get(14, 7)).toBe('RMB' + amountToCn(492 + 960 * 3))
+    expect(get(14, 7)).toBe(amountToCn(492 + 960 * 3)) // 大写不带 RMB 前缀
   })
 })
