@@ -574,6 +574,8 @@ export default function PoListTab(props: Props) {
               {previewData.orderNo}　<b>供应商：</b>
               {previewData.supplier?.name || '-'}　<b>模板：</b>
               {previewTemplateName ?? '默认模板'}
+              {previewRender === 'model' ? '（模型渲染）' : '（模板表格）'}
+              {previewRenderV ? '·' + previewRenderV : ''}
             </div>
             <div style={{ marginBottom: 8 }}>
               <b>付款方式：</b>

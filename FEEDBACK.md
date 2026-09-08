@@ -1283,3 +1283,9 @@
 - 预览（仿照表格）：品名规格右侧新增「材质」列；品名只展示中文名称（不带尺寸）；表面处理只留中文（正则剔除英文/数字）；合计两行补全最右侧空单元格并显式边框（修复右边框线缺失）；表头列宽调整为 10 列。
 - 导出 Excel：标准模板页面设置改为 默认打印比例 100%（fitToPage 关、zoom=100）；模板列宽整体压缩 85% 使 100% 比例下一页 A4。已验证：导出文件 Zoom=100、PDF 单页。
 - 单测 4/4；后端已重启。
+
+## 2026-09-08 家里：生成采购单弹窗崩溃修复（老板报错）
+- 现象：点击「生成采购单」后页面报错 Cannot read properties of undefined (reading 'name')（GeneratePoModal.tsx 明细行渲染）。
+- 根因：真实数据下订单 265540 有 108 行需求，弹窗一次 setFieldsValue 写入 108 行时 Form.useWatch 与 Form.List 的 fields 存在一帧不同步，分组渲染按旧索引取 fields[index] 得到 undefined 崩溃（此前 TEST 行数少未暴露）。
+- 处理：①GeneratePoModal 分组渲染的索引过滤到 fields.length 内、空组跳过渲染；②取不到 field 的行直接跳过（兜底防护）；③顺带修复 PoListTab.tsx 遗留 build 错误（previewRender/previewRenderV 声明未使用）——恢复声明并在预览弹窗「模板」后显示渲染模式（模型渲染/模板表格）与版本。
+- 验证：前端 build 通过；请老板刷新页面后重新点「生成采购单」验收。

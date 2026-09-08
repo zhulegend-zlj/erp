@@ -442,7 +442,11 @@ export default function GeneratePoModal(props: Props) {
           {(fields, { add, remove }) => (
             <>
               {grouped.map((group) => {
-                const firstIdx = group.indices[0]
+                // 只渲染真实存在的字段行：useWatch 与 Form.List fields 可能存在一帧不同步，
+                // 越界索引会导致 fields[index] 为 undefined 而崩溃（真实数据 108 行必现）
+                const indices = group.indices.filter((i) => i < fields.length)
+                if (indices.length === 0) return null
+                const firstIdx = indices[0]
                 const firstIt = watchedItems?.[firstIdx]
                 const firstReq = requirements.find((r) => r.partId === firstIt?.partId)
                 const isSelfBuyGroup = firstIt?.selfBuy === true
@@ -495,14 +499,15 @@ export default function GeneratePoModal(props: Props) {
                         <Tag color="blue">本次改选</Tag>
                       ) : null}
                       <span style={{ color: '#8c8c8c', fontSize: 12 }}>
-                        {group.indices.length} 项
+                        {indices.length} 项
                       </span>
                     </div>
 
                     {/* 组内明细行 */}
                     <div style={{ padding: '4px 12px 12px' }}>
-                      {group.indices.map((index) => {
-                        const field = fields[index]!
+                      {indices.map((index) => {
+                        const field = fields[index]
+                        if (!field) return null
                         const it = watchedItems?.[index]
                         const isBundleRow = it?.bundleId != null
                         const req = requirements.find((r) => r.partId === it?.partId)
