@@ -5,7 +5,7 @@
 > 继续开发前请先读 DEV_HANDOFF.md，再读 FEEDBACK.md 里的待处理反馈。
 >
 > 简版速查：
-> - 本机=工厂电脑 / 家里电脑=另一台：拉代码后先 `npx prisma migrate deploy`，账号用 `npx tsx --env-file=.env prisma/seed.ts` 重建（密码 88888888）
+> - 本机=工厂电脑 / 家里电脑=另一台：**2026-09-08 起建库改用恢复包 SQL（schema+基础数据），不要跑 migrate deploy**（迁移历史与生产库有出入）；账号已含在基础数据里，无需 seed。详见 DEV_HANDOFF.md 顶部
 > - 后端 `cd backend && npm run start`（:3000）；前端 `cd frontend && npm run dev -- --host 0.0.0.0`（:5173）
 > - 测试 `cd backend && npm run typecheck && npx vitest run`（测试库 erp_test，反馈文件已隔离）；前端 `npm run build`
 > - 数据/图片/图档不随 git 同步；导入脚本：`prisma/import-csp-v3*.ts`、`prisma/audit-csp-v3.ts`

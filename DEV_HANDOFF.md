@@ -1,5 +1,11 @@
 # ERP 开发交接摘要（工厂 → 家里，最新）
 
+> **2026-09-08 采购打印模板终版·家里建库方式变更（本机=工厂电脑，提交 a5be2c2 已推送）**：
+> - 预览=仿表格前端表格（免 Excel 渲染），打印=浏览器打印同一 HTML，导出=Excel 模板填充（100% 缩放、一页 A4）。新增 STD 模板 backend/templates/PurchaseOrder-STD.xlsx；核心代码 domain/purchase-doc.ts + routes/purchasing.ts，模板编辑页 frontend/src/pages/purchasing/PoTemplateTab.tsx。
+> - **建库方式变更（重要）**：仓库迁移历史与生产库实际结构有出入，全新库跑 `npx prisma migrate deploy` 会失败（SalesOrder.zrhDeliveryDate 不存在）。家里建库改用老板微信发的恢复包 `erp-home-20260908.zip`：建空库 → 导入 erp-schema-20260908.sql（32 张表结构）→ 导入 erp-base-data-20260908.sql（基础主数据：零件489/产品19/BOM749/供应商39/客户1/抬头/档案/打印模板/用户6，已含自增序列 setval）。**顺序不能反；以后改表结构一律 `npx prisma db push`，不要跑 migrate deploy**。
+> - 数据状态：单据已清空重新测试过；恢复包不含单据（现库有 26 采购单 1 销售单为测试数据，留工厂）。
+> - 服务启动沿用 2026-08-29 记录的坑：PowerShell Start-Process + -WorkingDirectory（dsh 后台任务会被会话清理杀掉）；Node.js >= 22。
+>
 > **2026-08-29 采购功能重构·第一期（本机=工厂电脑，老板 6 份表格驱动，25+ 项口径逐轮拍板，提交 5d03431/1eecbf3 已推送）**：
 > 老板发的 6 份采购文件全部理解并定制进 ERP（总方案/盘点/预览在 D:\AI\采购\：采购重构-总方案.md、采购重构-预览.html、_盘点-后端.md、_盘点-前端.md）。**迁移 202608290001_purchasing_refactor（家里电脑拉代码后跑 npx prisma migrate deploy）**：Supplier +contactPerson/phone/fax/email/defaultPaymentTerms/defaultHeaderName/taxPoint；Part +priceInclTax/leadTime/safetyStock（moq 启用展示）；PurchaseOrder +poStatus(pending未下单/sent已下单/printed已打印/confirmed已回签，与收货进度 status 独立)/poType(normal/spare免费备品)/orderDate/expectedDeliveryDate(文本口径如"2026.03.01开始每周交1000套")/paymentTerms/termsNote/headerName(抬头=智锐恒/锦名诚)/taxPoint；PurchaseOrderItem +usage/unitPriceInclTax/note/supplierReplyDate；Receipt +consigned(客供料，第二期接 UI)；新模型 CompanyHeader(多抬头)/PurchaseOrderSalesOrder(多订单中间表，salesOrderId 保留作主订单)/PurchaseOrderAttachment(回签件)/PurchaseOrderEditLog(改单历史)。
 > **编号引擎（domain/po-numbering.ts，替代 Z001）**：挂1单=订单号+字母 A→Z 跳 I/O（如 259203A）；挂多单合并=首PO-末PO后3位+字母（259283-288E）；拆单=同组字母顺延；备品单=订单号+备品（重复 -2）；自购/现金=PO-日期-AA/AB/AC（当天递增）；全部可手工改（manualOrderNo，唯一性预检）；历史单不重编号。
