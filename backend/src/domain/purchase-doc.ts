@@ -416,22 +416,16 @@ async function renderPoDoc(data: PoDocData, cfg?: PoTemplateConfig | null, tplFi
   ws.pageSetup.printArea = 'A1:' + tpl.printCol + maxRow
 
   // 8) 一页打印压缩（2026-09-08 老板：导出 100% 比例必须正好一页 A4）
+  // 列宽/行高按模板原比例统一缩放，保持表格原样观感（不能改乱比例）
   if (tpl.file === PO_TEMPLATE_STD) {
-    const widths = [7, 9, 7, 4, 4, 5.5, 6, 8, 5]
-    ws.columns.forEach((col, i) => {
-      if (widths[i]) col.width = widths[i]
+    ws.columns.forEach((col) => {
+      if (col.width) col.width = Math.round(col.width * 0.55 * 10) / 10
     })
     for (let row = 1; row <= maxRow; row++) {
       const r = ws.getRow(row)
-      if (r.height) {
-        if (row >= first && row <= last) {
-          r.height = 13.5 // 明细行
-        } else {
-          r.height = Math.round(r.height * 0.75 * 10) / 10 // 头尾/条款区按 75% 压缩
-        }
-      }
+      if (r.height) r.height = Math.round(r.height * 0.75 * 10) / 10
     }
-    ps.margins = { ...ps.margins, left: 0.35, right: 0.35, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 }
+    ps.margins = { ...ps.margins, left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }
   }
 
   const html = workbookToHtml(wb)
