@@ -3,6 +3,7 @@
 > **2026-09-08 采购打印模板终版·家里建库方式变更（本机=工厂电脑，提交 a5be2c2 已推送）**：
 > - 预览=仿表格前端表格（免 Excel 渲染），打印=浏览器打印同一 HTML，导出=Excel 模板填充（100% 缩放、一页 A4）。新增 STD 模板 backend/templates/PurchaseOrder-STD.xlsx；核心代码 domain/purchase-doc.ts + routes/purchasing.ts，模板编辑页 frontend/src/pages/purchasing/PoTemplateTab.tsx。
 > - **建库方式变更（重要）**：仓库迁移历史与生产库实际结构有出入，全新库跑 `npx prisma migrate deploy` 会失败（SalesOrder.zrhDeliveryDate 不存在）。家里建库改用老板微信发的恢复包 `erp-home-20260908.zip`：建空库 → 导入 erp-schema-20260908.sql（32 张表结构）→ 导入 erp-base-data-20260908.sql（基础主数据：零件489/产品19/BOM749/供应商39/客户1/抬头/档案/打印模板/用户6，已含自增序列 setval）。**顺序不能反；以后改表结构一律 `npx prisma db push`，不要跑 migrate deploy**。
+> - **家里已有旧环境的话**：旧 erp 库直接 `DROP DATABASE` 重建再导入（工厂库是最新真相，旧库无保留价值）；旧代码目录先 `git status` 看本地改动，家里本地旧改动直接丢弃/`git stash`，`git pull` 拉到最新（b042d3f）后按 README 装依赖即可（Node>=22/PostgreSQL16 家里已具备）。
 > - 数据状态：单据已清空重新测试过；恢复包不含单据（现库有 26 采购单 1 销售单为测试数据，留工厂）。
 > - 服务启动沿用 2026-08-29 记录的坑：PowerShell Start-Process + -WorkingDirectory（dsh 后台任务会被会话清理杀掉）；Node.js >= 22。
 >
