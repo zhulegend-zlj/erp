@@ -59,15 +59,12 @@ model Supplier {
   defaultPaymentTerms  String? // 默认付款方式（月结/月结30天/货到付款/现金…）
   defaultHeaderName    String? // 默认抬头（智锐恒/锦名诚）
   taxPoint             Decimal? @db.Decimal(5, 2) // 加税点数（如 7=加7个点；空=不含税口径）
-  poTemplateId         Int? // 该供应商默认使用的打印模板（2026-09-07 迷你编辑器方案）
-  poTemplate           PoTemplate?       @relation("SupplierTemplate", fields: [poTemplateId], references: [id])
   createdAt            DateTime          @default(now())
   purchaseOrders       PurchaseOrder[]
   supplierPayments     SupplierPayment[]
   parts                Part[]
   returnReplenishments ReturnReplenish[]
   receipts             Receipt[]
-  bundles              PriceBundle[]
 }
 
 model Product {
@@ -109,8 +106,6 @@ model Part {
   usedIn               String? // 用在何处（暂存未展示）
   process              String? // 生产工艺（暂存未展示）
   sourcing             String              @default("purchased") // 采购方式：purchased外购/selfbuy自购/selfmade自制（2026-09-01 老板设计）
-  priceBundleId        Int? // 套餐价组（供应商打包一口价，分摊单价来源）
-  priceBundle          PriceBundle?        @relation(fields: [priceBundleId], references: [id])
   supplier             Supplier?           @relation(fields: [supplierId], references: [id])
   supplierId           Int?
   boms                 Bom[]
@@ -118,7 +113,6 @@ model Part {
   receipts             Receipt[]
   issues               Issue[]
   returnReplenishments ReturnReplenish[]
-  bundleItems          PriceBundleItem[]
 }
 
 model Bom {
@@ -185,17 +179,6 @@ model SalesOrderItem {
   @@unique([orderId, productId])
 }
 
-model PoTemplate {
-  suppliers  Supplier[] @relation("SupplierTemplate")
-  id         Int      @id @default(autoincrement())
-  name       String   @unique
-  headerType String   @default("zrh") // zrh=智锐恒(含税) / jmc=锦名诚(不含税)
-  isDefault  Boolean  @default(false)
-  config     Json? // 列显隐/列宽/表头文字/条款覆盖
-  createdAt  DateTime @default(now())
-  purchaseOrders PurchaseOrder[]
-}
-
 model PurchaseOrder {
   id           Int                 @id @default(autoincrement())
   orderNo      String              @unique
@@ -214,8 +197,6 @@ model PurchaseOrder {
   termsNote    String? // 备注条款（打印用）
   headerName   String? // 抬头（智锐恒/锦名诚）→ 决定打印模板口径
   taxPoint     Decimal?            @db.Decimal(5, 2) // 加税点快照（供应商带出可改）
-  template     PoTemplate?         @relation(fields: [templateId], references: [id])
-  templateId   Int? // 打印模板（导出/预览套用，2026-09-07 老板方案A）
   createdAt    DateTime            @default(now())
   items        PurchaseOrderItem[]
   receipts     Receipt[]
@@ -492,31 +473,6 @@ model PurchaseOrderEditLog {
   editedAt        DateTime      @default(now())
 }
 
-// 套餐价组（2026-09-01 老板设计）：外购零件打包一口价——供应商把一批零件按「每套产品用量」报一个总价，
-// 系统按每套用量自动分摊出各零件单价并回写零件价格（Part.priceBundleId 关联）。
-model PriceBundle {
-  id         Int                @id @default(autoincrement())
-  supplierId Int
-  supplier   Supplier           @relation(fields: [supplierId], references: [id])
-  name       String // 套餐名，如「XX供应商21件套餐」
-  totalPrice Decimal            @db.Decimal(12, 2) // 每套总价
-  note       String?
-  items      PriceBundleItem[]
-  parts      Part[] // 分摊单价回写到的零件
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
-}
 
-model PriceBundleItem {
-  id        Int         @id @default(autoincrement())
-  bundleId  Int
-  bundle    PriceBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
-  partId    Int
-  part      Part        @relation(fields: [partId], references: [id])
-  qty       Int // 每套用量（默认取 BOM 用量，可改）
-  unitPrice Decimal?    @db.Decimal(12, 4) // 手改单价覆盖；空=自动分摊
-
-  @@unique([bundleId, partId])
-}
 
 

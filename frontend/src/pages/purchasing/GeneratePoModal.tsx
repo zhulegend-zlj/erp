@@ -120,35 +120,19 @@ export default function GeneratePoModal(props: Props) {
       onReady()
       return
     }
-    // 套餐价合并：同一套餐的成员零件合成一条「套餐」行（数量=套数、单价=每套总价），提交时展开
     const items: PoItemField[] = []
-    const seenBundles = new Set<number>()
     for (const r of requirements) {
       if (!r.includeInPo || (r.suggestedQty ?? r.gapQty) <= 0) continue
-      if (r.priceBundleId != null) {
-        if (seenBundles.has(r.priceBundleId)) continue
-        seenBundles.add(r.priceBundleId)
-        const sets = r.bundleItemQty ? Math.max(1, Math.round(r.requiredQty / r.bundleItemQty)) : 1
-        items.push({
-          bundleId: r.priceBundleId,
-          bundleName: r.bundleName ?? '套餐',
-          qty: sets,
-          unitPrice: r.bundleTotalPrice ?? undefined,
-          unitPriceInclTax: r.bundleTotalPrice ?? undefined,
-          supplierId: r.supplierId ?? undefined,
-        })
-      } else {
-        const isSelfBuy = r.sourcing === 'selfbuy'
-        items.push({
-          partId: r.partId,
-          qty: Math.ceil(r.suggestedQty ?? r.gapQty ?? 0),
-          unitPrice: r.price ?? undefined,
-          unitPriceInclTax: r.priceInclTax ?? r.price ?? undefined,
-          supplierId: isSelfBuy ? (selfBuySup?.id ?? undefined) : (r.supplierId ?? undefined),
-          selfBuy: isSelfBuy || undefined,
-          usage: r.usage ?? undefined,
-        })
-      }
+      const isSelfBuy = r.sourcing === 'selfbuy'
+      items.push({
+        partId: r.partId,
+        qty: Math.ceil(r.suggestedQty ?? r.gapQty ?? 0),
+        unitPrice: r.price ?? undefined,
+        unitPriceInclTax: r.priceInclTax ?? r.price ?? undefined,
+        supplierId: isSelfBuy ? (selfBuySup?.id ?? undefined) : (r.supplierId ?? undefined),
+        selfBuy: isSelfBuy || undefined,
+        usage: r.usage ?? undefined,
+      })
     }
     form.setFieldsValue({ ...defaults, items })
     onReady()
@@ -225,37 +209,6 @@ export default function GeneratePoModal(props: Props) {
       selfBuy?: boolean
     }[] = []
     for (const it of values.items ?? []) {
-      // 套餐合并行：展开成成员零件行（数量按套数比例换算，单价用分摊单价）
-      if (it.bundleId != null) {
-        if (it.unitPrice == null) {
-          const bidx = values.items?.indexOf(it) ?? 0
-          message.error('套餐「' + (it.bundleName ?? '') + '」缺少价格，请填写单价')
-          form.setFields([{ name: ['items', bidx, 'unitPrice'], errors: ['缺少价格'] }])
-          form.scrollToField(['items', bidx, 'unitPrice'])
-          return
-        }
-        const members = requirements.filter((x) => x.priceBundleId === it.bundleId)
-        const m0 = members[0]
-        const baseSets = m0 && m0.bundleItemQty ? m0.requiredQty / m0.bundleItemQty : 1
-        for (const m of members) {
-          const perSet = baseSets > 0 ? m.requiredQty / baseSets : 0
-          const base = {
-            partId: m.partId,
-            unitPrice: Number(m.price ?? m.priceInclTax ?? 0),
-            unitPriceInclTax: m.priceInclTax ?? m.price ?? undefined,
-            usage: m.usage != null ? m.usage : undefined,
-            note: it.note || undefined,
-            supplierId: m.supplierId ?? undefined,
-          }
-          flat.push({
-            ...base,
-            qty: Math.max(1, Math.round(Number(it.qty ?? 0) * perSet)),
-            supplierReplyDate: it.supplierReplyDate ?? undefined,
-            splitNo: 0,
-          })
-        }
-        continue
-      }
       const partId = Number(it.partId ?? 0)
       const inclPrice = it.unitPriceInclTax != null ? Number(it.unitPriceInclTax) : null
       const rawPrice = it.unitPrice == null ? null : Number(it.unitPrice)
@@ -509,11 +462,7 @@ export default function GeneratePoModal(props: Props) {
                         const field = fields[index]
                         if (!field) return null
                         const it = watchedItems?.[index]
-                        const isBundleRow = it?.bundleId != null
                         const req = requirements.find((r) => r.partId === it?.partId)
-                        const bundleMembers = isBundleRow
-                          ? requirements.filter((x) => x.priceBundleId === it?.bundleId)
-                          : []
                         const isSelfBuy = req?.sourcing === 'selfbuy'
                         return (
                           <div
@@ -532,23 +481,6 @@ export default function GeneratePoModal(props: Props) {
                               </Tag>
                             ) : null}
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
-                              {isBundleRow ? (
-                                <span
-                                  style={{
-                                    width: 250,
-                                    lineHeight: '32px',
-                                    fontWeight: 600,
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                >
-                                  <Tag color="purple" style={{ marginRight: 6 }}>
-                                    套餐·{bundleMembers.length}件
-                                  </Tag>
-                                  {it?.bundleName}
-                                </span>
-                              ) : (
                               <Form.Item
                                 name={[field.name, 'partId']}
                                 rules={[{ required: true, message: '零件' }]}
@@ -577,7 +509,6 @@ export default function GeneratePoModal(props: Props) {
                                   }))}
                                 />
                               </Form.Item>
-                              )}
                               <Form.Item
                                 name={[field.name, 'qty']}
                                 rules={[{ required: true, message: '数量' }]}
@@ -610,15 +541,7 @@ export default function GeneratePoModal(props: Props) {
                               />
                             </div>
                             <div style={{ color: '#8c8c8c', fontSize: 12, marginTop: 6 }}>
-                              {isBundleRow
-                                ? '套餐 ' +
-                                  bundleMembers.length +
-                                  ' 件 ｜每套总价 ¥' +
-                                  (it?.unitPrice ?? '-') +
-                                  ' ｜需求 ' +
-                                  (it?.qty ?? '-') +
-                                  ' 套（数量=套数）'
-                                : req
+                              {req
                                   ? '用量 ' +
                                     (req.usageText ?? req.usage ?? '-') +
                                     ' ｜需求 ' +

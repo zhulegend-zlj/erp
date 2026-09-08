@@ -7,8 +7,6 @@ import { notifyError } from './common'
 import { useKeepAliveState } from './keepAlive'
 import GeneratePoTab from './purchasing/GeneratePoTab'
 import PoListTab from './purchasing/PoListTab'
-import PoTemplateTab from './purchasing/PoTemplateTab'
-import BundleTab from './purchasing/BundleTab'
 import SparePoModal from './purchasing/SparePoModal'
 import PlaceholderTab from './purchasing/PlaceholderTab'
 import type {
@@ -50,7 +48,6 @@ export default function Purchasing() {
 
   const canCreate = user?.role === 'purchase'
   // 套餐价：老板与采购都可维护（采购单生成仍仅采购角色）
-  const canManageBundles = user?.role === 'purchase' || user?.role === 'boss'
 
   return (
     <div>
@@ -105,16 +102,6 @@ export default function Purchasing() {
                   refreshKey={listRefreshKey}
                 />
               ),
-            },
-            {
-              key: 'bundle',
-              label: '套餐价',
-              children: <BundleTab canCreate={canManageBundles} suppliers={suppliers} />,
-            },
-            {
-              key: 'po-template',
-              label: '打印模板',
-              children: <PoTemplateTab canCreate={canManageBundles} />,
             },
             { key: 'follow', label: '采购跟进', children: <PlaceholderTab title="采购跟进" /> },
             { key: 'overview', label: '订单采购总览', children: <PlaceholderTab title="订单采购总览" /> },

@@ -153,19 +153,6 @@ function RequirementGroupedTable(props: {
           },
         },
         {
-          title: '套餐价',
-          key: 'bundle',
-          width: 170,
-          render: (_: unknown, r: Requirement) =>
-            r.priceBundleId != null ? (
-              <Tag color="purple">
-                {r.bundleName} ¥{r.bundleTotalPrice}/套
-              </Tag>
-            ) : (
-              '-'
-            ),
-        },
-        {
           title: '用量/台',
           key: 'usage',
           render: (_: unknown, r: Requirement) => r.usageText ?? (r.usage === 0 || r.usage == null ? '-' : r.usage),

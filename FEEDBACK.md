@@ -1289,3 +1289,8 @@
 - 根因：真实数据下订单 265540 有 108 行需求，弹窗一次 setFieldsValue 写入 108 行时 Form.useWatch 与 Form.List 的 fields 存在一帧不同步，分组渲染按旧索引取 fields[index] 得到 undefined 崩溃（此前 TEST 行数少未暴露）。
 - 处理：①GeneratePoModal 分组渲染的索引过滤到 fields.length 内、空组跳过渲染；②取不到 field 的行直接跳过（兜底防护）；③顺带修复 PoListTab.tsx 遗留 build 错误（previewRender/previewRenderV 声明未使用）——恢复声明并在预览弹窗「模板」后显示渲染模式（模型渲染/模板表格）与版本。
 - 验证：前端 build 通过；请老板刷新页面后重新点「生成采购单」验收。
+
+## 2026-09-08 家里：下架「套餐价」与「打印模板」两个功能（老板拍板）
+- 套餐价：删采购页「套餐价」页签（BundleTab）、需求表套餐价列、生成采购单弹窗的套餐合并行与提交展开逻辑（回到每个零件独立一行）、后端 /api/price-bundles 全套接口与 routes/bundles.ts、库内 PriceBundle/PriceBundleItem 两张表与 Part.priceBundleId 字段（生产库当时无套餐数据，db push 安全删除）。
+- 打印模板：删独立菜单「打印模板」（PoTemplateTab）、后端 /api/po-templates 全套接口、库内 PoTemplate 表与 PurchaseOrder.templateId/Supplier.poTemplateId 字段；采购单「预览/导出/打印」保留，固定使用内置标准模板（resolvePoTemplate 已下线，xlsx 内置模板 + 仿表格 HTML 渲染，导出走 buildPoTemplate 默认配置）。
+- 验证：后端 typecheck 干净、测试 232/232 通过（erp_test 已 db push 同步）、前端 build 通过、后端已重启。

@@ -423,7 +423,7 @@ async function renderPoDoc(data: PoDocData, cfg?: PoTemplateConfig | null, tplFi
   if (tpl.file === PO_TEMPLATE_STD) {
     // 标准模板：默认打印比例 100%（2026-09-08 老板要求），模板列宽已压缩到一页 A4 内
     ps.fitToPage = false
-    ps.zoom = 100
+    ;(ps as unknown as { zoom?: number }).zoom = 100
   } else {
     ps.fitToPage = true
     ps.fitToWidth = 1

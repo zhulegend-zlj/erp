@@ -305,7 +305,6 @@ function CrudTab({
   const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [sourcingFilter, setSourcingFilter] = useState<string | undefined>()
   const [supplierFilter, setSupplierFilter] = useState<number | undefined>()
-  const [bundles, setBundles] = useState<Array<{ id: number; name: string }>>([])
   const [form] = Form.useForm<Record<string, any>>()
   // 零件页默认每页 100 条、成品/供应商页默认 50 条（按老板反馈），其他基础资料页默认 10 条
   const [pageSize, setPageSize] = useState(resource.path === '/parts' ? 100 : resource.path === '/products' || resource.path === '/suppliers' ? 50 : 10)
@@ -367,10 +366,6 @@ function CrudTab({
         .get<{ id: number; sku: string; name: string }[]>('/products')
         .then(({ data }) => setProducts(data))
         .catch(notifyError)
-      void api
-        .get<Array<{ id: number; name: string }>>('/price-bundles')
-        .then(({ data }) => setBundles(data))
-        .catch(() => {})
     }
   }, [resource.path])
 
@@ -529,26 +524,6 @@ function CrudTab({
         return f.wrap ? <WrapText text={String(v)} /> : String(v)
       },
     })),
-    ...(isPart
-      ? [
-          {
-            title: '套餐价',
-            key: 'priceBundleId',
-            width: 84,
-            fixed: fixOps ? ('right' as const) : undefined,
-            align: 'center' as const,
-            ellipsis: true,
-            onHeaderCell: () => ({ className: 'pt-center' }),
-            onCell: () => ({ className: 'pt-center' }),
-            render: (_: unknown, row: CrudRow) => {
-              const bid = row.priceBundleId
-              if (bid == null || bid === '') return '-'
-              const b = bundles.find((x) => x.id === Number(bid))
-              return b ? <Tag color="purple">{b.name}</Tag> : String(bid)
-            },
-          },
-        ]
-      : []),
     ...(linkSupplierOnly
       ? [
           {

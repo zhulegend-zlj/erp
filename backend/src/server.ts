@@ -19,7 +19,6 @@ import { returnReplenishRoutes } from './routes/returnReplenish'
 import { companyProfileRoutes } from './routes/company-profile'
 import { hubRoutes } from './routes/hubs'
 import { scheduleRoutes } from './routes/schedules'
-import { bundleRoutes } from './routes/bundles'
 import { requireRole } from './auth/guard'
 import { prismaErrorInfo } from './errors'
 import { UPLOAD_DIR } from './uploads-store'
@@ -80,7 +79,6 @@ export function buildApp() {
   companyProfileRoutes(app)
   hubRoutes(app)
   scheduleRoutes(app)
-  bundleRoutes(app)
   financeRoutes(app)
   dashboardRoutes(app)
   feedbackRoutes(app)
