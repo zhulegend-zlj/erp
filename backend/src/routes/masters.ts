@@ -330,10 +330,16 @@ function registerCrud(app: FastifyInstance, spec: CrudSpec) {
       }
       const whereSql = conds.length > 0 ? Prisma.sql`WHERE ${Prisma.join(conds, ' AND ')}` : Prisma.empty
       const role = (req as { user?: { role?: string } }).user?.role ?? ''
-      // 采购价格仅采购/老板可见：其余角色（工程/仓库/销售/财务）剥离 price
+      // 采购价格仅采购/老板可见：其余角色（工程/仓库/销售/财务）剥离 price 与 priceInclTax
+      // （2026-09-08 系统性测试发现：priceInclTax 含税参考价此前漏剥，价格泄露）
       const hidePrice = role !== 'purchase' && role !== 'boss'
       const strip = (rows: unknown[]) =>
-        hidePrice ? rows.map((r) => { const { price: _price, ...rest } = (r ?? {}) as Record<string, unknown>; return rest }) : rows
+        hidePrice
+          ? rows.map((r) => {
+              const { price: _price, priceInclTax: _priceInclTax, ...rest } = (r ?? {}) as Record<string, unknown>
+              return rest
+            })
+          : rows
       if (pagination.kind === 'none') {
         const rows = await prisma.$queryRaw(Prisma.sql`SELECT * FROM "Part" ${whereSql} ${orderBySql}`)
         return strip(rows as unknown[])
