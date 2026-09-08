@@ -163,38 +163,39 @@ export const JMC: TplPos = {
  *  料号|品名规格|表面处理/颜色|单位|用量|采购数量|单价(含税)|金额(含税)|备注，23 行明细槽位，含 3.3 交货时间行 */
 const STD: TplPos = {
   file: PO_TEMPLATE_STD,
-  no: { col: 6, row: 2, prefix: '采购单编号：' },
+  no: { col: 7, row: 2, prefix: '采购单编号：' },
   to: { col: 1, row: 3, prefix: 'TO:' },
-  orderDate: { col: 6, row: 4, prefix: '下单日期：' },
+  orderDate: { col: 7, row: 4, prefix: '下单日期：' },
   attn: { col: 1, row: 4, prefix: 'ATTN:' },
   tel: { col: 1, row: 5, prefix: 'TEL:' },
   fax: { col: 1, row: 6, prefix: 'FAX:' },
   email: null,
-  model: { col: 6, row: 6, prefix: '适用机型：' },
+  model: { col: 7, row: 6, prefix: '适用机型：' },
   headerRow: 8,
   firstDataRow: 9,
-  cols: { seq: 0, sku: 1, name: 2, spec: 2, material: 0, finish: 3, unit: 4, usage: 5, qty: 6, price: 7, priceInclTax: 0, amount: 8, note: 9 },
+  // 10 列布局（2026-09-08 老板：加材质列）：料号|品名规格|材质|表面处理/颜色|单位|用量|采购数量|单价|金额|备注
+  cols: { seq: 0, sku: 1, name: 2, spec: 2, material: 3, finish: 4, unit: 5, usage: 6, qty: 7, price: 8, priceInclTax: 0, amount: 9, note: 10 },
   totalRowOffset: 1,
-  totalCol: 7,
+  totalCol: 8,
   paymentRow: 15,
   deliveryRow: 23,
   isZrh: false,
   slot: 1,
   orientation: 'portrait',
-  printCol: 'I',
-  amountFormula: (r) => '=G' + r + '*F' + r,
+  printCol: 'J',
+  amountFormula: (r) => '=H' + r + '*G' + r,
   capitalAsText: true,
   endRow: 30,
   finishOrMaterial: true,
   noteMerged: true,
   headerLabels: [
-    { col: 7, zrh: '单价 (含税)', jmc: '单价' },
-    { col: 8, zrh: '金额 (含税)', jmc: '金额' },
+    { col: 8, zrh: '单价 (含税)', jmc: '单价' },
+    { col: 9, zrh: '金额 (含税)', jmc: '金额' },
   ],
   companyBlock: {
     title: { col: 1, row: 1 },
-    from: { col: 6, row: 3, prefix: 'FROM:' },
-    confirm: { col: 7, row: 27 },
+    from: { col: 7, row: 3, prefix: 'FROM:' },
+    confirm: { col: 8, row: 27 },
   },
 }
 
@@ -220,6 +221,11 @@ function colLetter(n: number): string {
   return s
 }
 
+/** 表面处理只留中文（2026-09-08 老板：导出/预览都不填英文） */
+export function cnOnlyText(s: string | null | undefined): string {
+  return (s ?? '').replace(/[^\u4e00-\u9fa5，、；：（）·%‰]/g, '').trim()
+}
+
 async function renderPoDoc(data: PoDocData, cfg?: PoTemplateConfig | null, tplFileOverride?: string | null): Promise<{ buffer: Buffer; html: string }> {
   // 2026-09-07 老板：智锐恒/锦名诚统一用标准模板（原样采购单）；旧横向模板保留仅作显式绑定兜底
   const tpl = STD
@@ -232,6 +238,9 @@ async function renderPoDoc(data: PoDocData, cfg?: PoTemplateConfig | null, tplFi
   const slot = tpl.slot
   const last = first + n - 1
   const c = tpl.cols
+  const totalCol = tpl.totalCol
+  const amountFormula = tpl.amountFormula
+  const printCol = tpl.printCol
 
   // 1) 明细行数超过模板槽位：复制样式行插入 + 合并单元格同步位移；
   //    未超过时合计/大写行位置不变（模板原样）
@@ -324,32 +333,46 @@ async function renderPoDoc(data: PoDocData, cfg?: PoTemplateConfig | null, tplFi
     }
     set(c.seq, i + 1)
     set(c.sku, line.sku)
-    if (c.spec && c.spec === c.name) {
-      // 品名规格合并在同一列（新版标准模板：物料编号|品名规格|…）
-      set(c.name, line.name + (line.spec ?? ''))
-    } else {
-      set(c.name, line.name)
-      set(c.spec, line.spec)
-    }
+    // 品名只填中文名称（2026-09-08 老板：与预览一致，不带尺寸规格）
+    set(c.name, line.name)
+    // 材质列（2026-09-08 老板：导出要有材质列）
     set(c.material, line.material)
-    set(c.finish, tpl.finishOrMaterial ? line.finish ?? line.material ?? '' : line.finish)
+    // 表面处理只留中文（2026-09-08 老板：不填英文）
+    set(c.finish, cnOnlyText(tpl.finishOrMaterial ? line.finish ?? line.material ?? '' : line.finish))
     set(c.unit, line.unit)
     set(c.usage, line.usage ?? '')
     set(c.qty, line.qty)
     set(c.price, useInclTax ? line.unitPriceInclTax ?? line.unitPrice : line.unitPrice)
-    // 备注列每行独立显示本行备注（2026-09-08 老板：不再整列合并拉长）
+    // 备注先写进每行，随后按明细行数整列合并（不波及合计行）
     set(c.note, line.note)
     if (tpl.isZrh) {
       // 金额(含税) = 单价(含税) × 采购数量
       set(c.priceInclTax, line.unitPriceInclTax ?? '')
     }
-    ws.getCell(r, c.amount).value = { formula: tpl.amountFormula(r) }
+    ws.getCell(r, c.amount).value = { formula: amountFormula(r) }
   })
+
+  // 备注列合并：合并行数 = 明细行数（零级行），不波及下方金额合计行（2026-09-08 老板口径）
+  if (c.note) {
+    const notes: string[] = []
+    if (data.termsNote?.trim()) notes.push(data.termsNote.trim())
+    for (const l of data.lines) {
+      const t = l.note?.trim()
+      if (t && !notes.includes(t)) notes.push(t)
+    }
+    if (n > 1) {
+      const master = ws.getCell(first, c.note)
+      for (let i = first; i <= last; i++) {
+        if (i !== first) (ws.getCell(i, c.note) as unknown as { merge: (m: unknown, s?: boolean) => void }).merge(master, true)
+      }
+    }
+    ws.getCell(first, c.note).value = notes.join('；')
+  }
 
   // 4) 合计公式覆盖全部明细行 + 大写金额行指向新合计行
   const totalRow = first + Math.max(n, slot) - 1 + tpl.totalRowOffset
-  const sumCol = colLetter(tpl.cols.amount) // 求和范围 = 金额列
-  ws.getCell(totalRow, tpl.totalCol).value = {
+  const sumCol = colLetter(c.amount) // 求和范围 = 金额列
+  ws.getCell(totalRow, totalCol).value = {
     formula: '=SUM(' + sumCol + first + ':' + sumCol + last + ')',
   }
   if (tpl.capitalAsText) {
@@ -358,15 +381,15 @@ async function renderPoDoc(data: PoDocData, cfg?: PoTemplateConfig | null, tplFi
     const total = Math.round(
       data.lines.reduce((s, l) => s + l.qty * (useInclTax ? l.unitPriceInclTax ?? l.unitPrice : l.unitPrice), 0) * 100,
     ) / 100
-    ws.getCell(totalRow + 1, tpl.totalCol).value = amountToCn(total)
+    ws.getCell(totalRow + 1, totalCol).value = amountToCn(total)
   } else {
-    ws.getCell(totalRow + 1, tpl.totalCol).value = { formula: '=' + sumCol + totalRow }
+    ws.getCell(totalRow + 1, totalCol).value = { formula: '=' + sumCol + totalRow }
   }
 
-  // 合计行金额区右边框补实线：模板「金额合计（小写）」行金额区 G/H/I 缺 right 边框（最右不是实线），
+  // 合计行金额区右边框补实线：模板「金额合计（小写）」行金额区缺 right 边框（最右不是实线），
   // 打印时右侧开口；小写/大写两行统一补全（2026-09-08 老板反馈）
   for (const row of [totalRow, totalRow + 1]) {
-    for (let col = tpl.totalCol; col <= 9; col++) {
+    for (let col = totalCol; col <= c.note; col++) {
       const cell = ws.getCell(row, col)
       cell.border = {
         ...cell.border,
@@ -413,7 +436,7 @@ async function renderPoDoc(data: PoDocData, cfg?: PoTemplateConfig | null, tplFi
   ps.orientation = tpl.orientation
   ps.paperSize = 9 // A4
   const maxRow = Math.max(tpl.endRow + insertCount, totalRow + 2) + 4
-  ws.pageSetup.printArea = 'A1:' + tpl.printCol + maxRow
+  ws.pageSetup.printArea = 'A1:' + printCol + maxRow
 
   const html = workbookToHtml(wb)
   const buffer = Buffer.from(await wb.xlsx.writeBuffer())
@@ -474,19 +497,26 @@ export function buildPoMimicHtml(data: PoDocData, opts?: { autoPrint?: boolean }
   const company = useInclTax ? '东莞市智锐恒电子有限公司' : '东莞市锦名诚电子有限公司'
   const priceTitle = useInclTax ? '单价 (含税)' : '单价'
   const amountTitle = useInclTax ? '金额 (含税)' : '金额'
+  const n = Math.max(data.lines.length, 1)
+  // 备注合并单元格内容：整单备注优先 + 各行备注去重拼接（2026-09-08 老板口径）
+  const noteParts: string[] = []
+  if (data.termsNote?.trim()) noteParts.push(data.termsNote.trim())
+  for (const l of data.lines) {
+    const t = l.note?.trim()
+    if (t && !noteParts.includes(t)) noteParts.push(t)
+  }
+  const noteText = noteParts.join('；')
   const rows: string[] = []
-  // 表面处理只留中文（2026-09-08 老板要求）
-  const cnOnly = (s: string | null | undefined) => (s ?? '').replace(/[^\u4e00-\u9fa5，、；：（）·%‰]/g, '').trim()
-  data.lines.forEach((l) => {
+  data.lines.forEach((l, i) => {
     const price = useInclTax ? (l.unitPriceInclTax ?? l.unitPrice) : l.unitPrice
     const amount = round2(l.qty * price)
-    // 备注列：每行独立显示本行备注（2026-09-08 老板：不再整列合并拉长）
-    const noteCell = '<td class="l">' + escHtml(l.note ?? '') + '</td>'
+    // 备注列：合并行数 = 明细行数（不波及合计行），内容为整单/各行备注拼接
+    const noteCell = i === 0 ? '<td class="l" rowspan="' + n + '">' + escHtml(noteText) + '</td>' : ''
     rows.push(
       '<tr><td class="l">' + escHtml(l.sku) + '</td>' +
         '<td class="l">' + escHtml(l.name) + '</td>' + // 品名只展示中文名称，不带尺寸
         '<td class="l">' + escHtml(l.material ?? '') + '</td>' + // 材质列
-        '<td class="l">' + escHtml(cnOnly(l.finish ?? l.material ?? '')) + '</td>' +
+        '<td class="l">' + escHtml(cnOnlyText(l.finish ?? l.material ?? '')) + '</td>' +
         '<td>' + escHtml(l.unit) + '</td>' +
         '<td>' + (l.usage ?? '') + '</td>' +
         '<td class="r">' + l.qty + '</td>' +
