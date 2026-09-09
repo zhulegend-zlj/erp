@@ -187,3 +187,53 @@ export interface PartOption {
   name: string
   unit?: string
 }
+
+// 采购跟进（2026-09-09）：一行 = 一个采购单明细行
+export interface FollowUpRow {
+  id: number
+  purchaseOrderId: number
+  purchaseOrderNo: string
+  poStatus: string
+  poType: string
+  receiveStatus: string
+  headerName?: string | null
+  supplierId: number
+  supplierName: string
+  salesOrderId: number | null
+  salesOrderNo: string
+  salesOrderNos: string[]
+  productModel: string
+  productName: string
+  orderQty: number | null
+  partId: number
+  sku: string
+  partName: string
+  spec?: string | null
+  unit?: string | null
+  usage?: number | null
+  qty: number
+  unitPrice?: number
+  unitPriceInclTax?: number | null
+  amount?: number
+  orderDate?: string | null
+  expectedDeliveryDate?: string | null
+  supplierReplyDate?: string | null
+  lastDeliveryDate?: string | null
+  receivedQty: number
+  returnQty: number
+  replenishQty: number
+  outstandingQty: number
+  confirmed: boolean
+  deliveryConfirmedAt?: string | null
+  done: boolean
+}
+
+export interface DeliveryEditLogRow {
+  id: number
+  field: string
+  beforeVal?: string | null
+  afterVal?: string | null
+  editedBy: string
+  editedAt: string
+  note?: string | null
+}

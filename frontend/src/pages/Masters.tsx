@@ -306,8 +306,8 @@ function CrudTab({
   const [sourcingFilter, setSourcingFilter] = useState<string | undefined>()
   const [supplierFilter, setSupplierFilter] = useState<number | undefined>()
   const [form] = Form.useForm<Record<string, any>>()
-  // 零件页默认每页 100 条、成品/供应商页默认 50 条（按老板反馈），其他基础资料页默认 10 条
-  const [pageSize, setPageSize] = useState(resource.path === '/parts' ? 100 : resource.path === '/products' || resource.path === '/suppliers' ? 50 : 10)
+  // 所有基础资料页默认每页 100 条（老板 2026-09-02 反馈：所有分页默认 100 条）
+  const [pageSize, setPageSize] = useState(100)
   const isPart = resource.path === '/parts'
   const isProduct = resource.path === '/products'
   const isSupplier = resource.path === '/suppliers'

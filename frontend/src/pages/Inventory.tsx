@@ -196,7 +196,7 @@ function ReceiptForm({ parts, suppliers, onDone }: { parts: Part[]; suppliers: S
     }
   }
 
-  async function submit(values: { purchaseOrderId?: number | 'self'; items?: ReceiptRow[] }) {
+  async function submit(values: { purchaseOrderId?: number | 'self'; items?: ReceiptRow[] }, allowOverQty = false) {
     const rows = values.items ?? []
     const valid = rows.filter((r) => r.partId && r.qty && r.qty > 0)
     if (valid.length === 0) {
@@ -207,6 +207,8 @@ function ReceiptForm({ parts, suppliers, onDone }: { parts: Part[]; suppliers: S
     try {
       await api.post('/receipts', {
         ...(isSelfBuy ? {} : { purchaseOrderId: values.purchaseOrderId }),
+        // 超收确认后放行（老板口径：供应商多送要记录，之后退还供应商）
+        ...(allowOverQty ? { allowOverQty: true } : {}),
         items: valid.map((r) => ({
           partId: Number(r.partId),
           qty: Number(r.qty),
@@ -220,6 +222,17 @@ function ReceiptForm({ parts, suppliers, onDone }: { parts: Part[]; suppliers: S
       await refreshPos()
       onDone?.()
     } catch (err) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? ''
+      if (msg.includes('超过订购数量')) {
+        Modal.confirm({
+          title: '超出订购数量',
+          content: msg,
+          okText: '确认超收并入库',
+          cancelText: '取消',
+          onOk: () => submit(values, true),
+        })
+        return
+      }
       notifyError(err)
     } finally {
       setSubmitting(false)
@@ -391,7 +404,7 @@ function QcPanel({ refreshToken, onDone }: { refreshToken: number; onDone?: () =
   const [editing, setEditing] = useState<ReceiptRecord | null>(null)
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm<{ qcStatus?: string; defectiveQty?: number; lotNo?: string }>()
-  const [pageSize, setPageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(100)
   const canVoid = user?.role === 'warehouse' || user?.role === 'boss'
 
   async function load(targetPage = 1, size?: number) {
@@ -991,7 +1004,7 @@ function RecentIssues({ refreshToken, onDone }: { refreshToken?: number; onDone?
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
-  const [pageSize, setPageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(100)
   const canVoid = user?.role === 'warehouse' || user?.role === 'boss'
 
   async function load(targetPage = 1, size?: number) {
@@ -1090,7 +1103,7 @@ function RecentProductions({ refreshToken, onDone }: { refreshToken?: number; on
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
-  const [pageSize, setPageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(100)
   const canVoid = user?.role === 'warehouse' || user?.role === 'boss'
 
   async function load(targetPage = 1, size?: number) {
@@ -1189,7 +1202,7 @@ function StockTab({ refreshToken }: { refreshToken?: number }) {
   const [keyword, setKeyword] = useState('')
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
-  const [pageSize, setPageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(100)
 
   async function load(targetPage = 1, type?: string, kw?: string, size?: number) {
     setLoading(true)
@@ -1338,7 +1351,7 @@ function LedgerTab({ parts, orders }: { parts: Part[]; orders: SalesOrder[] }) {
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
-  const [pageSize, setPageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(100)
 
   useEffect(() => {
     api
@@ -1530,7 +1543,7 @@ function ReturnReplenishTab({ parts, onDone }: { parts: Part[]; onDone?: () => v
   const [submitting, setSubmitting] = useState(false)
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
-  const [pageSize, setPageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(100)
   const [form] = Form.useForm<{
     partId?: number
     supplierId?: number
@@ -1859,7 +1872,7 @@ function WarehouseLedgerTab() {
   const [orderNo, setOrderNo] = useState('')
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
-  const [pageSize, setPageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(100)
 
   async function load(targetPage = 1, size?: number) {
     setLoading(true)

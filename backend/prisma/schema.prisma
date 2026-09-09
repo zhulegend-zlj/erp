@@ -218,6 +218,9 @@ model PurchaseOrderItem {
   usage           Decimal?      @db.Decimal(12, 4) // 用量（BOM 带出可改，打印用；随 BOM 用量小数化）
   note            String? // 备注（打印用，如 请给3‰免费备品）
   supplierReplyDate DateTime? // 供应商回复交期（采购跟进里采购填）
+  // 采购跟进（2026-09-09）：采购点「已收齐」——与仓库收货进度（未交≤0）双条件才算收完
+  deliveryConfirmedAt DateTime?
+  deliveryConfirmedBy Int?
 
   @@unique([purchaseOrderId, partId])
 }
@@ -236,6 +239,12 @@ model Receipt {
   qcStatus        String?
   defectiveQty    Int            @default(0)
   consigned       Boolean        @default(false) // 客供料：客户免费供料，不挂采购单/供应商、单价0，正常入库领用扣库存
+  // 采购跟进（2026-09-09）：送货单日期（采购照送货单录，空则视为 receivedAt）；
+  // source 区分录入来源（warehouse 仓库收货 / purchase 采购补录）；操作人留痕
+  deliveryDate    DateTime?
+  source          String         @default("warehouse")
+  createdById     Int?
+  updatedById     Int?
   receivedAt      DateTime       @default(now())
   createdAt       DateTime       @default(now())
 }
@@ -425,6 +434,7 @@ model ReturnReplenish {
   replenishDate   DateTime?
   replenishQty    Int       @default(0)
   purchaseOrderNo String?
+  purchaseOrderId Int? // 采购跟进按明细行汇总退货（可空，历史记录按单号+零件匹配）
   lotNo           String?
   note            String?
   createdAt       DateTime  @default(now())
@@ -471,6 +481,21 @@ model PurchaseOrderEditLog {
   afterJson       String
   editedBy        String
   editedAt        DateTime      @default(now())
+}
+
+// 采购跟进·交货记录改动历史（老板口径：采购可改交货数量，但必须留痕可追溯）
+// field: qty 交货数量 / deliveryDate 送货日期 / confirm 已收齐确认
+model DeliveryEditLog {
+  id              Int      @id @default(autoincrement())
+  receiptId       Int?
+  purchaseOrderId Int?
+  partId          Int?
+  field           String
+  beforeVal       String?
+  afterVal        String?
+  editedBy        String
+  editedAt        DateTime @default(now())
+  note            String?
 }
 
 

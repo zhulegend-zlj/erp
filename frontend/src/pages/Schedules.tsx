@@ -504,7 +504,7 @@ export default function Schedules() {
         columns={columns}
         dataSource={rows}
         loading={loading}
-        pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: [20, 50, 100, 200] }}
+        pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100] }}
       />
       <Modal
         title={'编辑排程：' + (editTarget ? editTarget.salesOrder.orderNo + ' / ' + editTarget.product.sku : '')}

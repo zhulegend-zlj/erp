@@ -9,6 +9,7 @@ import GeneratePoTab from './purchasing/GeneratePoTab'
 import PoListTab from './purchasing/PoListTab'
 import SparePoModal from './purchasing/SparePoModal'
 import PlaceholderTab from './purchasing/PlaceholderTab'
+import FollowUpTab from './purchasing/FollowUpTab'
 import type {
   CompanyHeader,
   PoItemField,
@@ -103,7 +104,7 @@ export default function Purchasing() {
                 />
               ),
             },
-            { key: 'follow', label: '采购跟进', children: <PlaceholderTab title="采购跟进" /> },
+            { key: 'follow', label: '采购跟进', children: <FollowUpTab canCreate={canCreate} suppliers={suppliers} /> },
             { key: 'overview', label: '订单采购总览', children: <PlaceholderTab title="订单采购总览" /> },
             { key: 'incoming', label: '来料明细', children: <PlaceholderTab title="来料明细" /> },
             { key: 'common-parts', label: '共用料库存', children: <PlaceholderTab title="共用料库存" /> },

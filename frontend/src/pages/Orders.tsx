@@ -294,7 +294,7 @@ export default function Orders() {
   const [total, setTotal] = useState(0)
   const [form] = Form.useForm<OrderFormValues>()
   const [editForm] = Form.useForm<OrderFormValues>()
-  const [pageSize, setPageSize] = useState(50)
+  const [pageSize, setPageSize] = useState(100)
   const [deleteTarget, setDeleteTarget] = useState<SalesOrder | null>(null)
   const [deleteText, setDeleteText] = useState('')
   const [deletingId, setDeletingId] = useState<number | null>(null)

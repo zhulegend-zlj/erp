@@ -12,7 +12,8 @@ export type PaginationParse =
   | { kind: 'error'; message: string }
   | { kind: 'ok'; page: PageParams }
 
-export const DEFAULT_PAGE_SIZE = 20
+// 老板 2026-09-02 反馈：所有分页默认 100 条（仅影响只传 page 不传 pageSize 的调用方）
+export const DEFAULT_PAGE_SIZE = 100
 export const MAX_PAGE_SIZE = 200
 
 const MAX_PAGE = 100000

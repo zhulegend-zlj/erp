@@ -45,7 +45,7 @@ export default function PoListTab(props: Props) {
   const [rows, setRows] = useState<PurchaseOrder[]>([])
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(50)
+  const [pageSize, setPageSize] = useState(100)
   const [total, setTotal] = useState(0)
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
   const [salesOrderFilter, setSalesOrderFilter] = useState<number | undefined>(undefined)
